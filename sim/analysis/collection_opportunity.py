@@ -15,10 +15,11 @@ from sim.analysis.collection_opportunity_resources import (
     CollectionResources,
     screen_collection_resources,
 )
-from sim.analysis.conjunction_geometry import StateHistory, interpolate_history
+from sim.analysis.conjunction_geometry import StateHistory, _interpolate_prepared
 from sim.analysis.conjunction_workflow import propagate_history
 from sim.analysis.coverage_tasking import TaskOpportunity
 from sim.analysis.event_refinement import availability_intervals, refine_availability_transitions
+from sim.analysis.history_adapters import AnalysisHistory
 from sim.analysis.optical_collection import (
     OPTICAL_COLLECTION_MODEL,
     CollectionConstraints,
@@ -26,11 +27,14 @@ from sim.analysis.optical_collection import (
     OpticalPayload,
     evaluate_collection_sample,
     footprint_boundary_evidence,
+    local_nadir_frame_sensor_from_eci,
     sensor_frame_and_gimbal_vector,
 )
+from sim.analysis.orbit_history_product import orbit_history_semantic_sha256
+from sim.analysis.rust_numeric import AnalyticSunEvaluator, OpticalPointingEvaluator, require_native
+from sim.analysis.rust_numeric import numeric_backend as validate_numeric_backend
 from sim.analysis.trajectory_targeting import PropagationSettings
 from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
-from sim.dynamics.orbit.epoch import resolve_sun_moon_positions
 from sim.dynamics.orbit.frames import FrameContext, eci_to_ecef_rotation_context
 from sim.frame_time import TimeScale, epoch_julian_date, parse_epoch
 
@@ -159,6 +163,13 @@ class CollectionOpportunityProblem:
     transition_time_tolerance_s: float
     transition_max_iterations: int
     schema_version: str = COLLECTION_OPPORTUNITY_PROBLEM_SCHEMA
+    numeric_backend: str = "rust"
+
+    def __post_init__(self) -> None:
+        try:
+            validate_numeric_backend(self.numeric_backend)
+        except ValueError as exc:
+            raise CollectionOpportunityError(str(exc)) from exc
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> CollectionOpportunityProblem:
@@ -167,6 +178,7 @@ class CollectionOpportunityProblem:
             raw,
             {
                 "schema_version",
+                "numeric_backend",
                 "name",
                 "epoch_utc",
                 "duration_s",
@@ -214,6 +226,7 @@ class CollectionOpportunityProblem:
         if any(item.start_s < 0.0 or item.end_s > duration for item in resources.downlink_windows):
             raise CollectionOpportunityError("Downlink windows must lie inside [0, duration_s].")
         return cls(
+            numeric_backend=raw.get("numeric_backend", "rust"),
             schema_version=schema,
             name=_required_text(raw.get("name", "collection_opportunity"), "name"),
             epoch_utc=epoch_text,
@@ -229,7 +242,7 @@ class CollectionOpportunityProblem:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "schema_version": self.schema_version,
             "name": self.name,
             "epoch_utc": self.epoch_utc,
@@ -246,6 +259,8 @@ class CollectionOpportunityProblem:
             "transition_time_tolerance_s": self.transition_time_tolerance_s,
             "transition_max_iterations": self.transition_max_iterations,
         }
+        value["numeric_backend"] = self.numeric_backend
+        return value
 
 
 def _canonical_sha256(value: Mapping[str, Any]) -> str:
@@ -262,17 +277,6 @@ def _frame_context(problem: CollectionOpportunityProblem) -> FrameContext:
         time_scale_model="utc_leap_second_aware_epoch",
         source="collection_opportunity_problem",
     )
-
-
-def _sun_position_eci(frame_context: FrameContext, time_s: float) -> np.ndarray:
-    sun, _moon = resolve_sun_moon_positions(
-        {
-            "jd_utc_start": frame_context.jd_utc_start,
-            "ephemeris_mode": "analytic_enhanced",
-        },
-        float(time_s),
-    )
-    return np.asarray(sun, dtype=float)
 
 
 def _angle_rate(left: np.ndarray, right: np.ndarray, duration_s: float) -> float:
@@ -306,22 +310,39 @@ class _CollectionEvaluator:
         self.problem = problem
         self.history = history
         self.frame_context = frame_context
+        self._times, self._states = history.arrays()
+        self._sun = AnalyticSunEvaluator(problem.numeric_backend, "analytic_enhanced")
+        self._native_pointing = OpticalPointingEvaluator() if problem.numeric_backend == "rust" else None
         self.start_s = float(history.times_s[0])
         self.stop_s = float(history.times_s[-1])
 
     def _pointing(self, time_s: float) -> tuple[np.ndarray, np.ndarray, float, np.ndarray, np.ndarray, np.ndarray]:
-        state = interpolate_history(self.history, float(time_s))
+        state = _interpolate_prepared(self.history, self._times, self._states, float(time_s))
         ecef_from_eci = eci_to_ecef_rotation_context(float(time_s), self.frame_context)
         target_eci = ecef_from_eci.T @ self.problem.target.ecef_km
-        sensor_from_eci, gimbal_vector, gimbal_angle = sensor_frame_and_gimbal_vector(
+        pointing = sensor_frame_and_gimbal_vector if self._native_pointing is None else self._native_pointing.pointing
+        sensor_from_eci, gimbal_vector, gimbal_angle = pointing(
             state,
             target_eci,
             pointing_mode=self.problem.sensor.pointing_mode,
         )
         sensor_from_ecef = sensor_from_eci @ ecef_from_eci.T
         observer_ecef = ecef_from_eci @ state[:3]
-        sun_eci = _sun_position_eci(self.frame_context, float(time_s))
+        sun_eci = self._sun.at_jd(self.frame_context.jd_utc_start + float(time_s) / 86400.0)
         return state, gimbal_vector, gimbal_angle, sensor_from_ecef, observer_ecef, ecef_from_eci @ sun_eci
+
+    def _gimbal_vector(self, time_s: float) -> np.ndarray:
+        state = _interpolate_prepared(self.history, self._times, self._states, time_s)
+        rotation = eci_to_ecef_rotation_context(time_s, self.frame_context)
+        target = rotation.T @ self.problem.target.ecef_km
+        mode = self.problem.sensor.pointing_mode
+        if self._native_pointing is not None:
+            return self._native_pointing.gimbal(state, target, pointing_mode=mode)
+        local = local_nadir_frame_sensor_from_eci(state)
+        if mode == "nadir_fixed":
+            return np.array([0.0, 0.0, 1.0])
+        los = target - state[:3]
+        return local @ (los / np.linalg.norm(los))
 
     def required_slew_rate(self, time_s: float) -> float:
         query = float(time_s)
@@ -330,8 +351,8 @@ class _CollectionEvaluator:
         right = min(self.stop_s, query + span)
         if not right > left:
             return 0.0
-        left_vector = self._pointing(left)[1]
-        right_vector = self._pointing(right)[1]
+        left_vector = self._gimbal_vector(left)
+        right_vector = self._gimbal_vector(right)
         return _angle_rate(left_vector, right_vector, right - left)
 
     def sample(self, time_s: float) -> tuple[dict[str, Any], np.ndarray, np.ndarray]:
@@ -372,19 +393,41 @@ def _window_sample_rows(rows: Sequence[Mapping[str, Any]], start_s: float, end_s
 
 def assess_collection_opportunities(
     problem: CollectionOpportunityProblem | Mapping[str, Any],
+    *,
+    orbit_history: AnalysisHistory | None = None,
 ) -> dict[str, Any]:
     parsed = (
         problem
         if isinstance(problem, CollectionOpportunityProblem)
         else CollectionOpportunityProblem.from_mapping(problem)
     )
+    if parsed.numeric_backend == "rust":
+        require_native("optical_pointing", "optical_gimbal_vector", "ONPEnvironmentContext.analytic_sun_km")
     normalized_problem = parsed.to_dict()
     problem_sha256 = _canonical_sha256(normalized_problem)
-    history = propagate_history(
-        parsed.spacecraft.initial_state_eci_km_km_s,
-        parsed.duration_s,
-        parsed.propagation,
-    )
+    if orbit_history is None:
+        history = propagate_history(
+            parsed.spacecraft.initial_state_eci_km_km_s,
+            parsed.duration_s,
+            parsed.propagation,
+        )
+    else:
+        frame_epoch = _frame_context(parsed).jd_utc_start
+        if (orbit_history.object_id != parsed.spacecraft.asset_id
+                or abs(orbit_history.initial_jd_utc - frame_epoch) > 1.0e-12
+                or orbit_history.times_s[0] != 0.0
+                or orbit_history.times_s[-1] < parsed.duration_s):
+            raise CollectionOpportunityError("Orbit history asset, epoch, or horizon differs from collection problem.")
+        initial = np.hstack((orbit_history.position_eci_km[0], orbit_history.velocity_eci_km_s[0]))
+        if not np.array_equal(initial, np.asarray(parsed.spacecraft.initial_state_eci_km_km_s)):
+            raise CollectionOpportunityError("Collection initial state differs from retained orbit history.")
+        relevant = orbit_history.times_s <= parsed.duration_s
+        if orbit_history.times_s[relevant][-1] != parsed.duration_s:
+            raise CollectionOpportunityError("Collection duration must be a retained orbit-history sample.")
+        history = StateHistory.from_arrays(
+            orbit_history.times_s[relevant],
+            np.hstack((orbit_history.position_eci_km[relevant], orbit_history.velocity_eci_km_s[relevant])),
+        )
     frame_context = _frame_context(parsed)
     evaluator = _CollectionEvaluator(parsed, history, frame_context)
     discovery_times, discovery_subdivisions = _interior_discovery_times(history.times_s)
@@ -468,7 +511,7 @@ def assess_collection_opportunities(
         }
         candidates.append(candidate)
         if candidate["accepted"]:
-            pointing_state = interpolate_history(history, midpoint)
+            pointing_state = _interpolate_prepared(history, evaluator._times, evaluator._states, midpoint)
             target_eci = eci_to_ecef_rotation_context(midpoint, frame_context).T @ parsed.target.ecef_km
             pointing = target_eci - pointing_state[:3]
             pointing /= float(np.linalg.norm(pointing))
@@ -487,7 +530,7 @@ def assess_collection_opportunities(
             )
             task_opportunities.append(asdict(task))
     reason_counts = {reason: reasons.count(reason) for reason in sorted(set(reasons))}
-    return {
+    evidence = {
         "schema_version": COLLECTION_OPPORTUNITY_EVIDENCE_SCHEMA,
         "problem_name": parsed.name,
         "problem_sha256": problem_sha256,
@@ -529,6 +572,17 @@ def assess_collection_opportunities(
             "Opportunity discovery is bounded by the recorded interior-discovery cadence; windows narrower than that cadence require a smaller propagation step.",
         ],
     }
+    if orbit_history is not None:
+        evidence["orbit_history_semantic_sha256"] = orbit_history_semantic_sha256(orbit_history)
+        evidence["orbit_history_derivation"] = {
+            "method": "exact_prefix_samples_with_existing_hermite_refinement",
+            "sample_count": len(history.times_s),
+            "end_s": parsed.duration_s,
+        }
+        evidence["limitations"].append(
+            "Collection geometry uses the retained ECI history; declared propagation settings were not executed in this mode."
+        )
+    return evidence
 
 
 def write_collection_evidence(evidence: Mapping[str, Any], path: str | Path) -> Path:

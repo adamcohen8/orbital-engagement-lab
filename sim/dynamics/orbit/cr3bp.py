@@ -162,14 +162,31 @@ def propagate_cr3bp_state(
     adaptive_rtol: float = 1e-7,
     h_init: float | None = None,
     return_info: bool = False,
+    numeric_backend: str = "rust",
 ) -> np.ndarray | tuple[np.ndarray, AdaptiveStepInfo | None]:
     """Propagate physical rotating state; optional diagnostics are None for RK4."""
     sys = EARTH_MOON_CR3BP if system is None else system
     command = (
-        np.zeros(3, dtype=float)
+        None
         if command_accel_km_s2 is None
-        else np.array(command_accel_km_s2, dtype=float).reshape(3)
+        else np.asarray(command_accel_km_s2, dtype=float).reshape(3)
     )
+
+    backend = str(numeric_backend).strip().lower()
+    if backend not in {"python", "rust"}:
+        raise ValueError(f"Unknown CR3BP numeric backend {numeric_backend!r}")
+    if backend == "rust":
+        from sim.dynamics.orbit.rust_cr3bp import integrate
+
+        out, info = integrate(
+            state_km_s, dt_s, t_s, system=sys, command=command,
+            integrator=integrator, adaptive_atol=adaptive_atol,
+            adaptive_rtol=adaptive_rtol, h_init=h_init, collect_info=return_info,
+        )
+        return (out, info) if return_info else out
+
+    if command is None:
+        command = np.zeros(3, dtype=float)
 
     def deriv(t_local: float, x_local: np.ndarray) -> np.ndarray:
         return cr3bp_derivative_physical(x_local, command_accel_km_s2=command, system=sys)
@@ -199,6 +216,7 @@ def propagate_cr3bp_reference_stm(
     adaptive_rtol: float = 1e-7,
     h_init: float | None = None,
     return_info: bool = False,
+    numeric_backend: str = "rust",
 ) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, AdaptiveStepInfo | None]:
     """Integrate the 42-component reference/STM system with shared adaptive steps.
 
@@ -206,12 +224,23 @@ def propagate_cr3bp_reference_stm(
     Default return shape and RK4 stepping preserve Trainer compatibility.
     """
     sys = EARTH_MOON_CR3BP if system is None else system
-    augmented = np.hstack(
-        (
-            np.array(reference_state_km_s, dtype=float).reshape(6),
-            np.array(stm, dtype=float).reshape(6, 6).reshape(36),
+    augmented = np.empty(42, dtype=float)
+    augmented[:6] = np.asarray(reference_state_km_s, dtype=float).reshape(6)
+    augmented[6:] = np.asarray(stm, dtype=float).reshape(6, 6).reshape(36)
+
+    backend = str(numeric_backend).strip().lower()
+    if backend not in {"python", "rust"}:
+        raise ValueError(f"Unknown CR3BP numeric backend {numeric_backend!r}")
+    if backend == "rust":
+        from sim.dynamics.orbit.rust_cr3bp import integrate
+
+        out, info = integrate(
+            augmented, dt_s, t_s, system=sys, stm=True,
+            integrator=integrator, adaptive_atol=adaptive_atol,
+            adaptive_rtol=adaptive_rtol, h_init=h_init, collect_info=return_info,
         )
-    )
+        result = (out[:6].copy(), out[6:].reshape(6, 6).copy())
+        return (*result, info) if return_info else result
 
     def deriv(t_local: float, x_local: np.ndarray) -> np.ndarray:
         reference = np.array(x_local[:6], dtype=float)

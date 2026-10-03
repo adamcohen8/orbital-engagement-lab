@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -23,11 +24,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.generate_python_sbom import write_sbom  # noqa: E402
+from tools.native_source_identity import native_source_identity  # noqa: E402
 
 PYTORCH_CPU_INDEX_URL = "https://download.pytorch.org/whl/cpu"
 PYPI_INDEX_URL = "https://pypi.org/simple"
 PIP_VERSION = "26.2.1"
 PIP_AUDIT_VERSION = "2.10.1"
+_NATIVE_WHEEL_PACKAGES = (
+    ("oel-rust-orbit", "oel_rust_orbit", "oel-orbit"),
+    ("oel-rust-game", "oel_rust_game", "oel-game"),
+)
 
 
 def _package_version() -> str:
@@ -88,12 +94,83 @@ def _run(
     return subprocess.run(cmd, cwd=cwd, env=env, text=True, check=False)
 
 
+
+def _normalized_distribution_name(value: object) -> str:
+    return re.sub(r"[-_.]+", "-", str(value or "").strip().lower())
+
+
+def _native_qualification_manifest() -> Path:
+    return ROOT / "rust" / f"qualification-v{_package_version()}.json"
+
+
+def _qualified_native_wheel_receipts(*, python_minor: tuple[int, int] | None = None) -> dict[str, dict[str, Any]]:
+    """Return the current-source native wheel receipts for this host/interpreter."""
+    manifest = _native_qualification_manifest()
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    if payload.get("release_version") != _package_version():
+        raise ValueError("Native qualification release version does not match")
+    major, minor = python_minor or (sys.version_info.major, sys.version_info.minor)
+    prefix = f"{major}.{minor}."
+    reports = [
+        row for row in payload.get("reports", [])
+        if isinstance(row, dict)
+        and row.get("status") == "passed"
+        and row.get("system") == platform.system()
+        and row.get("machine") == platform.machine()
+        and str(row.get("python", "")).startswith(prefix)
+    ]
+    selected: dict[str, dict[str, Any]] = {}
+    for distribution, module_name, crate_name in _NATIVE_WHEEL_PACKAGES:
+        matches = [row for row in reports if str(row.get("wheel", "")).startswith(module_name + "-")]
+        if len(matches) != 1:
+            raise ValueError(f"Native wheel needs one passing host/interpreter qualification: {module_name}")
+        row = matches[0]
+        crate = ROOT / "rust" / crate_name
+        source_identity = native_source_identity(crate)
+        if row.get("source_identity") != source_identity:
+            raise ValueError(f"Native wheel qualification differs from candidate source: {module_name}")
+        name = str(row.get("wheel", ""))
+        if Path(name).name != name or not name.endswith(".whl"):
+            raise ValueError("Native qualification contains an invalid wheel name")
+        digest = str(row.get("sha256", ""))
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError(f"Native qualification has an invalid wheel SHA-256: {name}")
+        selected[distribution] = {
+            "wheel": name,
+            "sha256": digest,
+            "source_identity_sha256": source_identity["sha256"],
+        }
+    return selected
+
+
+def _qualified_native_wheels(
+    wheelhouse: Path,
+    *,
+    qualified_receipts: dict[str, dict[str, Any]] | None = None,
+) -> tuple[Path, ...]:
+    """Accept only bytes qualified for this release, host and Python minor."""
+    house = wheelhouse.expanduser().resolve()
+    receipts = qualified_receipts if qualified_receipts is not None else _qualified_native_wheel_receipts()
+    selected = []
+    for distribution, _module_name, _crate_name in _NATIVE_WHEEL_PACKAGES:
+        receipt = receipts.get(distribution)
+        if receipt is None:
+            raise ValueError(f"Native wheel has no current qualification receipt: {distribution}")
+        name = str(receipt["wheel"])
+        wheel = house / name
+        if wheel.is_symlink() or not wheel.is_file() or _sha256(wheel) != receipt.get("sha256"):
+            raise ValueError(f"Native wheel differs from qualified bytes: {name}")
+        selected.append(wheel)
+    return tuple(selected)
+
+
 def _full_install_command(
     *,
     python_executable: str,
     constraints: Path,
     install_report_path: Path,
     torch_cpu_index: bool,
+    native_wheels: tuple[Path, ...] = (),
 ) -> list[str]:
     command = [
         python_executable,
@@ -109,7 +186,7 @@ def _full_install_command(
     ]
     if torch_cpu_index:
         command.extend(["--extra-index-url", PYTORCH_CPU_INDEX_URL])
-    command.extend([".[full]", "--report", str(install_report_path)])
+    command.extend([*(str(path) for path in native_wheels), ".[full]", "--report", str(install_report_path)])
     return command
 
 
@@ -161,22 +238,85 @@ def _recorded_run(
     return proc
 
 
-def _validate_dependency_sources(path: Path, *, torch_cpu_index: bool) -> str | None:
+def _validate_dependency_sources(
+    path: Path,
+    *,
+    torch_cpu_index: bool,
+    native_wheels: tuple[Path, ...] = (),
+    qualified_native_wheels: dict[str, dict[str, Any]] | None = None,
+) -> str | None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     allowed_hosts = {"files.pythonhosted.org", "pypi.org"}
     if torch_cpu_index:
         allowed_hosts.add("download.pytorch.org")
+    native_hashes = {wheel.name: _sha256(wheel) for wheel in native_wheels}
+    seen_native_packages: set[str] = set()
+    seen_local_native_artifacts: set[str] = set()
+    native_package_counts: dict[str, int] = {}
     unexpected: list[str] = []
     for row in list(dict(payload).get("packages", []) or []):
         if not isinstance(row, dict):
             continue
+        distribution = _normalized_distribution_name(row.get("name"))
+        is_native = distribution in {item[0] for item in _NATIVE_WHEEL_PACKAGES}
+        if is_native and qualified_native_wheels is not None:
+            native_package_counts[distribution] = native_package_counts.get(distribution, 0) + 1
+            if native_package_counts[distribution] > 1:
+                unexpected.append(f"duplicate-native:{distribution}")
         source_url = str(row.get("source_url", "") or "")
         if source_url == "<local-source>":
+            if row.get("name") == "orbital-engineering-lab" and row.get("version") == _package_version():
+                continue
+            artifact = str(row.get("artifact", ""))
+            if is_native and qualified_native_wheels is not None:
+                receipt = qualified_native_wheels.get(distribution)
+                matches_receipt = (
+                    receipt is not None
+                    and row.get("artifact_type") == "wheel"
+                    and artifact == receipt.get("wheel")
+                    and row.get("sha256") == receipt.get("sha256")
+                )
+                matches_input = not native_hashes or (
+                    artifact in native_hashes and row.get("sha256") == native_hashes[artifact]
+                )
+                if matches_receipt and matches_input:
+                    seen_native_packages.add(distribution)
+                    if native_hashes:
+                        seen_local_native_artifacts.add(artifact)
+                    continue
+                unexpected.append(f"unqualified-native:{distribution}")
+                continue
+            if artifact in native_hashes and row.get("sha256") == native_hashes[artifact]:
+                seen_local_native_artifacts.add(artifact)
+                seen_native_packages.add(distribution)
+                continue
+            unexpected.append(f"unqualified-local:{row.get('name', '')}")
             continue
         if urlparse(source_url).hostname not in allowed_hosts:
             unexpected.append(source_url or "<missing-source-url>")
+            continue
+        if is_native and qualified_native_wheels is not None:
+            receipt = qualified_native_wheels.get(distribution)
+            artifact = str(row.get("artifact", ""))
+            matches_receipt = (
+                receipt is not None
+                and row.get("artifact_type") == "wheel"
+                and artifact == receipt.get("wheel")
+                and row.get("sha256") == receipt.get("sha256")
+            )
+            if matches_receipt:
+                seen_native_packages.add(distribution)
+            else:
+                unexpected.append(f"unqualified-native:{distribution}")
+    if native_hashes and set(native_hashes) != seen_local_native_artifacts:
+        unexpected.append("missing-qualified-native-wheel")
+    if qualified_native_wheels is not None:
+        expected_native_packages = set(qualified_native_wheels)
+        if seen_native_packages != expected_native_packages:
+            missing = sorted(expected_native_packages - seen_native_packages)
+            unexpected.extend(f"missing-qualified-native:{name}" for name in missing)
     if unexpected:
-        return "Dependency evidence contains unapproved source URLs: " + ", ".join(sorted(set(unexpected)))
+        return "Dependency evidence contains unapproved or unqualified sources: " + ", ".join(sorted(set(unexpected)))
     return None
 
 
@@ -188,8 +328,21 @@ def _run_supply_chain_gate_in_environment(
     constraints: Path,
     torch_cpu_index: bool,
     isolated_environment_root: Path | None,
+    native_wheels: tuple[Path, ...] = (),
+    qualified_native_wheels: dict[str, dict[str, Any]] | None = None,
+    native_qualification_sha256: str | None = None,
 ) -> dict[str, Any]:
     command_results: list[dict[str, Any]] = []
+    qualified_native_dependencies: list[dict[str, str]] = []
+    if install_full:
+        current_qualification = _qualified_native_wheel_receipts()
+        current_qualification_sha256 = _sha256(_native_qualification_manifest())
+        if qualified_native_wheels is not None and qualified_native_wheels != current_qualification:
+            raise ValueError("Native qualification receipts differ from the current candidate source")
+        if native_qualification_sha256 is not None and native_qualification_sha256 != current_qualification_sha256:
+            raise ValueError("Native qualification manifest changed before the disposable audit started")
+        qualified_native_wheels = current_qualification
+        native_qualification_sha256 = current_qualification_sha256
     package_environment = _package_environment()
     audit_python = str(bootstrap_python)
     if isolated_environment_root is not None:
@@ -239,6 +392,7 @@ def _run_supply_chain_gate_in_environment(
                 constraints=constraints,
                 install_report_path=install_report_path,
                 torch_cpu_index=torch_cpu_index,
+                native_wheels=native_wheels,
             ),
         ]
         for cmd in commands:
@@ -280,6 +434,8 @@ def _run_supply_chain_gate_in_environment(
                     source_error = _validate_dependency_sources(
                         wheel_inventory_path,
                         torch_cpu_index=torch_cpu_index,
+                        native_wheels=native_wheels,
+                        qualified_native_wheels=qualified_native_wheels,
                     )
                     command_results.append(
                         {
@@ -288,6 +444,21 @@ def _run_supply_chain_gate_in_environment(
                             **({"error": source_error} if source_error is not None else {}),
                         }
                     )
+                    if source_error is None and qualified_native_wheels is not None:
+                        inventory = json.loads(wheel_inventory_path.read_text(encoding="utf-8"))
+                        qualified_native_dependencies = [
+                            {
+                                "package": _normalized_distribution_name(row.get("name")),
+                                "wheel": str(row.get("artifact", "")),
+                                "sha256": str(row.get("sha256", "")),
+                                "source_identity_sha256": qualified_native_wheels[
+                                    _normalized_distribution_name(row.get("name"))
+                                ]["source_identity_sha256"],
+                            }
+                            for row in list(dict(inventory).get("packages", []) or [])
+                            if isinstance(row, dict)
+                            and _normalized_distribution_name(row.get("name")) in qualified_native_wheels
+                        ]
 
     if all(row["return_code"] == 0 for row in command_results):
         if isolated_environment_root is None:
@@ -345,6 +516,20 @@ def _run_supply_chain_gate_in_environment(
                     "sha256": _sha256(path),
                 }
             )
+    if native_wheels:
+        # Do not attest a wheelhouse rewritten while the disposable audit ran.
+        _qualified_native_wheels(
+            native_wheels[0].parent,
+            qualified_receipts=qualified_native_wheels,
+        )
+    if qualified_native_wheels is not None:
+        qualification_path = _native_qualification_manifest()
+        if (
+            native_qualification_sha256 is None
+            or _sha256(qualification_path) != native_qualification_sha256
+            or _qualified_native_wheel_receipts() != qualified_native_wheels
+        ):
+            raise ValueError("Native qualification changed while the disposable audit ran")
     passed = bool(command_results) and all(row["return_code"] == 0 for row in command_results)
     manifest = {
         "schema_version": 1,
@@ -359,6 +544,8 @@ def _run_supply_chain_gate_in_environment(
             "primary_index": PYPI_INDEX_URL,
             "pytorch_cpu_index": PYTORCH_CPU_INDEX_URL if torch_cpu_index else None,
             "pip_environment_sanitized": True,
+            "qualified_native_wheels": qualified_native_dependencies,
+            "native_qualification_sha256": native_qualification_sha256,
         },
         "git": git_provenance(),
         "audit_exceptions": [],
@@ -379,7 +566,22 @@ def run_supply_chain_gate(
     python_executable: str = sys.executable,
     constraints_file: str | Path | None = None,
     torch_cpu_index: bool = False,
+    native_wheelhouse: str | Path | None = None,
 ) -> dict[str, Any]:
+    if native_wheelhouse is not None and not install_full:
+        raise ValueError("Native wheel inputs require full-profile installation")
+    native_qualification = _qualified_native_wheel_receipts() if install_full else None
+    native_qualification_sha256 = (
+        _sha256(_native_qualification_manifest()) if native_qualification is not None else None
+    )
+    native_wheels = (
+        ()
+        if native_wheelhouse is None
+        else _qualified_native_wheels(
+            Path(native_wheelhouse),
+            qualified_receipts=native_qualification,
+        )
+    )
     output = Path(output_dir).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
 
@@ -399,6 +601,9 @@ def run_supply_chain_gate(
                 constraints=constraints,
                 torch_cpu_index=torch_cpu_index,
                 isolated_environment_root=Path(temporary_root) / "audit-env",
+                native_wheels=native_wheels,
+                qualified_native_wheels=native_qualification,
+                native_qualification_sha256=native_qualification_sha256,
             )
     return _run_supply_chain_gate_in_environment(
         output,
@@ -407,6 +612,8 @@ def run_supply_chain_gate(
         constraints=constraints,
         torch_cpu_index=torch_cpu_index,
         isolated_environment_root=None,
+        qualified_native_wheels=native_qualification,
+        native_qualification_sha256=native_qualification_sha256,
     )
 
 
@@ -430,12 +637,14 @@ def main(argv: list[str] | None = None) -> int:
             "Intended for disk-bounded Linux audit runners."
         ),
     )
+    parser.add_argument("--native-wheelhouse", help="Local orbit/game wheels matching this release's committed host/interpreter qualification")
     args = parser.parse_args(argv)
     manifest = run_supply_chain_gate(
         args.output_dir,
         install_full=bool(args.install_full),
         constraints_file=args.constraints,
         torch_cpu_index=bool(args.torch_cpu_index),
+        native_wheelhouse=args.native_wheelhouse,
     )
     print(f"Evidence manifest: {manifest['manifest']}")
     print(f"Supply-chain gate: {'PASS' if manifest['passed'] else 'FAIL'}")

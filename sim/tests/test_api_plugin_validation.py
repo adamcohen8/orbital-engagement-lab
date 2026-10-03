@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -40,6 +41,28 @@ def _invalid_plugin_config(output_dir: Path) -> dict:
             "animations": {"enabled": False, "types": []},
         },
     }
+
+
+def _sealed_batch_plugin_config(output_dir: Path) -> dict:
+    config = _invalid_plugin_config(output_dir)
+    config["target"]["flight_software"] = {
+        "module": "sim.flight_software.reference_stacks",
+        "class_name": "PassiveFlightSoftwareStack",
+        "hardware_profile": "hardware.passive.v1",
+    }
+    config["monte_carlo"] = {
+        "enabled": True,
+        "iterations": 1,
+        "base_seed": 17,
+        "variations": [
+            {
+                "parameter_path": "objects.target.flight_software.module",
+                "mode": "choice",
+                "options": ["pathlib"],
+            }
+        ],
+    }
+    return config
 
 
 class TestApiPluginValidation(unittest.TestCase):
@@ -115,6 +138,43 @@ class TestApiPluginValidation(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "Failed to construct requested plugin"):
                 session.run()
+
+    def test_hosted_monte_carlo_rechecks_sealed_policy_before_plugin_import(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            config = _sealed_batch_plugin_config(Path(tmpdir))
+            workspace = HostedSimulationWorkspace()
+
+            with patch(
+                "sim.config.plugin_validation.importlib.import_module",
+                side_effect=AssertionError("untrusted plugin imported"),
+            ):
+                with self.assertRaisesRegex(ValueError, "sealed mode blocks plugin module"):
+                    workspace.run_monte_carlo_metrics(config, metrics=[])
+
+    def test_hosted_sweep_rechecks_sealed_policy_before_plugin_import(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            config = _invalid_plugin_config(Path(tmpdir))
+            config["target"]["flight_software"] = {
+                "module": "sim.flight_software.reference_stacks",
+                "class_name": "PassiveFlightSoftwareStack",
+                "hardware_profile": "hardware.passive.v1",
+            }
+            workspace = HostedSimulationWorkspace()
+
+            original_import = importlib.import_module
+
+            def reject_untrusted_import(name: str, *args, **kwargs):
+                if name == "pathlib":
+                    raise AssertionError("untrusted plugin imported")
+                return original_import(name, *args, **kwargs)
+
+            with patch("sim.config.plugin_validation.importlib.import_module", side_effect=reject_untrusted_import):
+                with self.assertRaisesRegex(ValueError, "sealed mode blocks plugin module"):
+                    workspace.sweep(
+                        config,
+                        parameter="objects.target.flight_software.module",
+                        values=["pathlib"],
+                    )
 
 
 if __name__ == "__main__":

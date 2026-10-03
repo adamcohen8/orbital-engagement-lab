@@ -22,7 +22,7 @@ from sim.platform_compat import (
 
 
 def test_windows_folder_opener_preserves_path_with_spaces(tmp_path: Path) -> None:
-    folder = tmp_path / "Orbital Engagement Lab" / "run output"
+    folder = tmp_path / "Orbital Engineering Lab" / "run output"
     folder.mkdir(parents=True)
     startfile = Mock()
     popen = Mock()
@@ -61,7 +61,7 @@ def test_cli_output_folder_delegates_to_platform_layer(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    folder = tmp_path / "Orbital Engagement Lab" / "Windows output"
+    folder = tmp_path / "Orbital Engineering Lab" / "Windows output"
     folder.mkdir(parents=True)
     calls: list[Path] = []
     monkeypatch.setattr(run_simulation, "open_folder", lambda path: calls.append(Path(path)))

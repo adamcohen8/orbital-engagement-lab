@@ -281,6 +281,13 @@ Termination metadata:
 Downstream tools should use these fields instead of inferring early termination
 only from sample count.
 
+Opt-in `simulator.collisions` does not terminate a run. For the supported
+two-satellite passive ONP envelope, the engine resolves each first spherical
+contact within the step, applies a frictionless restitution-1 impulse to both
+ECI velocities, then advances the remaining interval. Ordinary state samples
+remain on the time grid. Exact impact times and pre/post velocities are recorded
+in `collision_events` and the review `events` table.
+
 
 ## Payload And Artifact Expectations
 

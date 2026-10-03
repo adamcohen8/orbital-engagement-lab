@@ -411,3 +411,61 @@ class TestRocketAscentEngine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_rocket_unit_helpers_keep_readonly_inputs_and_owned_outputs():
+    from sim.rocket.engine import _unit as engine_unit
+    from sim.rocket.guidance import _unit as guidance_unit
+    from sim.rocket.navigation import _unit as navigation_unit
+
+    source = np.array([1.0, -3.0, 5.0, 7.0, 11.0, 13.0])[::2]
+    source.flags.writeable = False
+    expected = source / float(np.linalg.norm(source))
+    before = source.tobytes()
+    for unit in (engine_unit, guidance_unit, navigation_unit):
+        output = unit(np.asarray(source, dtype=float))
+        assert output.tobytes() == expected.tobytes()
+        assert output.flags.writeable
+        assert not np.shares_memory(output, source)
+        output[0] = 99.0
+        assert source.tobytes() == before
+
+
+def test_rocket_step_orbit_pack_keeps_exact_values_and_input_ownership():
+    from sim.presets.rockets import BASIC_TWO_STAGE_STACK
+
+    sim_cfg = RocketSimConfig(
+        dt_s=0.5,
+        enable_drag=False,
+        enable_j2=False,
+        enable_j3=False,
+        enable_j4=False,
+        aero=RocketAeroConfig(enabled=False),
+    )
+    sim = RocketAscentSimulator(
+        sim_cfg=sim_cfg,
+        vehicle_cfg=RocketVehicleConfig(stack=BASIC_TWO_STAGE_STACK, payload_mass_kg=150.0),
+        guidance=HoldAttitudeGuidance(throttle=0.0),
+    )
+    state = sim.initial_state()
+    expected = np.hstack((state.position_eci_km, state.velocity_eci_km_s))
+    before = [part.tobytes() for part in (state.position_eci_km, state.velocity_eci_km_s)]
+    state.position_eci_km.flags.writeable = False
+    state.velocity_eci_km_s.flags.writeable = False
+    captured = []
+
+    def retain(**kwargs):
+        packed = kwargs["x_eci"]
+        captured.append(packed)
+        return packed.copy()
+
+    with patch.object(sim._propagator, "propagate", side_effect=retain):
+        result = sim.step(state, GuidanceCommand(throttle=0.0))
+    packed = captured[0]
+    assert packed.tobytes() == expected.tobytes()
+    assert packed.flags.writeable
+    assert not np.shares_memory(packed, state.position_eci_km)
+    assert not np.shares_memory(packed, state.velocity_eci_km_s)
+    assert [part.tobytes() for part in (state.position_eci_km, state.velocity_eci_km_s)] == before
+    assert result.position_eci_km.tobytes() == expected[:3].tobytes()
+    assert result.velocity_eci_km_s.tobytes() == expected[3:].tobytes()

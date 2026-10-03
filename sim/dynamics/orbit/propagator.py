@@ -21,7 +21,7 @@ from sim.dynamics.orbit.accelerations import (
 )
 from sim.dynamics.orbit.atmosphere import (
     _datetime_from_env_t_s,
-    _local_solar_time_epoch_terms,
+    _nrlmsise00_sun_longitude_rad,
     density_from_model,
 )
 from sim.dynamics.orbit.cr3bp import cr3bp_system, propagate_cr3bp_state
@@ -44,16 +44,15 @@ from sim.dynamics.orbit.environment import (
 )
 from sim.dynamics.orbit.epoch import (
     AU_KM,
-    datetime_to_julian_date,
     resolve_body_position_eci_km,
     resolve_sun_moon_positions,
     resolve_time_dependent_env,
-    sun_position_eci_km_enhanced,
 )
 from sim.dynamics.orbit.frames import (
     FRAME_MODEL_IAU76_80_EOP,
     _interp_eop,
     _load_nut80_table,
+    _validate_eop_elapsed_interval,
     eci_to_ecef_rotation,
     eci_to_ecef_rotation_hpop_like,
     normalize_frame_model,
@@ -124,22 +123,46 @@ def _compiled_iau76_80_rotation():
     return eci_to_ecef_iau76_80_kernel
 
 
-@lru_cache(maxsize=1)
-def _compiled_iau76_80_sidereal_time():
-    from sim.acceleration.kernels.frames import apparent_sidereal_time_iau76_80_kernel
-
-    return apparent_sidereal_time_iau76_80_kernel
-
 
 def j2_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
+    if env.get("_rust_numeric_backend") == "rust":
+        from sim.dynamics.orbit.environment import EARTH_J2, EARTH_J3, EARTH_J4
+        from sim.rust_environment_backend import try_zonal_acceleration
+
+        native = try_zonal_acceleration(
+            x_eci[:3], mu_km3_s2=ctx.mu_km3_s2, j2=EARTH_J2, j3=EARTH_J3, j4=EARTH_J4,
+            radius_km=EARTH_RADIUS_KM, codes=[2],
+        )
+        if native is not None:
+            return native
     return accel_j2(x_eci[:3], ctx.mu_km3_s2)
 
 
 def j3_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
+    if env.get("_rust_numeric_backend") == "rust":
+        from sim.dynamics.orbit.environment import EARTH_J2, EARTH_J3, EARTH_J4
+        from sim.rust_environment_backend import try_zonal_acceleration
+
+        native = try_zonal_acceleration(
+            x_eci[:3], mu_km3_s2=ctx.mu_km3_s2, j2=EARTH_J2, j3=EARTH_J3, j4=EARTH_J4,
+            radius_km=EARTH_RADIUS_KM, codes=[3],
+        )
+        if native is not None:
+            return native
     return accel_j3(x_eci[:3], ctx.mu_km3_s2)
 
 
 def j4_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
+    if env.get("_rust_numeric_backend") == "rust":
+        from sim.dynamics.orbit.environment import EARTH_J2, EARTH_J3, EARTH_J4
+        from sim.rust_environment_backend import try_zonal_acceleration
+
+        native = try_zonal_acceleration(
+            x_eci[:3], mu_km3_s2=ctx.mu_km3_s2, j2=EARTH_J2, j3=EARTH_J3, j4=EARTH_J4,
+            radius_km=EARTH_RADIUS_KM, codes=[4],
+        )
+        if native is not None:
+            return native
     return accel_j4(x_eci[:3], ctx.mu_km3_s2)
 
 
@@ -358,6 +381,19 @@ def lift_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> 
 
 def srp_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitContext) -> np.ndarray:
     sun_position = env.get("sun_pos_eci_km")
+    if env.get("_rust_numeric_backend") == "rust" and sun_position is not None:
+        shadow_name = str(env.get("srp_shadow_model", "conical")).lower()
+        shadow_model = 0 if shadow_name in ("none", "off", "disabled") else 1 if shadow_name in ("cylindrical", "cylinder") else 2
+        from sim.rust_environment_backend import try_srp_acceleration
+
+        native = try_srp_acceleration(
+            x_eci[:3], np.asarray(sun_position, dtype=float).reshape(3),
+            mass_kg=ctx.mass_kg, area_m2=float(env.get("srp_area_m2", ctx.area_m2)),
+            reflectivity=ctx.cr, pressure_pa=srp_pressure_n_m2(env), au_km=AU_KM,
+            earth_radius_km=EARTH_RADIUS_KM, sun_radius_km=SUN_RADIUS_KM, shadow_model=shadow_model,
+        )
+        if native is not None:
+            return native
     if acceleration_enabled_from_mode() and sun_position is not None:
         shadow_name = str(env.get("srp_shadow_model", "conical")).lower()
         shadow_model = (
@@ -404,6 +440,12 @@ def third_body_moon_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitC
     moon = env.get("moon_pos_eci_km")
     if moon is None:
         _, moon = resolve_sun_moon_positions(env, t_s)
+    if env.get("_rust_numeric_backend") == "rust":
+        from sim.rust_environment_backend import try_third_body_acceleration
+
+        native = try_third_body_acceleration(x_eci[:3], moon, mu_km3_s2=MOON_MU_KM3_S2)
+        if native is not None:
+            return native
     return accel_third_body(x_eci[:3], moon, MOON_MU_KM3_S2)
 
 
@@ -411,6 +453,12 @@ def third_body_sun_plugin(t_s: float, x_eci: np.ndarray, env: dict, ctx: OrbitCo
     sun = env.get("sun_pos_eci_km")
     if sun is None:
         sun, _ = resolve_sun_moon_positions(env, t_s)
+    if env.get("_rust_numeric_backend") == "rust":
+        from sim.rust_environment_backend import try_third_body_acceleration
+
+        native = try_third_body_acceleration(x_eci[:3], sun, mu_km3_s2=SUN_MU_KM3_S2)
+        if native is not None:
+            return native
     return accel_third_body(x_eci[:3], sun, SUN_MU_KM3_S2)
 
 
@@ -442,6 +490,8 @@ class OrbitPropagator:
     adaptive_atol: float = 1e-9
     adaptive_rtol: float = 1e-7
     acceleration_mode: str = "off"
+    numeric_backend: str = "rust"
+    last_numeric_path: str | None = field(default=None, init=False)
     _rkf78_h_next: float | None = field(default=None, init=False, repr=False)
     _rkf78_last_t_s: float | None = field(default=None, init=False, repr=False)
     _acceleration_enabled_cache: bool | None = field(default=None, init=False, repr=False)
@@ -460,6 +510,11 @@ class OrbitPropagator:
     _compiled_force_codes_cache: np.ndarray | None = field(default=None, init=False, repr=False)
     _compiled_force_plugins_cache: tuple[AccelerationPlugin, ...] | None = field(default=None, init=False, repr=False)
     _staged_force_plan_cache_key: tuple | None = field(default=None, init=False, repr=False)
+    # Native extension objects are process-local and intentionally excluded
+    # from OrbitPropagator serialization; they are recreated on first use in
+    # the worker that receives the pickled propagator.
+    _rust_force_context_cache: tuple | None = field(default=None, init=False, repr=False)
+    _rust_environment_context_cache: tuple | None = field(default=None, init=False, repr=False)
     _staged_planet_positions: np.ndarray = field(
         default_factory=lambda: np.zeros((len(PLANETARY_MU_KM3_S2), 3), dtype=float),
         init=False,
@@ -513,6 +568,33 @@ class OrbitPropagator:
     last_adaptive_step_info: AdaptiveStepInfo | None = field(default=None, init=False, repr=False)
     adaptive_step_info: AdaptiveStepInfo | None = field(default=None, init=False, repr=False)
 
+    def __getstate__(self) -> dict:
+        """Serialize the Python reference state while dropping native caches.
+
+        PyO3 context instances retain Rust allocations and are not a stable
+        cross-process serialization contract.  Resource selection and table
+        validation remain in the Python state, so each process can recreate
+        an equivalent context lazily after unpickling.
+        """
+
+        state = dict(self.__dict__)
+        state.pop("_rust_force_context_cache", None)
+        state.pop("_rust_environment_context_cache", None)
+        state.pop("_rust_mechanical_context_cache", None)
+        state.pop("_rust_prepared_frame_cache", None)
+        state.pop("_rust_forecast_zonal_context", None)
+        state.pop("_rust_stage_context_cache", None)
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        self._rust_force_context_cache = None
+        self._rust_environment_context_cache = None
+        self._rust_mechanical_context_cache = None
+        self._rust_prepared_frame_cache = None
+        self._rust_forecast_zonal_context = None
+        self._rust_stage_context_cache = None
+
     @property
     def state_frame(self) -> str:
         """Frame carried by the six-component numerical state."""
@@ -555,12 +637,138 @@ class OrbitPropagator:
             command_accel_eci_km_s2, dtype=float
         ).reshape(3)
         accelerate_spherical_harmonics = self._acceleration_enabled() and spherical_harmonics_plugin in self.plugins
+        plugin_env = env
+        if str(self.numeric_backend).strip().lower() == "rust":
+            # The plugin itself decides whether its prepared numeric kernel is
+            # available.  Keeping the marker local preserves custom Python
+            # plugins and the default Python reference path.
+            plugin_env = dict(env)
+            plugin_env["_rust_numeric_backend"] = "rust"
         for plugin in self.plugins:
             if accelerate_spherical_harmonics and plugin is spherical_harmonics_plugin:
-                acceleration += _accelerated_spherical_harmonics_plugin(t_s, state, env, ctx)
+                acceleration += _accelerated_spherical_harmonics_plugin(t_s, state, plugin_env, ctx)
             else:
-                acceleration += plugin(t_s, state, env, ctx)
+                acceleration += plugin(t_s, state, plugin_env, ctx)
         return acceleration
+
+    def try_propagate_fixed_steps(
+        self, x_eci: np.ndarray, dt_s: float, steps: int, t_s: float,
+        command_accel_eci_km_s2: np.ndarray, env: dict, ctx: OrbitContext,
+        *, sample_stride: int = 0,
+    ) -> np.ndarray | None:
+        """Advance a constant-command native segment, or leave ordinary stepping in charge.
+
+        This numerical API has no controller, event or scenario lifecycle.
+        Callers must own the interval and visit their usual lifecycle boundaries.
+        Zero stride retains only the final state; positive stride includes the
+        initial state, requested samples and the final state.
+        """
+        if self.numeric_backend != "rust" or self.integrator != "rk4" or self.model != "two_body" or self.state_frame != "eci":
+            return None
+        from sim.dynamics.orbit.rust_force_plan import _CODES, make_plan
+        from sim.rust_orbit_backend import _command, _state, native_harmonic_degree_limit
+
+        if any(not any(plugin is known for known in _CODES) for plugin in self.plugins):
+            return None
+        if spherical_harmonics_plugin in self.plugins:
+            if env.get("_compiled_spherical_harmonics_terms") is None:
+                spherical_harmonics_plugin(t_s, np.asarray(x_eci, dtype=float), env, ctx)
+            harmonic = env.get("_compiled_spherical_harmonics_terms")
+            if harmonic is None or not harmonic.all_normalized or harmonic.n_max > native_harmonic_degree_limit():
+                return None
+        *_, stage_callback, force_context = make_plan(self, x_eci, t_s, env, ctx)
+        function = getattr(force_context, "fixed_history", None)
+        if function is None:
+            return None
+        raw = function(_state(x_eci), float(t_s), float(dt_s), steps, sample_stride,
+                       _command(command_accel_eci_km_s2), stage_callback)
+        self.last_numeric_path = "rust_native_force_plan_history"
+        return np.frombuffer(raw, dtype="<f8").copy().reshape(-1, 6)
+
+    def try_propagate_sampled_steps(
+        self, x_eci: np.ndarray, step_widths, sample_ends, t_s: float,
+        command_accel_eci_km_s2: np.ndarray, env: dict, ctx: OrbitContext,
+        *, step_times=None,
+    ) -> np.ndarray | None:
+        """Visit an exact caller-owned RK4 schedule with ordinary stage forces.
+
+        Callers own every controller/event/output boundary. Explicit substep
+        start times preserve nested decimal simulation-clock semantics; without
+        them this numerical API advances one cumulative local clock.
+        """
+        if self.numeric_backend != "rust" or self.integrator != "rk4" or self.model != "two_body" or self.state_frame != "eci":
+            return None
+        from sim.dynamics.orbit.rust_force_plan import _CODES, make_plan
+        from sim.rust_orbit_backend import _command, _state, native_harmonic_degree_limit
+
+        if any(not any(plugin is known for known in _CODES) for plugin in self.plugins):
+            return None
+        if spherical_harmonics_plugin in self.plugins:
+            if env.get("_compiled_spherical_harmonics_terms") is None:
+                spherical_harmonics_plugin(t_s, np.asarray(x_eci, dtype=float), env, ctx)
+            harmonic = env.get("_compiled_spherical_harmonics_terms")
+            if harmonic is None or not harmonic.all_normalized or harmonic.n_max > native_harmonic_degree_limit():
+                return None
+        *_, stage_callback, force_context = make_plan(self, x_eci, t_s, env, ctx)
+        function = getattr(force_context, "sampled_history", None)
+        if not callable(function):
+            return None
+        widths = np.asarray(step_widths, dtype="<f8").reshape(-1)
+        if step_times is None:
+            times = np.empty(widths.size, dtype="<f8")
+            clock = float(t_s)
+            for index, width in enumerate(widths):
+                times[index] = clock
+                clock += float(width)
+        else:
+            times = np.asarray(step_times, dtype="<f8").reshape(-1)
+        ends = [int(value) for value in sample_ends]
+        density_callback = getattr(stage_callback, "_simple_drag_density_callback", None)
+        if (callable(density_callback) and not getattr(stage_callback, "native_preparation", False)
+                and callable(getattr(force_context, "supports_simple_drag_stages", None))):
+            raw = function(_state(x_eci), times.tobytes(), widths.tobytes(), ends,
+                           _command(command_accel_eci_km_s2), density_callback, True,
+                           getattr(stage_callback, "_simple_drag_jd_utc_start", None))
+        else:
+            raw = function(_state(x_eci), times.tobytes(), widths.tobytes(), ends,
+                           _command(command_accel_eci_km_s2), stage_callback)
+        self.last_numeric_path = "rust_native_force_plan_sampled_history"
+        return np.frombuffer(raw, dtype="<f8").copy().reshape(len(ends) + 1, 6)
+
+    def try_propagate_adaptive_sampled_steps(
+        self, x_eci, step_widths, sample_ends, t_s, command_accel_eci_km_s2,
+        env, ctx, *, step_times,
+    ):
+        """Prepare caller-owned full-force adaptive samples without advancing policy.
+
+        Return states and per-interval diagnostics. The caller commits adaptive
+        state only as its ordinary lifecycle consumes each interval.
+        """
+        if (self.numeric_backend != "rust" or self.integrator not in {"rkf78", "adaptive", "dopri5"}
+                or self.model != "two_body" or self.state_frame != "eci"):
+            return None
+        from sim.dynamics.orbit.rust_force_plan import immutable_builtin_plan_signature, make_plan
+        from sim.rust_orbit_backend import _command, _state
+
+        if immutable_builtin_plan_signature(self, env, ctx) is None:
+            return None
+        *_, stage_callback, force_context = make_plan(self, x_eci, t_s, env, ctx)
+        function = getattr(force_context, "sampled_adaptive_history", None)
+        if not callable(function):
+            return None
+        h_init = self._rkf78_h_next
+        if self._rkf78_last_t_s is None or float(t_s) < self._rkf78_last_t_s - 1.0e-12:
+            h_init = None
+        widths = np.asarray(step_widths, dtype="<f8").reshape(-1)
+        times = np.asarray(step_times, dtype="<f8").reshape(-1)
+        ends = [int(value) for value in sample_ends]
+        raw, infos = function(
+            _state(x_eci), times.tobytes(), widths.tobytes(), ends,
+            _command(command_accel_eci_km_s2), float(self.adaptive_atol), float(self.adaptive_rtol),
+            h_init, "dopri5" if self.integrator == "dopri5" else "rkf78", stage_callback,
+        )
+        return (np.frombuffer(raw, dtype="<f8").copy().reshape(len(ends) + 1, 6),
+                np.frombuffer(infos, dtype="<f8").copy().reshape(len(widths), 8))
 
     def propagate(
         self,
@@ -571,7 +779,11 @@ class OrbitPropagator:
         env: dict,
         ctx: OrbitContext,
     ) -> np.ndarray:
+        backend = str(self.numeric_backend).strip().lower()
+        if backend not in {"python", "rust"}:
+            raise ValueError(f"Unknown orbit numeric backend {self.numeric_backend!r}")
         if str(self.model or "two_body").strip().lower() == "cr3bp":
+            self.last_numeric_path = "rust_native_cr3bp" if backend == "rust" else "python"
             if self._rkf78_last_t_s is None or float(t_s) < float(self._rkf78_last_t_s) - 1e-12:
                 self._rkf78_h_next = None
             x_next, step_info = propagate_cr3bp_state(
@@ -585,6 +797,7 @@ class OrbitPropagator:
                 adaptive_rtol=self.adaptive_rtol,
                 h_init=self._rkf78_h_next,
                 return_info=True,
+                numeric_backend=backend,
             )
             self.last_adaptive_step_info = step_info
             if step_info is not None:
@@ -593,6 +806,133 @@ class OrbitPropagator:
                 previous = [] if self.adaptive_step_info is None else [self.adaptive_step_info]
                 self.adaptive_step_info = combine_adaptive_step_info(step_info.method, [*previous, step_info])
             return x_next
+
+        if backend == "rust":
+            if str(self.model or "two_body").strip().lower() != "two_body":
+                raise ValueError("Rust orbit backend supports only two-body ONP")
+            codes = ((j2_plugin, 2), (j3_plugin, 3), (j4_plugin, 4))
+            zonal_only = all(any(plugin is known for known, _ in codes) for plugin in self.plugins)
+            force_codes = (
+                [next(code for known, code in codes if plugin is known) for plugin in self.plugins]
+                if zonal_only else []
+            )
+            native_forces = tuple(known for known, _ in codes) + (
+                spherical_harmonics_plugin, drag_plugin, srp_plugin,
+                third_body_sun_plugin, third_body_moon_plugin,
+            )
+            native_plan = all(any(plugin is known for known in native_forces) for plugin in self.plugins)
+            if native_plan and any(plugin is spherical_harmonics_plugin for plugin in self.plugins):
+                from sim.rust_orbit_backend import native_harmonic_degree_limit
+
+                if env.get("_compiled_spherical_harmonics_terms") is None:
+                    spherical_harmonics_plugin(t_s, np.asarray(x_eci, dtype=float), env, ctx)
+                harmonic_terms = env.get("_compiled_spherical_harmonics_terms")
+                native_plan = bool(
+                    harmonic_terms is not None
+                    and harmonic_terms.all_normalized
+                    and harmonic_terms.n_max <= native_harmonic_degree_limit()
+                    and harmonic_terms.m_max <= native_harmonic_degree_limit()
+                )
+            integrator = str(self.integrator).strip().lower()
+
+            def acceleration_callback(stage_t, stage_x):
+                return self.acceleration_at(
+                    t_s=float(stage_t), x_eci=np.asarray(stage_x, dtype=float),
+                    command_accel_eci_km_s2=command_accel_eci_km_s2,
+                    env=env, ctx=ctx,
+                ).tolist()
+
+            if integrator == "rk4":
+                if not zonal_only:
+                    if native_plan:
+                        from sim.dynamics.orbit.rust_force_plan import make_plan
+                        from sim.rust_orbit_backend import rk4_force_plan_eci
+
+                        plan_codes, scalars, shadow, dims, tables, stage_callback, force_context = make_plan(
+                            self, x_eci, t_s, env, ctx,
+                        )
+                        self.last_numeric_path = "rust_native_force_plan"
+                        return rk4_force_plan_eci(
+                            x_eci, t_s, dt_s, codes=plan_codes, scalars=scalars,
+                            shadow_model=shadow, harmonic_dims=dims, tables=tables,
+                            command_accel_eci_km_s2=command_accel_eci_km_s2,
+                            stage_callback=stage_callback, force_context=force_context,
+                        )
+                    from sim.rust_orbit_backend import rk4_callback_eci
+
+                    self.last_numeric_path = "rust_python_force_callback"
+                    return rk4_callback_eci(x_eci, t_s, dt_s, acceleration_callback)
+                if force_codes in ([], [2]):
+                    from sim.rust_orbit_backend import rk4_step_eci
+
+                    self.last_numeric_path = "rust_native_zonal"
+                    return rk4_step_eci(
+                        x_eci,
+                        dt_s,
+                        ctx.mu_km3_s2,
+                        include_j2=bool(force_codes),
+                        command_accel_eci_km_s2=command_accel_eci_km_s2,
+                    )
+                from sim.rust_orbit_backend import rk4_zonal_step_eci
+
+                self.last_numeric_path = "rust_native_zonal"
+                return rk4_zonal_step_eci(
+                    x_eci, dt_s, ctx.mu_km3_s2,
+                    force_codes=force_codes,
+                    command_accel_eci_km_s2=command_accel_eci_km_s2,
+                )
+            if integrator in ("rkf78", "adaptive", "dopri5"):
+                from sim.rust_orbit_backend import (
+                    adaptive_callback_eci,
+                    dopri5_force_plan_eci,
+                    rkf78_force_plan_eci,
+                    rkf78_zonal_step_eci,
+                )
+
+                if self._rkf78_last_t_s is None or float(t_s) < float(self._rkf78_last_t_s) - 1e-12:
+                    self._rkf78_h_next = None
+                method = "dopri5" if integrator == "dopri5" else "rkf78"
+                if zonal_only and method == "rkf78":
+                    self.last_numeric_path = "rust_native_zonal"
+                    x_next, info = rkf78_zonal_step_eci(
+                        x_eci, t_s, dt_s, ctx.mu_km3_s2,
+                        force_codes=force_codes,
+                        command_accel_eci_km_s2=command_accel_eci_km_s2,
+                        atol=self.adaptive_atol,
+                        rtol=self.adaptive_rtol,
+                        h_init=self._rkf78_h_next,
+                    )
+                elif native_plan:
+                    from sim.dynamics.orbit.rust_force_plan import make_plan
+
+                    self.last_numeric_path = "rust_native_force_plan"
+                    plan_codes, scalars, shadow, dims, tables, stage_callback, force_context = make_plan(
+                        self, x_eci, t_s, env, ctx,
+                    )
+                    force_step = dopri5_force_plan_eci if method == "dopri5" else rkf78_force_plan_eci
+                    x_next, info = force_step(
+                        x_eci, t_s, dt_s, codes=plan_codes, scalars=scalars,
+                        shadow_model=shadow, harmonic_dims=dims, tables=tables,
+                        command_accel_eci_km_s2=command_accel_eci_km_s2,
+                        atol=self.adaptive_atol, rtol=self.adaptive_rtol,
+                        h_init=self._rkf78_h_next, stage_callback=stage_callback,
+                        force_context=force_context,
+                    )
+                else:
+                    self.last_numeric_path = "rust_python_force_callback"
+                    x_next, info = adaptive_callback_eci(
+                        x_eci, t_s, dt_s, atol=self.adaptive_atol,
+                        rtol=self.adaptive_rtol, h_init=self._rkf78_h_next,
+                        method=method, acceleration_callback=acceleration_callback,
+                    )
+                self._rkf78_h_next = info.suggested_next_step_s
+                self._rkf78_last_t_s = float(t_s + dt_s)
+                self.last_adaptive_step_info = info
+                previous = [] if self.adaptive_step_info is None else [self.adaptive_step_info]
+                self.adaptive_step_info = combine_adaptive_step_info(method, [*previous, info])
+                return x_next
+            raise ValueError("Rust orbit backend supports only RK4, RKF78, and DOPRI5")
+        self.last_numeric_path = "python"
 
         fast_flags = self._zonal_rk4_fast_path_flags()
         acceleration_enabled = self._acceleration_enabled()
@@ -690,8 +1030,8 @@ class OrbitPropagator:
         self._zonal_rk4_fast_path_checked = True
         if str(self.integrator).strip().lower() != "rk4":
             return None
-        supported = {j2_plugin, j3_plugin, j4_plugin}
-        if any(plugin not in supported for plugin in self.plugins):
+        supported = (j2_plugin, j3_plugin, j4_plugin)
+        if any(not any(plugin is known for known in supported) for plugin in self.plugins):
             return None
         self._zonal_rk4_fast_path_flags_cache = (
             j2_plugin in self.plugins,
@@ -719,7 +1059,7 @@ class OrbitPropagator:
             third_body_sun_plugin,
             third_body_planets_plugin,
         }
-        if any(plugin not in supported for plugin in self.plugins):
+        if any(not any(plugin is known for known in supported) for plugin in self.plugins):
             self._builtin_rk4_fast_path_enabled_cache = False
             return False
         time_env_plugins = {
@@ -728,7 +1068,9 @@ class OrbitPropagator:
             third_body_sun_plugin,
             third_body_planets_plugin,
         }
-        self._builtin_needs_time_env_cache = any(plugin in time_env_plugins for plugin in self.plugins)
+        self._builtin_needs_time_env_cache = any(
+            any(plugin is known for known in time_env_plugins) for plugin in self.plugins
+        )
         self._builtin_rk4_fast_path_enabled_cache = True
         return True
 
@@ -765,6 +1107,8 @@ class OrbitPropagator:
         if model == FRAME_MODEL_IAU76_80_EOP:
             eop_path = env.get(path_key)
             has_eop_path = eop_path not in (None, "")
+            if has_eop_path and jd_utc_start is not None:
+                _validate_eop_elapsed_interval(float(jd_utc_start), t_s, str(eop_path))
             dut1_s = env.get("dut1_s")
             xp_arcsec = env.get("xp_arcsec")
             yp_arcsec = env.get("yp_arcsec")
@@ -824,61 +1168,6 @@ class OrbitPropagator:
             float(t_s),
             jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
         )
-
-    @staticmethod
-    def _accelerated_local_solar_time_epoch_terms(
-        env: dict,
-        jd_utc: float,
-        eop_path: str | None,
-    ) -> tuple[float, float]:
-        """Evaluate numerically equivalent sidereal terms for accelerated drag."""
-
-        if eop_path in (None, ""):
-            eop_path = None
-        dut1_s = env.get("dut1_s")
-        dat_s = env.get("dat_s")
-        tt_minus_utc_s = env.get("tt_minus_utc_s")
-        ddpsi_rad = float(env.get("ddpsi_rad", 0.0) or 0.0)
-        ddeps_rad = float(env.get("ddeps_rad", 0.0) or 0.0)
-        has_manual_eop = any(
-            value is not None for value in (dut1_s, dat_s, tt_minus_utc_s)
-        ) or ddpsi_rad != 0.0 or ddeps_rad != 0.0
-        if eop_path is None and not has_manual_eop:
-            return _local_solar_time_epoch_terms(
-                float(jd_utc),
-                None,
-                None,
-                None,
-                None,
-                ddpsi_rad,
-                ddeps_rad,
-                str(env.get("eop_extrapolation", "error") or "error"),
-            )
-        if eop_path is not None:
-            _xp_arcsec, _yp_arcsec, dut1_s, dat_s = _interp_eop(
-                float(jd_utc) - 2400000.5,
-                str(eop_path),
-                extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
-            )
-        else:
-            dut1_s = 0.0 if dut1_s is None else float(dut1_s)
-            if dat_s is None:
-                dat_s = (69.184 if tt_minus_utc_s is None else float(tt_minus_utc_s)) - 32.184
-            else:
-                dat_s = float(dat_s)
-        nutation_coefficients, nutation_terms = _load_nut80_table()
-        sidereal = _compiled_iau76_80_sidereal_time()(
-            float(jd_utc),
-            float(dut1_s),
-            float(dat_s),
-            ddpsi_rad,
-            ddeps_rad,
-            nutation_coefficients,
-            nutation_terms,
-        )
-        sun_eci = sun_position_eci_km_enhanced(float(jd_utc))
-        sun_ra = math.atan2(float(sun_eci[1]), float(sun_eci[0]))
-        return float(sidereal), float(sun_ra)
 
     @staticmethod
     def _compiled_rotation_key(env: dict, t_s: float, *, model_key: str, path_key: str) -> tuple:
@@ -972,6 +1261,7 @@ class OrbitPropagator:
             "nrlmsise00_f107a",
             "nrlmsise00_ap",
             "nrlmsise00_sw_path",
+            "nrlmsise00_lst_hr",
             "msis_sw_path",
             "ephemeris_mode",
             "de440_coeff_path",
@@ -994,6 +1284,22 @@ class OrbitPropagator:
             values.append(tuple(float(value) for value in ap_history))
         else:
             return None
+        # Solar geometry now follows the selected ephemeris and density
+        # rotation. File-backed endpoint inputs must be refreshed after a
+        # rewrite or deletion, just like their authoritative resource owners.
+        from sim.dynamics.orbit.de440_hpop import _resource_signature, default_de440_coeff_path
+
+        for key in (
+            "density_eop_path", "drag_eop_path", "spherical_harmonics_eop_path",
+            "de440_eop_path", "de440_coeff_path",
+        ):
+            path = env.get(key)
+            if path not in (None, ""):
+                values.append((key, _resource_signature(path)))
+        if str(env.get("ephemeris_mode", "analytic_enhanced")).lower() in {
+            "de440", "de440_hpop", "hpop_de440",
+        } and env.get("de440_coeff_path") in (None, ""):
+            values.append(("de440_coeff_path", _resource_signature(default_de440_coeff_path())))
         return tuple(values)
 
     def _try_propagate_compiled_builtin_rk4(
@@ -1015,7 +1321,9 @@ class OrbitPropagator:
             third_body_sun_plugin,
             third_body_moon_plugin,
         }
-        if not self.plugins or any(plugin not in supported for plugin in self.plugins):
+        if not self.plugins or any(
+            not any(plugin is known for known in supported) for plugin in self.plugins
+        ):
             return None
         if drag_plugin in self.plugins:
             try:
@@ -1053,6 +1361,10 @@ class OrbitPropagator:
             if str(env.get("geodetic_model", "")).strip().lower() != "wgs84":
                 return None
             if callable(env.get("nrlmsise00_density_callable")):
+                return None
+            if env.get("nrlmsise00_lst_hr") is not None and not math.isfinite(float(env["nrlmsise00_lst_hr"])):
+                # NaN is the packed "derive solar time" sentinel. Preserve
+                # the reference owner's handling of non-finite overrides.
                 return None
             try:
                 density_frame = normalize_frame_model(
@@ -1216,20 +1528,18 @@ class OrbitPropagator:
                 f107a, f107, _ap, ap_a = _solar_geomagnetic_inputs(dt_utc, stage_env)
                 if any(float(ap_a[index]) != 4.0 for index in range(2, 8)):
                     return None
-                jd_utc = datetime_to_julian_date(dt_utc)
-                eop_path = stage_env.get("density_eop_path", stage_env.get("drag_eop_path"))
-                sidereal, sun_ra = self._accelerated_local_solar_time_epoch_terms(
-                    stage_env,
-                    float(jd_utc),
-                    None if eop_path is None else str(eop_path),
+                lst_override = stage_env.get("nrlmsise00_lst_hr")
+                sun_lon = (
+                    _nrlmsise00_sun_longitude_rad(dt_utc, stage_time, stage_env, rotation=density_rotation)
+                    if lst_override is None else 0.0
                 )
                 self._compiled_atmosphere_inputs[stage_index] = (
                     float(dt_utc.timetuple().tm_yday),
                     float(dt_utc.hour * 3600.0 + dt_utc.minute * 60.0 + dt_utc.second + dt_utc.microsecond * 1.0e-6),
                     float(f107a),
                     float(f107),
-                    float(sidereal),
-                    float(sun_ra),
+                    float(sun_lon),
+                    math.nan if lst_override is None else float(lst_override),
                 )
             if needs_sun or needs_moon:
                 sun = stage_env.get("sun_pos_eci_km")
@@ -1379,13 +1689,13 @@ class OrbitPropagator:
                 [
                     (
                         0
-                        if eop_aerodynamics and plugin in {drag_plugin, lift_plugin}
+                        if eop_aerodynamics and (plugin is drag_plugin or plugin is lift_plugin)
                         else (
                             FORCE_SPHERICAL_HARMONICS
                             if plugin is spherical_harmonics_plugin
                             and compiled_harmonics is not None
                             and compiled_harmonics.all_normalized
-                            else plugin_code.get(plugin, 0)
+                            else next((code for known, code in plugin_code.items() if plugin is known), 0)
                         )
                     )
                     for plugin in self.plugins
@@ -1471,13 +1781,12 @@ class OrbitPropagator:
         )
 
         needs_time_env = any(
-            plugin
-            in {
-                srp_plugin,
-                third_body_sun_plugin,
-                third_body_moon_plugin,
-                third_body_planets_plugin,
-            }
+            any(
+                plugin is known for known in (
+                    srp_plugin, third_body_sun_plugin,
+                    third_body_moon_plugin, third_body_planets_plugin,
+                )
+            )
             for plugin in self.plugins
         )
         if needs_time_env:

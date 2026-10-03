@@ -2,7 +2,7 @@
 
 This document defines the current stabilization contract for rocket ascent
 guidance, navigation, control, actuation, dynamics, and telemetry in Orbital
-Engagement Lab. It is intentionally narrower than a full launch-vehicle
+Engineering Lab. It is intentionally narrower than a full launch-vehicle
 design specification. The goal is to make rocket behavior deterministic,
 reviewable, and testable enough to mature alongside the rest of the project.
 
@@ -125,6 +125,14 @@ Rocket ascent may terminate early for:
 - `earth_impact`,
 - `rocket_orbit_insertion`,
 - future explicit rocket failure reasons.
+
+Earth-impact termination uses the WGS-84 ellipsoidal surface when
+`use_wgs84_geodesy` is enabled and `earth_impact_radius_km` has its default
+value of 6378.137 km (the WGS-84 equatorial semi-major axis). Setting a
+different `earth_impact_radius_km` selects a spherical impact boundary at that
+radius, while WGS-84 geodesy remains active for navigation and altitude
+reporting. With `use_wgs84_geodesy` disabled, impact termination always uses
+the configured spherical radius.
 
 For early termination, returned result histories must include the post-step
 state at `termination_time_s`. Time histories must be strictly representative:

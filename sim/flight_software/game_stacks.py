@@ -16,7 +16,7 @@ from sim.gnc.attitude_v2 import (
     AttitudeReferenceMode,
     QuaternionTorqueController,
 )
-from sim.gnc.contracts import GuidanceReference, RequestedEffort, RequestedEffortKind
+from sim.gnc.contracts import EstimateValidity, GuidanceReference, RequestedEffort, RequestedEffortKind
 from sim.gnc.navigation_v2 import NavigationInitializationMode, OrbitNavigationSolution, OrbitNavigator
 from sim.gnc.orbit_v2 import TranslationAllocator, TranslationAllocatorConfig, TranslationAllocatorKind
 from sim.utils.quaternion import (
@@ -36,13 +36,12 @@ from .contracts import (
     FrameId,
     GroundCommandKind,
     GroundCommandPayload,
-    IdealTrackedObjectStateMeasurement,
     IdealWrenchCommand,
     InputKind,
-    MeasurementEvent,
     PacketId,
     PilotInputPayload,
     TelemetryField,
+    TimeValidity,
     ValidityInterval,
 )
 from .reference_stacks import ReferenceStackBase
@@ -138,6 +137,7 @@ class GamePilotReferenceStackConfig:
     emit_diagnostics: bool = True
     translation_reference_origin_state_eci_m_m_s: tuple[float, ...] | None = None
     operator_impulse_duration_s: float = 1.0e-3
+    measurement_stale_after_s: float = 30.0
 
     def __post_init__(self) -> None:
         if not self.satellite_id.strip():
@@ -161,6 +161,8 @@ class GamePilotReferenceStackConfig:
                 raise ValueError("translation reference origin state must contain six finite SI values")
         if not isfinite(float(self.operator_impulse_duration_s)) or self.operator_impulse_duration_s <= 0.0:
             raise ValueError("operator_impulse_duration_s must be finite and positive")
+        if not isfinite(float(self.measurement_stale_after_s)) or self.measurement_stale_after_s < 0.0:
+            raise ValueError("measurement_stale_after_s must be finite and nonnegative")
         identities = [(binding.actuator_id, binding.coordinate_id) for binding in self.effectors]
         if len(identities) != len(set(identities)):
             raise ValueError("aerodynamic effector identities must be unique")
@@ -215,6 +217,7 @@ class GamePilotReferenceFlightSoftwareStack(ReferenceStackBase):
             if self._live_navigation_fast_path
             else self._navigator.solution(batch.invocation_time)
         )
+        self._reference_state_eci_m_m_s = self._accepted_reference_state(solution, batch.invocation_time)
         dt_s = _elapsed_seconds(self._last_step_time, batch.invocation_time)
         self._last_step_time = batch.invocation_time
         commands: list[ActuatorCommand] = []
@@ -256,12 +259,13 @@ class GamePilotReferenceFlightSoftwareStack(ReferenceStackBase):
         for event in batch.events:
             if event.packet_id in self._seen_inputs:
                 continue
-            if event.kind is InputKind.MEASUREMENT and isinstance(event.payload, MeasurementEvent):
-                tracked = event.payload.payload
-                if isinstance(tracked, IdealTrackedObjectStateMeasurement):
-                    self._reference_state_eci_m_m_s = (*tracked.position_m, *tracked.velocity_m_s)
-                continue
             if event.kind not in (InputKind.PILOT_INPUT, InputKind.GROUND_COMMAND):
+                continue
+            if (
+                event.kind is InputKind.GROUND_COMMAND
+                and isinstance(event.payload, GroundCommandPayload)
+                and self._action_command_time_is_invalid(event.payload, batch.invocation_time)
+            ):
                 continue
             self._seen_inputs.add(event.packet_id)
             if event.kind is InputKind.PILOT_INPUT and isinstance(event.payload, PilotInputPayload):
@@ -273,7 +277,49 @@ class GamePilotReferenceFlightSoftwareStack(ReferenceStackBase):
             elif isinstance(event.payload, GroundCommandPayload):
                 self._ingest_ground_command(event.payload, batch.invocation_time)
 
+    def _accepted_reference_state(
+        self,
+        solution: OrbitNavigationSolution,
+        now: ClockTag,
+    ) -> tuple[float, ...] | None:
+        prefix = "OEL/RIC/"
+        frame_name = self.config.relative_frame.name
+        if not frame_name.startswith(prefix):
+            return None
+        target_id = frame_name[len(prefix) :]
+        if not target_id:
+            return None
+        track = solution.relative_track(target_id)
+        if (
+            track is None
+            or track.validity is not EstimateValidity.VALID
+            or track.frame != self.config.relative_frame
+            or track.epoch.validity is not TimeValidity.VALID
+            or now.validity is TimeValidity.INVALID
+            or not _same_clock_domain(track.epoch, now)
+            or track.epoch.ticks > now.ticks
+            or (now.ticks - track.epoch.ticks) * track.epoch.tick_period_ns
+            > float(self.config.measurement_stale_after_s) * 1_000_000_000.0
+            or track.chief_position_eci_m is None
+            or track.chief_velocity_eci_m_s is None
+        ):
+            return None
+        return (*track.chief_position_eci_m, *track.chief_velocity_eci_m_s)
+
+    @staticmethod
+    def _action_command_time_is_invalid(command: GroundCommandPayload, now: ClockTag) -> bool:
+        if command.kind is not GroundCommandKind.ACTION_REQUEST:
+            return False
+        if now.validity is TimeValidity.INVALID:
+            return True
+        execute_at = command.execute_at
+        return execute_at is not None and (
+            execute_at.validity is TimeValidity.INVALID or not _same_clock_domain(now, execute_at)
+        )
+
     def _ingest_ground_command(self, command: GroundCommandPayload, now: ClockTag) -> None:
+        if self._action_command_time_is_invalid(command, now):
+            return
         if command.execute_at is not None and _signed_elapsed_seconds(now, command.execute_at) > 0.0:
             return
         self._last_ground_command_id = command.command_id
@@ -379,15 +425,7 @@ class GamePilotReferenceFlightSoftwareStack(ReferenceStackBase):
             ]
         )
         if dt_s > 0.0 and np.linalg.norm(body_rate) > 0.0:
-            self._desired_attitude = tuple(
-                float(value)
-                for value in normalize_quaternion(
-                    quaternion_multiply(
-                        np.asarray(self._desired_attitude),
-                        quaternion_delta_from_body_rate(body_rate, dt_s),
-                    )
-                )
-            )
+            self._desired_attitude = self._advance_desired_attitude(body_rate, dt_s)
         if self._live_command_fast_path:
             desired = np.asarray(self._desired_attitude, dtype=float)
             if (
@@ -426,6 +464,11 @@ class GamePilotReferenceFlightSoftwareStack(ReferenceStackBase):
             attitude,
             command_id=self._next_command_id(),
         ).proposed_commands
+
+    def _advance_desired_attitude(self, body_rate: np.ndarray, dt_s: float) -> tuple[float, ...]:
+        return tuple(float(value) for value in normalize_quaternion(quaternion_multiply(
+            np.asarray(self._desired_attitude), quaternion_delta_from_body_rate(body_rate, dt_s),
+        )))
 
     def _translation_commands(
         self,
@@ -628,14 +671,18 @@ def _elapsed_seconds(start: ClockTag | None, end: ClockTag) -> float:
 
 
 def _signed_elapsed_seconds(start: ClockTag, end: ClockTag) -> float:
-    if (start.clock_id, start.tick_period_ns, start.scale, start.reset_counter) != (
-        end.clock_id,
-        end.tick_period_ns,
-        end.scale,
-        end.reset_counter,
-    ):
+    if not _same_clock_domain(start, end):
         raise ValueError("game stack clocks must share a domain")
     return (end.ticks - start.ticks) * start.tick_period_ns * 1.0e-9
+
+
+def _same_clock_domain(first: ClockTag, second: ClockTag) -> bool:
+    return (first.clock_id, first.tick_period_ns, first.scale, first.reset_counter) == (
+        second.clock_id,
+        second.tick_period_ns,
+        second.scale,
+        second.reset_counter,
+    )
 
 
 def _add_ticks(tag: ClockTag, ticks: int) -> ClockTag:

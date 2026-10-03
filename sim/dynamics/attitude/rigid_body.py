@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 import numpy as np
 
 from sim.acceleration.settings import acceleration_enabled_from_mode
+from sim.numeric_backend import normalize_numeric_backend
 from sim.utils.quaternion import (
     normalize_quaternion,
     omega_matrix,
@@ -112,6 +113,8 @@ def guard_attitude_state_output(
 
 
 def _add_guardrail_counts(counts: np.ndarray) -> None:
+    if isinstance(counts, (list, tuple)) and len(counts) >= 6 and not any(counts[:6]):
+        return
     if isinstance(counts, np.ndarray) and counts.ndim == 1 and counts.size >= 6:
         if (
             counts[0] == 0
@@ -140,7 +143,21 @@ def rigid_body_derivatives(
     omega_body_rad_s: np.ndarray,
     inertia_kg_m2: np.ndarray,
     torque_body_nm: np.ndarray,
+    numeric_backend: str = "rust",
 ) -> tuple[np.ndarray, np.ndarray]:
+    backend = normalize_numeric_backend(numeric_backend, error_message="numeric_backend must be 'python' or 'rust'.")
+    if backend == "rust":
+        from sim.rust_attitude_backend import rigid_body_derivatives as rust_derivatives
+
+        q_dot, omega_dot, counts = rust_derivatives(
+            quat_bn,
+            omega_body_rad_s,
+            inertia_kg_m2,
+            torque_body_nm,
+        )
+        _add_guardrail_counts(counts)
+        return q_dot, omega_dot
+
     q_raw = np.asarray(quat_bn, dtype=float).reshape(-1)
     if q_raw.size != 4 or not np.all(np.isfinite(q_raw)) or float(np.linalg.norm(q_raw)) <= 0.0:
         _ATTITUDE_GUARDRAIL_STATS.non_finite_input_events += 1
@@ -195,8 +212,15 @@ def propagate_attitude_euler(
     inertia_kg_m2: np.ndarray,
     torque_body_nm: np.ndarray,
     dt_s: float,
+    numeric_backend: str = "rust",
 ) -> tuple[np.ndarray, np.ndarray]:
-    q_dot, omega_dot = rigid_body_derivatives(quat_bn, omega_body_rad_s, inertia_kg_m2, torque_body_nm)
+    q_dot, omega_dot = rigid_body_derivatives(
+        quat_bn,
+        omega_body_rad_s,
+        inertia_kg_m2,
+        torque_body_nm,
+        numeric_backend=numeric_backend,
+    )
     dt = float(max(dt_s, 0.0))
     q_candidate = np.array(quat_bn, dtype=float).reshape(4) + dt * q_dot
     if not np.all(np.isfinite(q_candidate)) or float(np.linalg.norm(q_candidate)) <= 0.0:
@@ -217,7 +241,22 @@ def propagate_attitude_exponential_map(
     torque_body_nm: np.ndarray,
     dt_s: float,
     acceleration_mode: str = "off",
+    numeric_backend: str = "rust",
 ) -> tuple[np.ndarray, np.ndarray]:
+    backend = normalize_numeric_backend(numeric_backend, error_message="numeric_backend must be 'python' or 'rust'.")
+    if backend == "rust":
+        from sim.rust_attitude_backend import propagate_attitude_exponential_map as rust_propagate
+
+        q_next, omega_next, counts = rust_propagate(
+            quat_bn,
+            omega_body_rad_s,
+            inertia_kg_m2,
+            torque_body_nm,
+            dt_s,
+        )
+        _add_guardrail_counts(counts)
+        return q_next, omega_next
+
     global propagate_attitude_exponential_map_kernel
     if acceleration_enabled_from_mode(acceleration_mode):
         if propagate_attitude_exponential_map_kernel is None:
@@ -237,7 +276,13 @@ def propagate_attitude_exponential_map(
         return q_next, omega_next
 
     # Integrate angular-rate dynamics with first-order step.
-    _, omega_dot = rigid_body_derivatives(quat_bn, omega_body_rad_s, inertia_kg_m2, torque_body_nm)
+    _, omega_dot = rigid_body_derivatives(
+        quat_bn,
+        omega_body_rad_s,
+        inertia_kg_m2,
+        torque_body_nm,
+        numeric_backend=backend,
+    )
     dt = float(max(dt_s, 0.0))
     omega_now = np.asarray(omega_body_rad_s, dtype=float).reshape(3)
     omega_next = omega_now + dt * omega_dot

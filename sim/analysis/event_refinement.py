@@ -7,6 +7,8 @@ from typing import Callable
 
 import numpy as np
 
+from sim.numeric_backend import normalize_numeric_backend
+
 
 @dataclass(frozen=True)
 class RefinedTransition:
@@ -64,8 +66,25 @@ def refine_availability_transitions(
     evaluator_at_time: AvailabilityEvaluator | None = None,
     time_tolerance_s: float | None = None,
     max_iterations: int | None = None,
+    numeric_backend: str = "rust",
 ) -> tuple[RefinedTransition, ...]:
     """Refine sampled boolean changes without inventing an interpolation model."""
+
+    backend = normalize_numeric_backend(numeric_backend)
+    if backend == "rust":
+        from sim.rust_coverage_backend import (
+            refine_availability_transitions as rust_refine_availability_transitions,
+        )
+
+        raw = rust_refine_availability_transitions(
+            times_s,
+            available,
+            reasons,
+            evaluator_at_time=evaluator_at_time,
+            time_tolerance_s=time_tolerance_s,
+            max_iterations=max_iterations,
+        )
+        return tuple(RefinedTransition(*value) for value in raw)
 
     times, mask, reason_tuple = _validated_samples(times_s, available, reasons)
     if evaluator_at_time is None:

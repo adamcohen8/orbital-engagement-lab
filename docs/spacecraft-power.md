@@ -21,9 +21,10 @@ resource state into run evidence. See
 
 The example solves the existing two-asset public schedule, selects SAT-A's
 activities, generates a two-body ECI history spanning eclipse, assesses power,
-authoritatively replays the result, and binds its summary into a verified study
-lifecycle bundle. The terminal summary distinguishes power recomputation from
-lifecycle identity replay.
+and retains both complete domain packets in a verified two-step study. The
+terminal summary distinguishes authoritative domain replay from lifecycle
+identity replay. To use your own completed schedule and orbit history, see the
+[schedule-coupled study workflow](study-lifecycle.md#build-a-schedule-coupled-power-study).
 
 ## Analyze your own completed run
 
@@ -97,3 +98,18 @@ fidelity thermal/EPS networks, degradation, managed environmental data,
 uncertainty, optimization and campaign trades, customer spacecraft models,
 dashboards, and qualification evidence remain outside this workflow. Neither
 workflow grants flight or operational authority.
+
+## Rust analytic Sun
+
+Top-level `numeric_backend: "rust"` selects the existing native analytic Sun
+equations through a resource-bound environment context (wheel 0.17.0 or newer).
+Both analytic models retain the Python-selected ephemeris model and NUT80
+resources. Missing symbols fail closed. Rust is the default. Python owns eclipse
+discovery/refinement, incidence, load and battery policy, accounting, evidence,
+and replay. Rust selection persists in normalized problems and their identity.
+Small floating point differences can change hashes without changing decisions.
+
+Each assessment retains at most 128 exact Sun epochs and 4096 geometry epochs.
+Geometry reuse requires an operation-local copied built-in history. Custom state
+evaluators remain uncached and are invoked in the original order. Sun caching
+contains only time-dependent ephemeris values, never callback state.

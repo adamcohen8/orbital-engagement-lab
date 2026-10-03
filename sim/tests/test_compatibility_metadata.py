@@ -89,6 +89,9 @@ def test_direct_dependencies_and_supported_extras_are_bounded() -> None:
 
     assert any(item.startswith("pygame") and "python_version < '3.14'" in item for item in extras["game"])
     assert any(item.startswith("pygame-ce") and "python_version >= '3.14'" in item for item in extras["game"])
+    for profile in ("game", "cross-platform", "full"):
+        assert any(item.startswith("oel-rust-game>=") for item in extras[profile])
+        assert any(item.startswith("oel-rust-orbit>=") for item in extras[profile])
     assert any(
         item.startswith("numba") and "platform_system != 'Darwin'" in item and "platform_machine != 'x86_64'" in item
         for item in extras["cross-platform"]

@@ -15,6 +15,7 @@ from sim.config.scenario.primitives import (
     _reject_unknown_fields,
     _reject_unsupported_aliases,
 )
+from sim.numeric_backend import normalize_numeric_backend
 from sim.security import ConfigPathPolicy
 
 __all__ = [
@@ -45,10 +46,16 @@ def _validate_orbital_analysis_section(section: dict[str, Any]) -> None:
         "max_cell_time_comparisons", "transition_time_tolerance_s", "transition_max_iterations",
         "max_transition_refinement_evaluations",
         "include_cell_csv", "include_fraction_plot",
+        "numeric_backend",
     }
     for index, raw in enumerate(list(section.get("coverage", []) or [])):
         path = f"outputs.orbital_analysis.coverage[{index}]"
         _reject_unknown_fields(raw, path, coverage_allowed)
+        if "numeric_backend" in raw:
+            backend = normalize_numeric_backend(raw["numeric_backend"], field_name=f"{path}.numeric_backend")
+            if backend not in {"python", "rust"}:
+                raise ValueError(f"{path}.numeric_backend must be python or rust.")
+            raw["numeric_backend"] = backend
         for field_name in ("analysis_id", "source_object_id", "sensor_id", "order", "half_angle_deg"):
             if raw.get(field_name) in (None, ""):
                 raise ValueError(f"{path}.{field_name} is required.")
@@ -103,10 +110,16 @@ def _validate_orbital_analysis_section(section: dict[str, Any]) -> None:
         "required_eb_n0_db", "tx_line_loss_db", "rx_line_loss_db", "misc_loss_db", "max_range_km",
         "min_fixed_site_elevation_deg", "transition_time_tolerance_s", "transition_max_iterations",
         "include_margin_plot",
+        "numeric_backend",
     }
     for index, raw in enumerate(list(section.get("directed_links", []) or [])):
         path = f"outputs.orbital_analysis.directed_links[{index}]"
         _reject_unknown_fields(raw, path, link_allowed)
+        if "numeric_backend" in raw:
+            backend = normalize_numeric_backend(raw["numeric_backend"], field_name=f"{path}.numeric_backend")
+            if backend not in {"python", "rust"}:
+                raise ValueError(f"{path}.numeric_backend must be python or rust.")
+            raw["numeric_backend"] = backend
         required = (
             "analysis_id", "link_id", "tx_terminal", "rx_terminal",
             "carrier_frequency_hz", "tx_power_w", "data_rate_bps", "system_noise_temperature_k", "required_eb_n0_db",

@@ -146,18 +146,39 @@ def run_self_play_training(
             seed=int(trainer_cfg.seed + iteration),
         )
 
-        if trainer_cfg.update_mode == "simultaneous":
-            for agent_id in agent_ids:
-                direction = policies_by_agent[agent_id].mutate(rng, sigma=float(trainer_cfg.mutation_sigma))
-                reward_sum = float(stats.get(f"{agent_id}_reward_sum", 0.0))
-                policies_by_agent[agent_id].update(
-                    direction, scale=np.sign(reward_sum) * float(trainer_cfg.learning_rate)
-                )
-        else:
-            assert learner is not None
-            direction = policies_by_agent[learner].mutate(rng, sigma=float(trainer_cfg.mutation_sigma))
-            reward_sum = float(stats.get(f"{learner}_reward_sum", 0.0))
-            policies_by_agent[learner].update(direction, scale=np.sign(reward_sum) * float(trainer_cfg.learning_rate))
+        # A reward sign cannot identify whether an independently sampled
+        # mutation improves policy performance.  Evaluate each proposed
+        # direction against the current policy with the same episode seed and
+        # fixed opponents, then apply only an improving mutation.
+        learners = agent_ids if trainer_cfg.update_mode == "simultaneous" else (learner,)
+        iteration_policies = {key: policy.clone() for key, policy in policies_by_agent.items()}
+        accepted_updates = []
+        for agent_id in learners:
+            assert agent_id is not None
+            baseline_policies = (
+                dict(iteration_policies)
+                if trainer_cfg.update_mode == "simultaneous"
+                else {**opponents, agent_id: policies_by_agent[agent_id]}
+            )
+            _, baseline = evaluate_self_play_policies(
+                env,
+                policies_by_agent=baseline_policies,
+                horizon=int(trainer_cfg.rollout_horizon),
+                seed=int(trainer_cfg.seed + iteration),
+            )
+            direction = policies_by_agent[agent_id].mutate(rng, sigma=float(trainer_cfg.mutation_sigma))
+            candidate = policies_by_agent[agent_id].clone()
+            candidate.update(direction, scale=float(trainer_cfg.learning_rate))
+            _, proposed = evaluate_self_play_policies(
+                env,
+                policies_by_agent={**baseline_policies, agent_id: candidate},
+                horizon=int(trainer_cfg.rollout_horizon),
+                seed=int(trainer_cfg.seed + iteration),
+            )
+            if float(proposed[f"{agent_id}_reward_sum"]) > float(baseline[f"{agent_id}_reward_sum"]):
+                accepted_updates.append((agent_id, direction))
+        for agent_id, direction in accepted_updates:
+            policies_by_agent[agent_id].update(direction, scale=float(trainer_cfg.learning_rate))
 
         if int(trainer_cfg.snapshot_interval) > 0 and ((iteration + 1) % int(trainer_cfg.snapshot_interval) == 0):
             for agent_id in agent_ids:

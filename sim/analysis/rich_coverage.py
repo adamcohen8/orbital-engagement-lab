@@ -35,6 +35,7 @@ from sim.analysis.sensor_footprint_geometry import (
     intersect_rays_wgs84,
 )
 from sim.dynamics.orbit.frames import FrameContext, eci_to_ecef_rotation_context
+from sim.numeric_backend import normalize_numeric_backend
 from sim.utils.geodesy import WGS84_A_KM, WGS84_B_KM, ecef_to_geodetic_deg_km
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
@@ -65,6 +66,7 @@ class RichCoverageConfig:
     chunk_size: int = 8192
     max_working_memory_bytes: int = 512 * 1024 * 1024
     max_cell_time_comparisons: int = 300_000_000
+    numeric_backend: str = "rust"
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -125,6 +127,8 @@ class RichCoverageConfig:
                     raise ValueError(f"{field_name} must be a positive integer.")
                 raise ValueError(f"{field_name} must be an integer within [{minimum}, {maximum}].")
             object.__setattr__(self, field_name, int(numeric))
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="numeric_backend must be python or rust.")
+        object.__setattr__(self, "numeric_backend", backend)
 
 
 @dataclass(frozen=True)
@@ -187,6 +191,8 @@ def estimate_rich_coverage_resources(
     chunk_boolean_bytes = chunk_cells * samples
     chunk_geometry_bytes = chunk_cells * 20 * 8
     chunk_gate_bytes = chunk_cells * 8
+    # A native tile holds one byte per cell/sample reason alongside the mask.
+    chunk_tile_reason_bytes = chunk_boolean_bytes if config.numeric_backend == "rust" else 0
     full_metric_bytes = npix * (8 * 8 + 2)
     input_state_bytes = samples * (3 + 4 + 3 + 9) * 8
     boundary_bytes = samples * boundary_rays * (2 * 8 + 1)
@@ -197,6 +203,7 @@ def estimate_rich_coverage_resources(
         chunk_boolean_bytes
         + chunk_geometry_bytes
         + chunk_gate_bytes
+        + chunk_tile_reason_bytes
         + full_metric_bytes
         + input_state_bytes
         + boundary_bytes
@@ -304,6 +311,7 @@ def _footprint_boundary(
     subpoint_latitude: np.ndarray,
     subpoint_longitude: np.ndarray,
     boresight_off_nadir: np.ndarray,
+    numeric_backend: str = "rust",
 ) -> FootprintBoundaryEvidence:
     rays_sensor = fov_boundary_rays_sensor(
         config.pattern,
@@ -320,11 +328,20 @@ def _footprint_boundary(
         intersections = intersect_rays_wgs84(
             positions_ecef[sample_index],
             directions_ecef,
+            # Ray arithmetic remains the product-hash reference owner.
+            numeric_backend="python",
         )
         hits[sample_index] = intersections.hit
-        for ray_index in np.flatnonzero(intersections.hit):
-            latitude, longitude, _ = ecef_to_geodetic_deg_km(
-                intersections.point_ecef_km[ray_index]
+        indices = np.flatnonzero(intersections.hit)
+        geodetic = None
+        if numeric_backend == "rust":
+            from sim.rust_environment_backend import try_geodetic_batch
+
+            geodetic = try_geodetic_batch(intersections.point_ecef_km[indices])
+        for row_index, ray_index in enumerate(indices):
+            latitude, longitude, _ = (
+                geodetic[row_index] if geodetic is not None
+                else ecef_to_geodetic_deg_km(intersections.point_ecef_km[ray_index])
             )
             latitudes[sample_index, ray_index] = latitude
             longitudes[sample_index, ray_index] = (longitude + 180.0) % 360.0 - 180.0
@@ -584,6 +601,8 @@ def evaluate_rich_coverage(
         subpoint_latitude,
         subpoint_longitude,
         boresight_off_nadir,
+        # Native geodesy preserves reference rounding; rays retain their owner.
+        numeric_backend=config.numeric_backend,
     )
 
     npix = healpix_npix(config.order)
@@ -599,26 +618,63 @@ def evaluate_rich_coverage(
         latitude_chunks.append(np.rad2deg(centers.geodetic_latitude_rad))
         longitude_chunks.append(np.rad2deg(centers.longitude_rad))
         mask = np.zeros((times.size, cells.size), dtype=bool)
-        for sample_index in range(times.size):
-            geometry = evaluate_rich_surface_targets_ecef(
-                observer_ecef_km=positions_ecef[sample_index],
-                target_ecef_km=centers.ecef_km,
-                target_outward_normal_ecef=centers.outward_normal_ecef,
-                dcm_sensor_from_ecef=sensor_from_ecef[sample_index],
-                pattern=config.pattern,
-                constraints=config.constraints,
-                max_range_km=config.max_range_km,
-                sun_ecef_km=None if sun_ecef is None else sun_ecef[sample_index],
-                angular_tolerance_rad=_ANGULAR_TOLERANCE_RAD,
-                range_tolerance_km=_RANGE_TOLERANCE_KM,
+        tile_reasons = None
+        if config.numeric_backend == "rust":
+            from sim.rust_coverage_backend import try_rich_reasons_tile
+
+            tile_reasons = try_rich_reasons_tile(
+                positions_ecef, centers.ecef_km, centers.outward_normal_ecef,
+                sensor_from_ecef, sun_ecef, config.pattern.kind,
+                config.pattern.x_half_angle_rad, config.pattern.y_half_angle_rad,
+                config.max_range_km, config.constraints.maximum_target_off_nadir_rad,
+                config.constraints.maximum_incidence_rad,
+                config.constraints.minimum_sun_elevation_rad,
+                config.constraints.maximum_sun_elevation_rad,
+                _ANGULAR_TOLERANCE_RAD, _RANGE_TOLERANCE_KM,
             )
-            mask[sample_index] = geometry.available
+        for sample_index in range(times.size):
+            if tile_reasons is not None:
+                reasons = tile_reasons[sample_index]
+            elif config.numeric_backend == "rust":
+                from sim.rust_coverage_backend import rich_cell_reasons
+
+                reasons = rich_cell_reasons(
+                    positions_ecef[sample_index], centers.ecef_km, centers.outward_normal_ecef,
+                    sensor_from_ecef[sample_index], None if sun_ecef is None else sun_ecef[sample_index],
+                    config.pattern.kind, config.pattern.x_half_angle_rad, config.pattern.y_half_angle_rad,
+                    config.max_range_km, config.constraints.maximum_target_off_nadir_rad,
+                    config.constraints.maximum_incidence_rad, config.constraints.minimum_sun_elevation_rad,
+                    config.constraints.maximum_sun_elevation_rad, _ANGULAR_TOLERANCE_RAD,
+                    _RANGE_TOLERANCE_KM,
+                )
+            else:
+                geometry = evaluate_rich_surface_targets_ecef(
+                    observer_ecef_km=positions_ecef[sample_index],
+                    target_ecef_km=centers.ecef_km,
+                    target_outward_normal_ecef=centers.outward_normal_ecef,
+                    dcm_sensor_from_ecef=sensor_from_ecef[sample_index],
+                    pattern=config.pattern,
+                    constraints=config.constraints,
+                    max_range_km=config.max_range_km,
+                    sun_ecef_km=None if sun_ecef is None else sun_ecef[sample_index],
+                    angular_tolerance_rad=_ANGULAR_TOLERANCE_RAD,
+                    range_tolerance_km=_RANGE_TOLERANCE_KM,
+                )
+                reasons = geometry.primary_reason_code
+            mask[sample_index] = reasons == 0
             reason_count[sample_index] += np.bincount(
-                geometry.primary_reason_code,
+                reasons,
                 minlength=len(PRIMARY_REASON_NAMES),
             )
         covered_count += np.count_nonzero(mask, axis=1)
-        metric_chunks.append(summarize_sampled_coverage_mask(mask, times, cell_indices=cells))
+        metric_chunks.append(
+            summarize_sampled_coverage_mask(
+                mask,
+                times,
+                cell_indices=cells,
+                numeric_backend=config.numeric_backend,
+            )
+        )
 
     metrics = _combine_chunk_metrics(metric_chunks)
     frame_metadata = frame_context.metadata(sample_t_s=float(times[0]))

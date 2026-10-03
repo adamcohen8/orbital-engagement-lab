@@ -25,6 +25,7 @@ from sim.actuators import (
 )
 from sim.actuators.presets import resolve_actuator_specs_from_satellite_specs
 from sim.digital_twin.mass_properties import resolve_inertia_kg_m2
+from sim.numeric_backend import normalize_numeric_backend
 from sim.presets.thrusters import (
     BASIC_CHEMICAL_BOTTOM_Z,
     resolve_thruster_max_thrust_n_from_specs,
@@ -136,6 +137,9 @@ def _build_rcs_cluster(raw: Any) -> RcsClusterLimits | None:
     if not thrusters:
         return None
     return RcsClusterLimits(
+        numeric_backend=normalize_numeric_backend(
+            raw.get("numeric_backend", "rust"), field_name="rcs_cluster.numeric_backend"
+        ),
         thrusters=tuple(thrusters),
         allocation_mode=str(raw.get("allocation_mode", "force_torque")),
         pulse_quantum_s=float(raw.get("pulse_quantum_s", 0.0)),
@@ -186,6 +190,9 @@ def _build_reaction_wheels(raw: Any) -> ReactionWheelLimits | None:
     if not isinstance(raw, dict) or not _strict_enabled(raw, "reaction_wheels"):
         return None
     return ReactionWheelLimits(
+        numeric_backend=normalize_numeric_backend(
+            raw.get("numeric_backend", "rust"), field_name="reaction_wheels.numeric_backend"
+        ),
         max_torque_nm=np.array(raw.get("max_torque_nm", [0.05, 0.05, 0.05]), dtype=float).reshape(-1),
         max_momentum_nms=np.array(raw.get("max_momentum_nms", [0.2, 0.2, 0.2]), dtype=float).reshape(-1),
         wheel_axes_body=_array_or_none(raw.get("wheel_axes_body")),

@@ -19,6 +19,7 @@ from sim.flight_software.contracts import (
     ActuatorTelemetryPayload,
     ClockTag,
     CommandDisposition,
+    DataValidity,
     GroundCommandPayload,
     InputEvent,
     InputKind,
@@ -26,6 +27,7 @@ from sim.flight_software.contracts import (
     ModeledFaultIndicationPayload,
     PacketId,
     TelemetryField,
+    TimeValidity,
     VehicleResourceMeasurement,
 )
 from sim.gnc.navigation_v2 import OrbitNavigationSolution, RelativeStateEstimateSI
@@ -40,6 +42,20 @@ def elapsed_seconds(start: ClockTag, end: ClockTag) -> float:
     ):
         raise ValueError("onboard service clocks must share a domain")
     return (end.ticks - start.ticks) * start.tick_period_ns * 1.0e-9
+
+
+def _same_clock_domain(left: ClockTag, right: ClockTag) -> bool:
+    return (
+        left.clock_id,
+        left.tick_period_ns,
+        left.scale,
+        left.reset_counter,
+    ) == (
+        right.clock_id,
+        right.tick_period_ns,
+        right.scale,
+        right.reset_counter,
+    )
 
 
 class HealthState(str, Enum):
@@ -270,26 +286,45 @@ class ResourceMonitor:
     def __init__(self, limits: ResourceLimits | None = None) -> None:
         self.limits = limits if limits is not None else ResourceLimits()
         self._values: dict[str, float] = {}
+        self._sample_epochs: dict[str, ClockTag] = {}
+        self._epochless_fields: set[str] = set()
         self._propellant_measured = False
 
     def update(self, events: tuple[InputEvent, ...], *, mass_kg: float | None = None, dry_mass_kg: float = 0.0) -> ResourceState:
         for event in events:
             payload = event.payload
+            if (
+                event.quality.validity is not DataValidity.VALID
+                or event.source_time.validity is not TimeValidity.VALID
+                or event.delivery_time.validity is not TimeValidity.VALID
+            ):
+                continue
             if event.kind is InputKind.MEASUREMENT and isinstance(payload, MeasurementEvent) and isinstance(
                 payload.payload, VehicleResourceMeasurement
             ):
+                sample_time = payload.sample_time
+                if not self._event_sample_time_is_usable(sample_time, event.delivery_time):
+                    continue
                 for name in self._FIELD_NAMES:
                     value = getattr(payload.payload, name)
-                    if value is not None:
-                        self._values[name] = float(value)
-                        if name == "propellant_kg":
-                            self._propellant_measured = True
+                    if value is not None and self._field_sample_is_chronological(
+                        name, sample_time, event.delivery_time
+                    ):
+                        self._accept_field(name, float(value), sample_time)
             elif event.kind is InputKind.ACTUATOR_TELEMETRY and isinstance(payload, ActuatorTelemetryPayload):
+                sample_time = event.source_time
+                if not self._event_sample_time_is_usable(sample_time, event.delivery_time):
+                    continue
                 for field in payload.fields:
-                    if field.name in self._FIELD_NAMES and isinstance(field.value, (int, float)) and isfinite(float(field.value)):
-                        self._values[field.name] = float(field.value)
-                        if field.name == "propellant_kg":
-                            self._propellant_measured = True
+                    if (
+                        field.name in self._FIELD_NAMES
+                        and isinstance(field.value, (int, float))
+                        and isfinite(float(field.value))
+                        and self._field_sample_is_chronological(
+                            field.name, sample_time, event.delivery_time
+                        )
+                    ):
+                        self._accept_field(field.name, float(field.value), sample_time)
         if not self._propellant_measured and mass_kg is not None:
             self._values["propellant_kg"] = max(float(mass_kg) - float(dry_mass_kg), 0.0)
         state = ResourceState(**{name: self._values.get(name) for name in self._FIELD_NAMES})
@@ -317,6 +352,9 @@ class ResourceMonitor:
     def snapshot_state(self) -> dict[str, object]:
         return {
             "values": dict(sorted(self._values.items())),
+            "sample_epochs": {
+                name: _clock_state(epoch) for name, epoch in sorted(self._sample_epochs.items())
+            },
             "propellant_measured": self._propellant_measured,
         }
 
@@ -324,11 +362,55 @@ class ResourceMonitor:
         values = {str(k): float(v) for k, v in dict(state.get("values", {})).items()}
         if any(name not in self._FIELD_NAMES or not isfinite(value) for name, value in values.items()):
             raise ValueError("resource snapshot contains invalid fields")
-        self._values = values
+        raw_epochs = dict(state.get("sample_epochs", {}))
+        sample_epochs: dict[str, ClockTag] = {}
+        for raw_name, raw_epoch in raw_epochs.items():
+            name = str(raw_name)
+            epoch = _clock_from_state(raw_epoch)
+            if (
+                name not in self._FIELD_NAMES
+                or name not in values
+                or epoch is None
+                or epoch.validity is not TimeValidity.VALID
+            ):
+                raise ValueError("resource snapshot contains invalid sample epochs")
+            sample_epochs[name] = epoch
         measured = state.get("propellant_measured", False)
         if not isinstance(measured, bool):
             raise ValueError("resource snapshot propellant source is invalid")
+        self._values = values
+        self._sample_epochs = sample_epochs
+        self._epochless_fields = set(values).difference(sample_epochs)
         self._propellant_measured = measured
+
+    def _accept_field(self, name: str, value: float, sample_time: ClockTag) -> None:
+        self._values[name] = value
+        self._sample_epochs[name] = sample_time
+        self._epochless_fields.discard(name)
+        if name == "propellant_kg":
+            self._propellant_measured = True
+
+    @staticmethod
+    def _event_sample_time_is_usable(sample_time: ClockTag, delivery_time: ClockTag) -> bool:
+        return (
+            sample_time.validity is TimeValidity.VALID
+            and _same_clock_domain(sample_time, delivery_time)
+            and sample_time.ticks <= delivery_time.ticks
+        )
+
+    def _field_sample_is_chronological(
+        self,
+        name: str,
+        sample_time: ClockTag,
+        delivery_time: ClockTag,
+    ) -> bool:
+        previous = self._sample_epochs.get(name)
+        if previous is None:
+            # Old snapshots did not retain measurement epochs. Until a field
+            # gets a new epoch, only a sample delivered at its own timestamp
+            # can safely replace that restored value.
+            return name not in self._epochless_fields or sample_time.ticks == delivery_time.ticks
+        return _same_clock_domain(previous, sample_time) and sample_time.ticks >= previous.ticks
 
 
 class OnboardCommandService:
@@ -337,22 +419,39 @@ class OnboardCommandService:
     def __init__(self) -> None:
         self._pending: dict[str, GroundCommandPayload] = {}
         self._completed: set[str] = set()
+        self._rejected: set[str] = set()
 
     def ingest(self, now: ClockTag, events: tuple[InputEvent, ...]) -> tuple[GroundCommandPayload, ...]:
+        if now.validity is TimeValidity.INVALID:
+            raise ValueError("stored-command service requires a valid current clock")
         due: list[GroundCommandPayload] = []
         for event in events:
             if event.kind is not InputKind.GROUND_COMMAND or not isinstance(event.payload, GroundCommandPayload):
                 continue
             command = event.payload
-            if command.command_id in self._completed or command.command_id in self._pending:
+            if (
+                command.command_id in self._completed
+                or command.command_id in self._pending
+                or command.command_id in self._rejected
+            ):
                 continue
-            if command.execute_at is None or elapsed_seconds(now, command.execute_at) <= 0.0:
+            if command.execute_at is None:
+                due.append(command)
+                self._completed.add(command.command_id)
+            elif command.execute_at.validity is TimeValidity.INVALID or not _same_clock_domain(now, command.execute_at):
+                self._rejected.add(command.command_id)
+            elif elapsed_seconds(now, command.execute_at) <= 0.0:
                 due.append(command)
                 self._completed.add(command.command_id)
             else:
                 self._pending[command.command_id] = command
         for command_id, command in sorted(tuple(self._pending.items())):
-            if command.execute_at is not None and elapsed_seconds(now, command.execute_at) <= 0.0:
+            if command.execute_at is not None and (
+                command.execute_at.validity is TimeValidity.INVALID or not _same_clock_domain(now, command.execute_at)
+            ):
+                self._rejected.add(command_id)
+                del self._pending[command_id]
+            elif command.execute_at is not None and elapsed_seconds(now, command.execute_at) <= 0.0:
                 due.append(command)
                 self._completed.add(command_id)
                 del self._pending[command_id]
@@ -382,6 +481,7 @@ class OnboardCommandService:
         return {
             "pending": [to_primitive(command) for command in self._pending.values()],
             "completed": sorted(self._completed),
+            "rejected": sorted(self._rejected),
         }
 
     def restore_state(self, state: dict[str, object]) -> None:
@@ -389,6 +489,7 @@ class OnboardCommandService:
         pending = [from_primitive(GroundCommandPayload, value) for value in list(state.get("pending", []))]
         self._pending = {command.command_id: command for command in pending}
         self._completed = {str(value) for value in list(state.get("completed", []))}
+        self._rejected = {str(value) for value in list(state.get("rejected", []))}
 
 
 class AdcsOperationalMode(str, Enum):

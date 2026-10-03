@@ -89,3 +89,7 @@ and declared load timeline. It excludes thermal state, temperature-dependent
 performance, degradation, self-shadowing, regulator or bus topology,
 uncertainty, probabilistic availability, hardware qualification, and
 operational authorization.
+
+The problem accepts optional `numeric_backend` with values `rust` (default)
+and `python`. Canonical problems retain either selection and bind replay to
+that selection. See the workflow guide for the native scope.

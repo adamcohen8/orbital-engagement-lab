@@ -21,11 +21,14 @@ from sim.acceleration.kernels.estimation import (
 from sim.acceleration.kernels.frames import (
     apparent_sidereal_time_iau76_80_kernel,
     eci_relative_to_ric_rect_kernel,
+    eci_relative_to_ric_rect_rva_kernel,
     eci_to_ecef_iau76_80_kernel,
     ric_angular_rate_eci_from_rv_kernel,
+    ric_angular_rate_eci_from_rva_kernel,
     ric_curv_to_rect_kernel,
     ric_dcm_ir_from_rv_kernel,
     ric_rect_state_to_eci_kernel,
+    ric_rect_state_to_eci_rva_kernel,
     ric_rect_to_curv_kernel,
 )
 from sim.acceleration.kernels.geodesy import ecef_to_geodetic_deg_km_kernel
@@ -82,6 +85,7 @@ def warmup_acceleration(profile: str = "core") -> dict[str, object]:
     x = np.hstack((r, v)).astype(float)
     u = np.array([0.0, 1.0e-9, 0.0], dtype=float)
     rel = np.array([0.1, -1.0, 0.05, 0.0, 0.0001, -0.00002], dtype=float)
+    acceleration = np.array([1.0e-7, -2.0e-7, 1.0e-6], dtype=float)
     quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
     omega = np.array([0.01, -0.02, 0.03], dtype=float)
     inertia = np.diag(np.array([100.0, 90.0, 80.0], dtype=float))
@@ -398,8 +402,16 @@ def warmup_acceleration(profile: str = "core") -> dict[str, object]:
     )
     calls.append(("ric_dcm_ir_from_rv_kernel", ric_dcm_ir_from_rv_kernel(r, v)))
     calls.append(("ric_angular_rate_eci_from_rv_kernel", ric_angular_rate_eci_from_rv_kernel(r, v)))
+    calls.append(("ric_angular_rate_eci_from_rva_kernel", ric_angular_rate_eci_from_rva_kernel(r, v, acceleration)))
     calls.append(("ric_rect_state_to_eci_kernel", ric_rect_state_to_eci_kernel(rel, r, v)))
+    calls.append(("ric_rect_state_to_eci_rva_kernel", ric_rect_state_to_eci_rva_kernel(rel, r, v, acceleration)))
     calls.append(("eci_relative_to_ric_rect_kernel", eci_relative_to_ric_rect_kernel(x, np.hstack((r, v)))))
+    calls.append(
+        (
+            "eci_relative_to_ric_rect_rva_kernel",
+            eci_relative_to_ric_rect_rva_kernel(x, np.hstack((r, v)), acceleration),
+        )
+    )
     calls.append(("ric_curv_to_rect_kernel", ric_curv_to_rect_kernel(rel, float(np.linalg.norm(r)))))
     calls.append(("ric_rect_to_curv_kernel", ric_rect_to_curv_kernel(rel, float(np.linalg.norm(r)))))
     calls.append(

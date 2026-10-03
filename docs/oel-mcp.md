@@ -1,7 +1,7 @@
 # OEL MCP Supported Local Surface
 
 OEL MCP is an optional interoperability adapter over documented Orbital
-Engagement Lab workflows. It does not replace `AGENTS.md`, scenario YAML, the
+Engineering Lab workflows. It does not replace `AGENTS.md`, scenario YAML, the
 CLI, Python APIs, deterministic physics, or saved evidence.
 
 The supported M5.2 surface is intentionally local. It uses the

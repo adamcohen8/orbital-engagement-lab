@@ -159,17 +159,19 @@ def test_trajectory_only_matches_passive_two_body_truth_exactly(tmp_path: Path) 
     assert trajectory.payload["object_runtime_profiles"] == {"sat": "trajectory_only"}
 
 
-def test_trajectory_only_reuses_zero_command_across_builtin_substeps(tmp_path: Path) -> None:
+@pytest.mark.parametrize("backend, expected_commands", [("python", 1), ("rust", 0)])
+def test_trajectory_only_reuses_zero_command_across_builtin_substeps(tmp_path: Path, backend: str, expected_commands: int) -> None:
     raw = _scenario(tmp_path / "substeps", trajectory_only=True)
     raw["simulator"]["duration_s"] = 1.0
     raw["simulator"]["dynamics"]["orbit"]["orbit_substep_s"] = 0.25
+    raw["simulator"]["dynamics"]["orbit"]["numeric_backend"] = backend
     session = SimulationSession.from_config(SimulationConfig.from_dict(raw))
     session._ensure_engine()
 
     with patch.object(Command, "zero", wraps=Command.zero) as zero_command:
         session.run()
 
-    assert zero_command.call_count == 1
+    assert zero_command.call_count == expected_commands
 
 
 def test_serial_object_step_does_not_clone_result_without_bridge(tmp_path: Path) -> None:

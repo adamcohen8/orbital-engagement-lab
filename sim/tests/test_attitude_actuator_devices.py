@@ -59,6 +59,20 @@ class TestAttitudeActuatorDevices(unittest.TestCase):
         self.assertTrue(np.allclose(out.mode_flags["rw_body_torque_applied_nm"], command.torque_body_nm))
         self.assertTrue(np.allclose(out.mode_flags["magnetorquer_torque_body_nm"], np.zeros(3)))
 
+    def test_reaction_wheel_allocator_matrix_is_reused_for_fixed_geometry(self):
+        actuator = AttitudeActuator(
+            reaction_wheels=ReactionWheelLimits(
+                max_torque_nm=np.full(3, 0.1),
+                max_momentum_nms=np.ones(3),
+                wheel_axes_body=np.eye(3),
+            )
+        )
+        actuator.apply(Command(torque_body_nm=np.array([0.01, 0.02, 0.03])), limits={}, dt_s=1.0)
+        cached = actuator._wheel_allocator_pinv
+        actuator.apply(Command(torque_body_nm=np.array([0.02, 0.01, 0.03])), limits={}, dt_s=1.0)
+
+        assert cached is actuator._wheel_allocator_pinv
+
     def test_control_moment_gyro_limits_torque_by_momentum_and_gimbal_rate(self):
         actuator = AttitudeActuator(
             control_moment_gyros=ControlMomentGyroLimits(

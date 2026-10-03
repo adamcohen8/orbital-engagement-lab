@@ -26,6 +26,7 @@ from sim.analysis.healpix import (
     healpix_npix,
 )
 from sim.dynamics.orbit.frames import FrameContext, eci_to_ecef_rotation_context
+from sim.numeric_backend import normalize_numeric_backend
 from sim.utils.geodesy import WGS84_A_KM, WGS84_B_KM
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
@@ -94,6 +95,7 @@ class CommunicationsCoverageConfig:
     chunk_size: int = 8192
     max_working_memory_bytes: int = 512 * 1024 * 1024
     max_cell_time_comparisons: int = 300_000_000
+    numeric_backend: str = "rust"
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -183,6 +185,8 @@ class CommunicationsCoverageConfig:
             ):
                 raise ValueError(f"{field_name} must be a positive integer.")
             object.__setattr__(self, field_name, int(value))
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="numeric_backend must be python or rust.")
+        object.__setattr__(self, "numeric_backend", backend)
 
 
 @dataclass(frozen=True)
@@ -380,6 +384,7 @@ def _scientific_config(config: CommunicationsCoverageConfig) -> dict[str, Any]:
         "max_cell_time_comparisons",
     ):
         record.pop(execution_field)
+    record.pop("numeric_backend", None)
     return record
 
 
@@ -468,6 +473,67 @@ def evaluate_communications_coverage(
         longitude_chunks.append(np.rad2deg(centers.longitude_rad))
         mask = np.zeros((times.size, cells.size), dtype=bool)
         best_margin = np.full(cells.size, -np.inf)
+        native_tile = None
+        if config.numeric_backend == "rust":
+            from sim.rust_coverage_backend import try_communications_geometry_tile
+
+            native_tile = try_communications_geometry_tile(
+                positions_ecef,
+                terminal_from_ecef,
+                centers.ecef_km,
+                centers.outward_normal_ecef,
+                minimum_elevation_rad=config.earth_terminal_profile.minimum_elevation_rad,
+                max_range_km=config.max_range_km,
+                source_half_angle_rad=(
+                    None if config.source_terminal_pattern.attitude_independent
+                    else config.source_terminal_pattern.half_angle_rad
+                ),
+                earth_half_angle_rad=(
+                    None if earth_pattern.attitude_independent else earth_pattern.half_angle_rad
+                ),
+                direct_cosine=normalized_gate_mode == "direct_cosine",
+            )
+        if native_tile is not None:
+            native_ranges, gate_flags = native_tile
+            if config.direction == "spacecraft_to_earth":
+                tx_gain = config.source_terminal_pattern.gain_dbi
+                rx_gain = earth_pattern.gain_dbi
+            else:
+                tx_gain = earth_pattern.gain_dbi
+                rx_gain = config.source_terminal_pattern.gain_dbi
+            rf = free_space_link_ledger(
+                native_ranges,
+                carrier_frequency_hz=config.carrier_frequency_hz,
+                tx_power_w=config.tx_power_w,
+                tx_gain_dbi=tx_gain,
+                rx_gain_dbi=rx_gain,
+                data_rate_bps=config.data_rate_bps,
+                system_noise_temperature_k=config.system_noise_temperature_k,
+                required_eb_n0_db=config.required_eb_n0_db,
+                tx_line_loss_db=config.tx_line_loss_db,
+                rx_line_loss_db=config.rx_line_loss_db,
+                misc_loss_db=config.misc_loss_db,
+                numeric_backend=config.numeric_backend,
+            )
+            available = np.ones(mask.shape, dtype=bool)
+            reason_code = np.zeros(mask.shape, dtype=np.uint8)
+            for code in range(1, 7):
+                gate = rf.margin_pass if code == 6 else (gate_flags & (1 << (code - 1))) != 0
+                reason_code[available & ~gate] = code
+                available &= gate
+            mask[:] = available
+            reason_count += np.stack(
+                [np.count_nonzero(reason_code == code, axis=1) for code in range(7)], axis=1,
+            )
+            sample_margin_min = np.minimum(sample_margin_min, np.min(rf.margin_db, axis=1))
+            sample_margin_max = np.maximum(sample_margin_max, np.max(rf.margin_db, axis=1))
+            best_margin = np.maximum(best_margin, np.max(rf.margin_db, axis=0))
+            covered_count += np.count_nonzero(mask, axis=1)
+            metric_chunks.append(summarize_sampled_coverage_mask(
+                mask, times, cell_indices=cells, numeric_backend=config.numeric_backend,
+            ))
+            best_margin_chunks.append(best_margin)
+            continue
         for sample_index in range(times.size):
             delta = centers.ecef_km - positions_ecef[sample_index]
             ranges = np.linalg.norm(delta, axis=1)
@@ -539,6 +605,7 @@ def evaluate_communications_coverage(
                 tx_line_loss_db=config.tx_line_loss_db,
                 rx_line_loss_db=config.rx_line_loss_db,
                 misc_loss_db=config.misc_loss_db,
+                numeric_backend=config.numeric_backend,
             )
             gates = (
                 visible,
@@ -569,7 +636,14 @@ def evaluate_communications_coverage(
             )
             best_margin = np.maximum(best_margin, rf.margin_db)
         covered_count += np.count_nonzero(mask, axis=1)
-        metric_chunks.append(summarize_sampled_coverage_mask(mask, times, cell_indices=cells))
+        metric_chunks.append(
+            summarize_sampled_coverage_mask(
+                mask,
+                times,
+                cell_indices=cells,
+                numeric_backend=config.numeric_backend,
+            )
+        )
         best_margin_chunks.append(best_margin)
     metrics = _combine_chunk_metrics(metric_chunks)
     best_margin = np.concatenate(best_margin_chunks)

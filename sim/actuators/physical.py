@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import cos, exp, isfinite, sin, sqrt
+from math import cos, exp, isfinite, isnan, sin, sqrt
 
 import numpy as np
 
@@ -43,7 +43,19 @@ class ActuatorRealization:
             raise ValueError("mass_flow_kg_s must be finite and nonnegative")
 
 
-class IdealWrenchHardware:
+class _NativeIntervalCacheState:
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # The native context caches immutable hardware parameters; device state
+        # remains in the ordinary Python fields and recreates the cache lazily.
+        state.pop("_native_interval_context", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
+
+class IdealWrenchHardware(_NativeIntervalCacheState):
     def __init__(
         self,
         actuator_id: str,
@@ -55,14 +67,27 @@ class IdealWrenchHardware:
     ) -> None:
         if not actuator_id.strip():
             raise ValueError("actuator_id must be non-empty")
-        if max_force_n < 0.0 or max_torque_n_m < 0.0 or response_time_constant_s < 0.0:
-            raise ValueError("hardware limits and response time must be nonnegative")
+        max_force = float(max_force_n)
+        max_torque = float(max_torque_n_m)
+        response_time_constant = float(response_time_constant_s)
+        # Positive infinity is the declared unbounded default for force and
+        # torque. NaN and negative infinity are never valid limits, and
+        # response time must always be finite.
+        if (
+            isnan(max_force)
+            or max_force < 0.0
+            or isnan(max_torque)
+            or max_torque < 0.0
+            or not isfinite(response_time_constant)
+            or response_time_constant < 0.0
+        ):
+            raise ValueError("hardware limits must be nonnegative and response time must be finite and nonnegative")
         if specific_impulse_s is not None and (not isfinite(specific_impulse_s) or specific_impulse_s <= 0.0):
             raise ValueError("specific_impulse_s must be positive and finite when provided")
         self.actuator_id = actuator_id
-        self.max_force_n = float(max_force_n)
-        self.max_torque_n_m = float(max_torque_n_m)
-        self.response_time_constant_s = float(response_time_constant_s)
+        self.max_force_n = max_force
+        self.max_torque_n_m = max_torque
+        self.response_time_constant_s = response_time_constant
         self.specific_impulse_s = None if specific_impulse_s is None else float(specific_impulse_s)
         self.realized_force_n: Vector3 = (0.0, 0.0, 0.0)
         self.realized_torque_n_m: Vector3 = (0.0, 0.0, 0.0)
@@ -73,6 +98,9 @@ class IdealWrenchHardware:
         payload = demand.payload
         if payload is not None and not isinstance(payload, IdealWrenchCommand):
             raise TypeError("ideal wrench hardware requires IdealWrenchCommand demand")
+        if type(self) is IdealWrenchHardware and getattr(self, "_native_actuator_intervals", False):
+            from sim.actuators.rust_physical import advance_hardware
+            return advance_hardware(self, demand, start_time_ns, end_time_ns)
         if isinstance(payload, IdealWrenchCommand):
             requested_force = payload.force_n
             requested_torque = payload.torque_n_m
@@ -110,13 +138,18 @@ class IdealWrenchHardware:
             raise ValueError("ideal-wrench checkpoint must be an object")
         force = tuple(float(value) for value in state.get("realized_force_n", ()))
         torque = tuple(float(value) for value in state.get("realized_torque_n_m", ()))
-        if len(force) != 3 or len(torque) != 3:
-            raise ValueError("ideal-wrench checkpoint vectors must have three components")
+        if (
+            len(force) != 3
+            or len(torque) != 3
+            or not all(isfinite(value) for value in force)
+            or not all(isfinite(value) for value in torque)
+        ):
+            raise ValueError("ideal-wrench checkpoint vectors must have three finite components")
         self.realized_force_n = force  # type: ignore[assignment]
         self.realized_torque_n_m = torque  # type: ignore[assignment]
 
 
-class ReactionWheelHardware:
+class ReactionWheelHardware(_NativeIntervalCacheState):
     """Body-torque realization with explicit wheel momentum storage."""
 
     def __init__(
@@ -168,6 +201,9 @@ class ReactionWheelHardware:
         payload = demand.payload
         if payload is not None and not isinstance(payload, ReactionWheelTorqueCommand):
             raise TypeError("reaction-wheel hardware requires ReactionWheelTorqueCommand demand")
+        if type(self) is ReactionWheelHardware and getattr(self, "_native_actuator_intervals", False):
+            from sim.actuators.rust_physical import advance_hardware
+            return advance_hardware(self, demand, start_time_ns, end_time_ns)
         requested = np.zeros(self.axes_body.shape[0]) if payload is None else np.asarray(payload.torque_n_m, dtype=float)
         if requested.size != self.axes_body.shape[0]:
             raise ValueError("reaction-wheel command count must match configured wheels")
@@ -221,7 +257,7 @@ class ReactionWheelHardware:
         self.momentum_n_m_s = momentum
 
 
-class MagnetorquerHardware:
+class MagnetorquerHardware(_NativeIntervalCacheState):
     def __init__(
         self,
         actuator_id: str,
@@ -243,6 +279,9 @@ class MagnetorquerHardware:
         payload = demand.payload
         if payload is not None and not isinstance(payload, MagnetorquerDipoleCommand):
             raise TypeError("magnetorquer hardware requires MagnetorquerDipoleCommand demand")
+        if type(self) is MagnetorquerHardware and getattr(self, "_native_actuator_intervals", False):
+            from sim.actuators.rust_physical import advance_hardware
+            return advance_hardware(self, demand, start_time_ns, end_time_ns)
         requested = np.zeros(3) if payload is None else np.asarray(payload.dipole_a_m2, dtype=float)
         realized = np.clip(requested, -self.max_dipole_a_m2, self.max_dipole_a_m2)
         requested_torque = np.cross(requested, self.magnetic_field_body_t)
@@ -272,7 +311,7 @@ class MagnetorquerHardware:
             raise ValueError("magnetorquer checkpoint must be empty")
 
 
-class CmgHardware:
+class CmgHardware(_NativeIntervalCacheState):
     def __init__(
         self,
         actuator_id: str,
@@ -293,6 +332,9 @@ class CmgHardware:
         payload = demand.payload
         if payload is not None and not isinstance(payload, CmgGimbalRateCommand):
             raise TypeError("CMG hardware requires CmgGimbalRateCommand demand")
+        if type(self) is CmgHardware and getattr(self, "_native_actuator_intervals", False):
+            from sim.actuators.rust_physical import advance_hardware
+            return advance_hardware(self, demand, start_time_ns, end_time_ns)
         requested = np.zeros(3) if payload is None else np.asarray(payload.gimbal_rate_rad_s, dtype=float)
         realized = np.clip(requested, -self.max_gimbal_rate_rad_s, self.max_gimbal_rate_rad_s)
         self.gimbal_angle_rad += realized * ((end_time_ns - start_time_ns) / 1.0e9)
@@ -327,7 +369,7 @@ class CmgHardware:
         self.gimbal_angle_rad = angles
 
 
-class ContinuousEngineHardware:
+class ContinuousEngineHardware(_NativeIntervalCacheState):
     """Physical continuous engine with body-frame yaw/pitch gimbals."""
 
     def __init__(self, actuator_id: str, *, max_thrust_n: float, specific_impulse_s: float | None = None) -> None:
@@ -352,6 +394,9 @@ class ContinuousEngineHardware:
         payload = demand.payload
         if payload is not None and not isinstance(payload, ContinuousEngineCommand):
             raise TypeError("continuous engine hardware requires ContinuousEngineCommand demand")
+        if type(self) is ContinuousEngineHardware and getattr(self, "_native_actuator_intervals", False):
+            from sim.actuators.rust_physical import advance_hardware
+            return advance_hardware(self, demand, start_time_ns, end_time_ns)
         throttle = float(payload.throttle_0_1) if isinstance(payload, ContinuousEngineCommand) else 0.0
         angles = payload.gimbal_angles_rad if isinstance(payload, ContinuousEngineCommand) else ()
         yaw = float(angles[0]) if len(angles) >= 1 else 0.0

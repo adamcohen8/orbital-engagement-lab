@@ -8,6 +8,7 @@ import pytest
 from sim import SimulationConfig, SimulationSession
 from sim.config import GroundStationSection, scenario_config_from_dict
 from sim.dynamics.orbit.epoch import datetime_to_julian_date
+from sim.dynamics.orbit.frames import frame_context_from_mapping, transform_position
 from sim.ground_stations import (
     evaluate_ground_station_access,
     evaluate_ground_station_measurements,
@@ -19,6 +20,7 @@ from sim.reporting.ground_station_access_reports import (
     render_ground_station_access_report,
     render_satellite_access_report,
 )
+from sim.utils.geodesy import enu_to_ecef_rotation, geodetic_to_ecef_km
 
 
 def _ground_station_config(output_dir: Path) -> dict:
@@ -161,6 +163,32 @@ def test_ground_station_access_geometry_applies_los_elevation_and_range() -> Non
     )
     assert range_hist["equator_prime"]["targets"]["sat"]["access"] == [False]
     assert range_hist["equator_prime"]["targets"]["sat"]["reason"] == ["range"]
+
+
+def test_midlatitude_ground_station_los_uses_wgs84_ellipsoid() -> None:
+    station = GroundStationSection(
+        id="midlatitude",
+        lat_deg=45.0,
+        lon_deg=0.0,
+        alt_km=0.0,
+        min_elevation_deg=0.0,
+    )
+    station_ecef = geodetic_to_ecef_km(45.0, 0.0, 0.0)
+    enu_to_ecef = enu_to_ecef_rotation(45.0, 0.0)
+    elevation_rad = np.deg2rad(0.1)
+    target_ecef = station_ecef + enu_to_ecef @ (
+        5000.0 * np.array([0.0, np.cos(elevation_rad), np.sin(elevation_rad)])
+    )
+
+    histories, _ = evaluate_ground_station_access(
+        ground_stations=[station],
+        t_s=np.array([0.0]),
+        truth_hist={"sat": np.array([np.r_[target_ecef, 0.0, 0.0, 0.0]])},
+    )
+
+    target = histories["midlatitude"]["targets"]["sat"]
+    assert target["line_of_sight"] == [True]
+    assert target["access"] == [True]
 
 
 def test_ground_station_measurements_emit_access_limited_sensor_rows() -> None:

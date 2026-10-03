@@ -159,6 +159,30 @@ else:
         HostedClient(profile_path, ledger_path=ledger)
 
 
+def test_ledger_rejects_symlinks_and_reuses_an_abandoned_lock_inode(tmp_path: Path) -> None:
+    unrelated = tmp_path / "unrelated.txt"
+    unrelated.write_text("keep me", encoding="utf-8")
+    alias = tmp_path / "transactions.jsonl"
+    alias.symlink_to(unrelated)
+    with pytest.raises(ValueError, match="symbolic link"):
+        append_event(alias, "route_classified", {})
+    assert unrelated.read_text(encoding="utf-8") == "keep me"
+    with pytest.raises(ValueError, match="symbolic link"):
+        read_ledger(alias)
+
+    alias.unlink()
+    linked_parent = tmp_path / "linked"
+    linked_parent.symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(ValueError, match="symbolic link"):
+        append_event(linked_parent / "transactions.jsonl", "route_classified", {})
+
+    # A previous process can leave the lock inode behind; the OS lock is gone.
+    lock = alias.with_suffix(alias.suffix + ".lock")
+    lock.touch()
+    assert append_event(alias, "route_classified", {})["sequence"] == 1
+    assert lock.exists()
+
+
 def test_result_import_rejects_traversal_and_byte_drift(tmp_path: Path) -> None:
     payload = b"evidence"
     transfer = {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import keyword
 import types
 from dataclasses import Field, fields, is_dataclass
 from enum import Enum
@@ -28,6 +29,11 @@ _FORBIDDEN_FIELD_NAMES = {
     "world_truth",
 }
 _TYPE_GUARD_CACHE: dict[type[object], tuple[str, bool, tuple[Field[Any], ...] | None]] = {}
+_BOUNDARY_SCALAR_TYPES = (str, bool, int, float, bytes, Enum)
+_SPECIALIZED_BOUNDARY_TYPES = frozenset(BOUNDARY_RECORD_TYPES)
+_TRUTH_DATACLASS_VALIDATORS: dict[
+    type[object], Callable[[object, list[str], set[int]], None]
+] = {}
 _TRUSTED_DATACLASS_ENCODERS: dict[
     type[object],
     Callable[[object], dict[str, object]],
@@ -371,8 +377,45 @@ def _decode_untyped(value: object, *, path: str, registry: Mapping[str, type[Any
     raise TypeError(f"{path} contains unsupported JSON value")
 
 
+def _compile_truth_dataclass_validator(
+    value_type: type[object],
+    dataclass_fields: tuple[Field[Any], ...],
+) -> Callable[[object, list[str], set[int]], None]:
+    """Unroll field access while recursively inspecting every actual child value."""
+
+    lines = ["def validate(value, path, seen):"]
+    for item in dataclass_fields:
+        name = item.name
+        # ASCII identifiers retain exact getattr semantics. Other field names
+        # can occur on dynamically constructed dataclasses; never interpolate
+        # them as executable source or normalize their spelling.
+        if name.isascii() and name.isidentifier() and not keyword.iskeyword(name):
+            access = f"value.{name}"
+        else:
+            access = f"getattr(value, {name!r})"
+        lines.extend((
+            f"    child = {access}",
+            "    if child is not None and not isinstance(child, _leaf_types):",
+            f"        path.append({('.' + name)!r})",
+            "        _walk(child, path=path, seen=seen)",
+            "        path.pop()",
+        ))
+    if not dataclass_fields:
+        lines.append("    pass")
+    namespace: dict[str, object] = {
+        "_leaf_types": _BOUNDARY_SCALAR_TYPES,
+        "_walk": _assert_truth_free,
+    }
+    filename = f"<truth-dataclass-validator {value_type.__module__}.{value_type.__qualname__}>"
+    exec(compile("\n".join(lines) + "\n", filename, "exec"), namespace)  # noqa: S102 - field access is escaped above
+    validator = namespace["validate"]
+    if not callable(validator):  # pragma: no cover - compile contract guard
+        raise RuntimeError("truth dataclass validator compilation failed")
+    return validator  # type: ignore[return-value]
+
+
 def _assert_truth_free(value: object, *, path: list[str], seen: set[int]) -> None:
-    if value is None or isinstance(value, (str, bool, int, float, bytes, Enum)):
+    if value is None or isinstance(value, _BOUNDARY_SCALAR_TYPES):
         return
     identity = id(value)
     if identity in seen:
@@ -383,24 +426,28 @@ def _assert_truth_free(value: object, *, path: list[str], seen: set[int]) -> Non
     if forbidden:
         raise TypeError(f"{_path_text(path)} contains forbidden simulator-owned value {qualified}")
     if dataclass_fields is not None and not isinstance(value, type):
-        for item in dataclass_fields:
-            child = getattr(value, item.name)
-            # Boundary records contain large numbers of scalar telemetry and
-            # vector leaves.  They are terminal by contract, so avoid another
-            # Python call and path mutation while retaining recursive checks
-            # for every container or wrapper that could conceal simulator
-            # truth.
-            if child is None or isinstance(child, (str, bool, int, float, bytes, Enum)):
-                continue
-            path.append(f".{item.name}")
-            _assert_truth_free(child, path=path, seen=seen)
-            path.pop()
+        if value_type in _SPECIALIZED_BOUNDARY_TYPES:
+            validator = _TRUTH_DATACLASS_VALIDATORS.get(value_type)
+            if validator is None:
+                validator = _compile_truth_dataclass_validator(value_type, dataclass_fields)
+                _TRUTH_DATACLASS_VALIDATORS[value_type] = validator
+            validator(value, path, seen)
+        else:
+            # External dataclasses retain reflective traversal, including
+            # mutable field metadata; annotations never establish trust.
+            for item in dataclass_fields:
+                child = getattr(value, item.name)
+                if child is None or isinstance(child, _BOUNDARY_SCALAR_TYPES):
+                    continue
+                path.append(f".{item.name}")
+                _assert_truth_free(child, path=path, seen=seen)
+                path.pop()
         return
     if isinstance(value, Mapping):
         for key, item in value.items():
             if str(key).lower() in _FORBIDDEN_FIELD_NAMES:
                 raise TypeError(f"{_path_text(path)}.{key} is a forbidden simulator-truth field")
-            if item is None or isinstance(item, (str, bool, int, float, bytes, Enum)):
+            if item is None or isinstance(item, _BOUNDARY_SCALAR_TYPES):
                 continue
             path.append(f".{key}")
             _assert_truth_free(item, path=path, seen=seen)
@@ -408,7 +455,7 @@ def _assert_truth_free(value: object, *, path: list[str], seen: set[int]) -> Non
         return
     if isinstance(value, (tuple, list)):
         for index, item in enumerate(value):
-            if item is None or isinstance(item, (str, bool, int, float, bytes, Enum)):
+            if item is None or isinstance(item, _BOUNDARY_SCALAR_TYPES):
                 continue
             path.append(f"[{index}]")
             _assert_truth_free(item, path=path, seen=seen)

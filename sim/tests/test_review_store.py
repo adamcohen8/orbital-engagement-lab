@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 import sim.reporting.review_store as review_store_module
+import sim.review.plotting as review_plotting_module
 from sim import ReviewWorkspace as TopLevelReviewWorkspace
 from sim import SimulationConfig, SimulationSession
 from sim.config import scenario_config_from_dict
@@ -33,6 +34,7 @@ from sim.review import (
     EvidencePlotter,
     ReviewPlotSpec,
     ReviewQueryError,
+    ReviewQueryResult,
     ReviewStoreNotFoundError,
     ReviewWorkspace,
     SavedReviewQuery,
@@ -457,7 +459,7 @@ def test_review_store_closes_sqlite_before_atomic_replace(
 
 
 def test_review_store_supports_workspace_paths_with_spaces(tmp_path: Path) -> None:
-    output_dir = tmp_path / "Orbital Engagement Lab" / "Windows Review Output"
+    output_dir = tmp_path / "Orbital Engineering Lab" / "Windows Review Output"
     SimulationSession.from_config(
         SimulationConfig.from_dict(_review_store_config(output_dir))
     ).run()
@@ -1478,6 +1480,37 @@ def test_ground_access_windows_distinguish_sample_span_and_credited_duration() -
 
     assert row[:-1] == pytest.approx((10.0, 20.0, 20.0, 20.0, 30.0, 10.0, 20.0))
     assert row[-1] == "sampled_no_interpolation"
+
+
+def test_auto_plot_reuses_its_bounded_query_result(tmp_path: Path, monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeWorkspace:
+        output_dir = tmp_path
+
+        def query(self, sql: str, *, max_rows: int) -> ReviewQueryResult:
+            calls.append(sql)
+            assert max_rows == 5000
+            return ReviewQueryResult(
+                columns=["time_s", "range_km"],
+                rows=[{"time_s": 0.0, "range_km": 1.0}],
+                row_count=1,
+            )
+
+    captured: dict[str, object] = {}
+
+    def capture(workspace, spec, *, result, path=None, record=True):
+        captured["result"] = result
+        captured["path"] = path
+        return "plot"
+
+    monkeypatch.setattr(review_plotting_module, "_save_review_plot_from_result", capture)
+    plotter = EvidencePlotter.__new__(EvidencePlotter)
+    plotter.workspace = FakeWorkspace()
+
+    assert plotter.auto(sql="SELECT time_s, range_km FROM relative_state") == "plot"
+    assert calls == ["SELECT time_s, range_km FROM relative_state"]
+    assert captured["result"].row_count == 1
 
 
 def _review_table_counts(db_path: Path) -> dict[str, int]:

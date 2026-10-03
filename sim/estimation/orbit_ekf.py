@@ -8,9 +8,11 @@ from sim.acceleration.settings import acceleration_settings_from_mode
 from sim.core.interfaces import Estimator
 from sim.core.models import Measurement, StateBelief
 from sim.dynamics.orbit.two_body import propagate_two_body_rk4
+from sim.numeric_backend import normalize_numeric_backend
 
 orbit_ekf_numerical_jacobian_kernel = None
 propagate_two_body_rk4_kernel = None
+rust_estimation_backend = None
 
 
 def _solve_innovation_gain_and_vector(
@@ -45,6 +47,15 @@ def _load_acceleration_kernels() -> None:
     propagate_two_body_rk4_kernel = accelerated_propagate
 
 
+def _load_rust_estimation_backend():
+    global rust_estimation_backend
+    if rust_estimation_backend is None:
+        from sim import rust_estimation_backend as backend
+
+        rust_estimation_backend = backend
+    return rust_estimation_backend
+
+
 @dataclass(frozen=True)
 class OrbitEKFUpdateDiagnostics:
     measurement_available: bool
@@ -64,6 +75,7 @@ class OrbitEKFEstimator(Estimator):
     meas_noise_diag: np.ndarray
     last_update_diagnostics: OrbitEKFUpdateDiagnostics | None = field(default=None, init=False, repr=False)
     acceleration_mode: str = "off"
+    numeric_backend: str = "rust"
     _q: np.ndarray = field(default_factory=lambda: np.zeros((6, 6)), init=False, repr=False)
     _r: np.ndarray = field(default_factory=lambda: np.zeros((6, 6)), init=False, repr=False)
     _i6: np.ndarray = field(default_factory=lambda: np.eye(6), init=False, repr=False)
@@ -75,6 +87,9 @@ class OrbitEKFEstimator(Estimator):
             raise ValueError("mu_km3_s2 must be non-negative and finite.")
         if not np.isfinite(float(self.dt_s)) or float(self.dt_s) <= 0.0:
             raise ValueError("dt_s must be positive and finite.")
+        self.numeric_backend = normalize_numeric_backend(self.numeric_backend, error_message="numeric_backend must be 'python' or 'rust'.")
+        if self.numeric_backend not in {"python", "rust"}:
+            raise ValueError("numeric_backend must be 'python' or 'rust'.")
         self.process_noise_diag = np.array(self.process_noise_diag, dtype=float).reshape(-1)
         self.meas_noise_diag = np.array(self.meas_noise_diag, dtype=float).reshape(-1)
         for name, values in (("process_noise_diag", self.process_noise_diag), ("meas_noise_diag", self.meas_noise_diag)):
@@ -126,18 +141,45 @@ class OrbitEKFEstimator(Estimator):
             raise ValueError("orbit measurement vector must contain finite values.")
         y = z - x_pred
         s = p_pred + self._r
-        hp_t = p_pred
-        try:
-            k, s_y = _solve_innovation_gain_and_vector(s, hp_t, y)
-        except np.linalg.LinAlgError:
-            s_pinv = np.linalg.pinv(s)
-            k = hp_t @ s_pinv
-            s_y = s_pinv @ y
-        x_upd = x_pred + k @ y
-        i_kh = self._i6 - k
-        p_upd = i_kh @ p_pred @ i_kh.T + k @ self._r @ k.T
-        p_upd = 0.5 * (p_upd + p_upd.T)
-        nis = float(y.T @ s_y)
+        if self.numeric_backend == "rust":
+            # The native path owns the repeated Joseph update and SPD solve.
+            # Preserve the Python pseudoinverse behavior only for the
+            # singular innovation matrices that the native Cholesky kernel
+            # deliberately rejects.
+            try:
+                x_upd, p_upd, y, s, nis = _load_rust_estimation_backend().ekf_update(
+                    x_pred,
+                    p_pred,
+                    z,
+                    self._i6,
+                    self._r,
+                )
+            except ValueError:
+                hp_t = p_pred
+                try:
+                    k, s_y = _solve_innovation_gain_and_vector(s, hp_t, y)
+                except np.linalg.LinAlgError:
+                    s_pinv = np.linalg.pinv(s)
+                    k = hp_t @ s_pinv
+                    s_y = s_pinv @ y
+                x_upd = x_pred + k @ y
+                i_kh = self._i6 - k
+                p_upd = i_kh @ p_pred @ i_kh.T + k @ self._r @ k.T
+                p_upd = 0.5 * (p_upd + p_upd.T)
+                nis = float(y.T @ s_y)
+        else:
+            hp_t = p_pred
+            try:
+                k, s_y = _solve_innovation_gain_and_vector(s, hp_t, y)
+            except np.linalg.LinAlgError:
+                s_pinv = np.linalg.pinv(s)
+                k = hp_t @ s_pinv
+                s_y = s_pinv @ y
+            x_upd = x_pred + k @ y
+            i_kh = self._i6 - k
+            p_upd = i_kh @ p_pred @ i_kh.T + k @ self._r @ k.T
+            p_upd = 0.5 * (p_upd + p_upd.T)
+            nis = float(y.T @ s_y)
         self.last_update_diagnostics = OrbitEKFUpdateDiagnostics(
             measurement_available=True,
             update_applied=True,
@@ -160,8 +202,19 @@ class OrbitEKFEstimator(Estimator):
         to_t_s: float,
     ) -> tuple[np.ndarray, np.ndarray]:
         dt_s = max(float(to_t_s) - float(from_t_s), 0.0)
-        x_pred = self._propagate_state(x_prev, dt_s=dt_s)
-        f = self._numerical_jacobian(x_prev, base=x_pred, dt_s=dt_s)
+        native = _load_rust_estimation_backend() if self.numeric_backend == "rust" else None
+        if native is not None and not self._acceleration_enabled() and np.any(np.asarray(x_prev)[:3] != 0.0):
+            # Older optional wheels retain the existing scalar propagation and
+            # native Jacobian assembly. The zero-position Python convention
+            # also remains with its scalar owner.
+            try:
+                x_pred, f = native.two_body_predict_and_jacobian(x_prev, dt_s, self.mu_km3_s2)
+            except RuntimeError:
+                x_pred = self._propagate_state(x_prev, dt_s=dt_s)
+                f = self._numerical_jacobian(x_prev, base=x_pred, dt_s=dt_s)
+        else:
+            x_pred = self._propagate_state(x_prev, dt_s=dt_s)
+            f = self._numerical_jacobian(x_prev, base=x_pred, dt_s=dt_s)
         q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
         p_pred = f @ p_prev @ f.T + self._q * max(q_scale, 0.0)
         return x_pred, 0.5 * (p_pred + p_pred.T)
@@ -189,6 +242,17 @@ class OrbitEKFEstimator(Estimator):
         base_eval = base
         if base_eval is None:
             base_eval = self._propagate_state(x, dt_s=step_dt_s)
+        if self.numeric_backend == "rust":
+            perturbed = np.empty((6, 6), dtype=float)
+            for i in range(6):
+                xp = np.asarray(x, dtype=float).reshape(6).copy()
+                xp[i] += eps
+                perturbed[i] = self._propagate_state(xp, dt_s=step_dt_s)
+            return _load_rust_estimation_backend().jacobian_from_perturbed(
+                np.asarray(base_eval, dtype=float).reshape(6),
+                perturbed,
+                eps,
+            )
         if self._acceleration_enabled():
             _load_acceleration_kernels()
             return orbit_ekf_numerical_jacobian_kernel(

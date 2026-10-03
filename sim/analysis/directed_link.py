@@ -24,6 +24,7 @@ from sim.dynamics.orbit.frames import (
     eci_to_ecef_rotation_context,
     eci_to_ecef_rotation_derivative_context,
 )
+from sim.numeric_backend import normalize_numeric_backend
 from sim.utils.geodesy import (
     WGS84_A_KM,
     WGS84_B_KM,
@@ -141,6 +142,7 @@ class DirectedLinkConfig:
     max_range_km: float | None = None
     transition_time_tolerance_s: float | None = None
     transition_max_iterations: int | None = None
+    numeric_backend: str = "rust"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "analysis_id", _required_id(self.analysis_id, "analysis_id"))
@@ -203,6 +205,8 @@ class DirectedLinkConfig:
                 raise ValueError("transition_max_iterations must be a positive integer.")
             object.__setattr__(self, "transition_time_tolerance_s", tolerance)
             object.__setattr__(self, "transition_max_iterations", int(iterations))
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="numeric_backend must be python or rust.")
+        object.__setattr__(self, "numeric_backend", backend)
 
 
 @dataclass(frozen=True)
@@ -480,7 +484,19 @@ def _validated_history_arrays(
     return times, positions, velocities
 
 
-def _earth_occulted_segment(tx_position: np.ndarray, rx_position: np.ndarray) -> np.ndarray:
+def _earth_occulted_segment(
+    tx_position: np.ndarray,
+    rx_position: np.ndarray,
+    *,
+    numeric_backend: str = "rust",
+) -> np.ndarray:
+    backend = str(numeric_backend).strip().lower()
+    if backend not in {"python", "rust"}:
+        raise ValueError(f"Unknown directed-link numeric backend {numeric_backend!r}.")
+    if backend == "rust":
+        from sim.rust_coverage_backend import earth_occulted
+
+        return earth_occulted(tx_position, rx_position)
     axes = np.array([WGS84_A_KM, WGS84_A_KM, WGS84_B_KM], dtype=float)
     tx = tx_position / axes[None, :]
     delta = (rx_position - tx_position) / axes[None, :]
@@ -503,12 +519,23 @@ def _pattern_geometry(
     terminal: LinkTerminal,
     history: LinkEndpointHistory,
     peer_direction_eci: np.ndarray,
+    *,
+    numeric_backend: str = "rust",
 ) -> tuple[np.ndarray, np.ndarray]:
     count = peer_direction_eci.shape[0]
     if terminal.pattern.attitude_independent:
         return np.zeros(count, dtype=float), np.ones(count, dtype=bool)
     if history.dcm_parent_from_eci is None:
         raise ValueError(f"Directional terminal {terminal.terminal_id!r} requires attitude evidence.")
+    if str(numeric_backend).strip().lower() == "rust":
+        from sim.rust_coverage_backend import terminal_pattern
+
+        return terminal_pattern(
+            peer_direction_eci,
+            history.dcm_parent_from_eci,
+            terminal.quat_parent_from_terminal,
+            float(terminal.pattern.half_angle_rad),
+        )
     terminal_from_parent = quaternion_to_dcm_bn(
         np.asarray(terminal.quat_parent_from_terminal, dtype=float)
     ).T
@@ -560,10 +587,30 @@ def free_space_link_ledger(
     tx_line_loss_db: float = 0.0,
     rx_line_loss_db: float = 0.0,
     misc_loss_db: float = 0.0,
+    numeric_backend: str = "rust",
 ) -> FreeSpaceLedger:
     """Evaluate the one authoritative v0.1 free-space RF equation path."""
 
+    backend = str(numeric_backend).strip().lower()
+    if backend not in {"python", "rust"}:
+        raise ValueError(f"Unknown directed-link numeric backend {numeric_backend!r}.")
     ranges = np.asarray(range_km, dtype=float)
+    if backend == "rust":
+        from sim.rust_coverage_backend import free_space_link_ledger as rust_free_space_link_ledger
+
+        return rust_free_space_link_ledger(
+            ranges,
+            carrier_frequency_hz=carrier_frequency_hz,
+            tx_power_w=tx_power_w,
+            tx_gain_dbi=tx_gain_dbi,
+            rx_gain_dbi=rx_gain_dbi,
+            data_rate_bps=data_rate_bps,
+            system_noise_temperature_k=system_noise_temperature_k,
+            required_eb_n0_db=required_eb_n0_db,
+            tx_line_loss_db=tx_line_loss_db,
+            rx_line_loss_db=rx_line_loss_db,
+            misc_loss_db=misc_loss_db,
+        )
     if ranges.size == 0 or np.any(~np.isfinite(ranges)) or np.any(ranges <= 0.0):
         raise ValueError("range_km must contain positive finite values.")
     positive_inputs = {
@@ -695,26 +742,39 @@ def evaluate_directed_link(
             index = int(np.flatnonzero(ellipsoid_level <= 1.0)[0])
             raise ValueError(f"{label} spacecraft is on or inside WGS84 at sample {index}.")
     relative = rx_history.position_eci_km - tx_history.position_eci_km
-    ranges = np.linalg.norm(relative, axis=1)
+    if config.numeric_backend == "rust":
+        from sim.rust_coverage_backend import endpoint_kinematics
+
+        ranges, range_rate = endpoint_kinematics(
+            tx_history.position_eci_km,
+            rx_history.position_eci_km,
+            tx_history.velocity_eci_km_s,
+            rx_history.velocity_eci_km_s,
+        )
+    else:
+        ranges = np.linalg.norm(relative, axis=1)
+        relative_velocity = rx_history.velocity_eci_km_s - tx_history.velocity_eci_km_s
+        range_rate = np.einsum("ij,ij->i", relative_velocity, relative / ranges[:, None])
     if np.any(~np.isfinite(ranges)) or np.any(ranges <= 0.0):
         raise ValueError("Endpoint range must be positive and finite at every epoch.")
     tx_to_rx = relative / ranges[:, None]
     rx_to_tx = -tx_to_rx
-    relative_velocity = rx_history.velocity_eci_km_s - tx_history.velocity_eci_km_s
-    range_rate = np.einsum("ij,ij->i", relative_velocity, tx_to_rx)
     tx_off_axis, tx_pattern_pass = _pattern_geometry(
         config.tx_terminal,
         tx_history,
         tx_to_rx,
+        numeric_backend=config.numeric_backend,
     )
     rx_off_axis, rx_pattern_pass = _pattern_geometry(
         config.rx_terminal,
         rx_history,
         rx_to_tx,
+        numeric_backend=config.numeric_backend,
     )
     earth_clear = ~_earth_occulted_segment(
         endpoint_positions_ecef["Transmitting"],
         endpoint_positions_ecef["Receiving"],
+        numeric_backend=config.numeric_backend,
     )
     fixed_site_elevation = np.full(times.shape, np.nan, dtype=float)
     elevation_pass = np.ones(times.shape, dtype=bool)
@@ -759,6 +819,7 @@ def evaluate_directed_link(
         tx_line_loss_db=config.tx_line_loss_db,
         rx_line_loss_db=config.rx_line_loss_db,
         misc_loss_db=config.misc_loss_db,
+        numeric_backend=config.numeric_backend,
     )
     margin_pass = rf.margin_pass
     available = (
@@ -825,6 +886,7 @@ def evaluate_directed_link(
             evaluator_at_time=evaluator_at_time,
             time_tolerance_s=config.transition_time_tolerance_s if evaluator_at_time else None,
             max_iterations=config.transition_max_iterations if evaluator_at_time else None,
+            numeric_backend=config.numeric_backend,
         )
         intervals = availability_intervals(
             times,
@@ -1143,6 +1205,7 @@ def write_directed_link_artifacts(
     *,
     include_margin_plot: bool = False,
     plot_scenario_name: str = "",
+    orbit_binding: Mapping[str, Any] | None = None,
 ) -> DirectedLinkArtifacts:
     """Write deterministic link samples, windows, summary, and evidence packet."""
 
@@ -1219,9 +1282,7 @@ def write_directed_link_artifacts(
             "transitions": [asdict(value) for value in result.transitions],
         },
     )
-    _json_dump(
-        packet_path,
-        {
+    packet_payload = {
             "schema": "oel.directed-link-evidence-packet.v1",
             "analysis_id": result.config.analysis_id,
             "link_id": result.config.link_id,
@@ -1233,8 +1294,10 @@ def write_directed_link_artifacts(
                 {"artifact": intervals_path.name, "rows": len(result.windows)},
                 {"artifact": transitions_path.name, "rows": len(result.transitions)},
             ],
-        },
-    )
+        }
+    if orbit_binding is not None:
+        packet_payload["orbit_binding"] = dict(orbit_binding)
+    _json_dump(packet_path, packet_payload)
     if plot_path is not None:
         from sim.analysis.link_plotting import write_link_margin_plot
 
@@ -1250,9 +1313,7 @@ def write_directed_link_artifacts(
         artifact_paths.append(plot_path)
     if plot_quality_path is not None:
         artifact_paths.append(plot_quality_path)
-    _json_dump(
-        manifest_path,
-        {
+    manifest_payload = {
             "contract_version": DIRECTED_LINK_CONTRACT_VERSION,
             "analysis_id": result.config.analysis_id,
             "link_id": result.config.link_id,
@@ -1266,8 +1327,10 @@ def write_directed_link_artifacts(
             },
             "claim_limits": result.summary["claim_limits"],
             "refinement_provider_id": result.refinement_provider_id,
-        },
-    )
+        }
+    if orbit_binding is not None:
+        manifest_payload["orbit_binding"] = dict(orbit_binding)
+    _json_dump(manifest_path, manifest_payload)
     return DirectedLinkArtifacts(
         output_dir=destination,
         manifest_json=manifest_path,

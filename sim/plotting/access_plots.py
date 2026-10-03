@@ -8,6 +8,7 @@ import numpy as np
 
 from sim.dynamics.orbit.frames import frame_context_from_mapping
 from sim.plotting.single_run_context import _payload_arrays, _save_show_close
+from sim.plotting.style import tight_layout_oel_figure
 from sim.utils.figure_size import cap_figsize
 from sim.utils.ground_track import ground_track_from_eci_history, split_ground_track_dateline
 from sim.utils.plotting_capabilities import _setup_ground_track_axes
@@ -89,7 +90,7 @@ def plot_ground_track_from_payload(
                 ax.scatter([lon[idx[-1]]], [lat[idx[-1]]], color="red", s=18)
     if ids:
         ax.legend(loc="best")
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig
 
@@ -126,7 +127,7 @@ def plot_ground_station_access(
                 va="center",
                 transform=ax.transAxes,
             )
-        fig.tight_layout()
+        tight_layout_oel_figure(fig)
         _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
         return fig
 
@@ -182,6 +183,6 @@ def plot_ground_station_access(
     if axes[2].lines:
         axes[2].legend(loc="best")
 
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig

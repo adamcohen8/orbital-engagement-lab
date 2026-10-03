@@ -107,6 +107,35 @@ def set_parameter_path_value(root: dict[str, Any], path: str, value: Any, *, all
         deep_set(root, synced_path, value)
 
 
+def validate_parameter_path_exists(
+    root: dict[str, Any], path: str, *, allow_input_file: bool = False
+) -> tuple[str, ...]:
+    """Validate one campaign path without mutating the base config."""
+
+    _reject_path_parameter(path, allow_input_file=allow_input_file)
+    synced_paths = object_synced_parameter_paths(root, path)
+    existing_paths = tuple(synced_path for synced_path in synced_paths if path_exists(root, synced_path))
+    if not existing_paths:
+        raise KeyError(f"Parameter path '{path}' does not exist in the base config.")
+    return existing_paths
+
+
+def validate_parameter_path_claims(root: dict[str, Any], claims: list[tuple[str, str, bool]]) -> None:
+    """Validate campaign paths and reject aliases that target one field twice."""
+
+    claimed: dict[frozenset[str], tuple[str, str]] = {}
+    for owner, path, allow_input_file in claims:
+        resolved = frozenset(validate_parameter_path_exists(root, path, allow_input_file=allow_input_file))
+        previous = claimed.get(resolved)
+        if previous is not None:
+            previous_owner, previous_path = previous
+            raise ValueError(
+                "Monte Carlo parameter paths must assign distinct fields; "
+                f"{previous_owner} path '{previous_path}' and {owner} path '{path}' resolve to the same field."
+            )
+        claimed[resolved] = (owner, path)
+
+
 def _dedupe(paths: list[str]) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()

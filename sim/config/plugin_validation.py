@@ -11,6 +11,7 @@ from sim.config.object_refs import configured_objects, object_parameter_prefix
 from sim.config.plugin_specs import instantiate_plugin_spec, iter_nested_plugin_specs, plugin_spec_field
 from sim.digital_twin.mass_properties import validate_mass_properties
 from sim.dynamics.orbit.tle import ogp_mean_elements_from_mapping, parse_tle_lines
+from sim.numeric_backend import normalize_numeric_backend
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,7 @@ _CONTRACTS = {
         methods_all=(), methods_any=("evaluate", "update", "check", "act"), allow_function=True
     ),
     "force_model": PluginContract(methods_all=("acceleration",), allow_function=True),
+    "system_force_model": PluginContract(methods_all=("accelerations",), allow_function=True),
 }
 
 
@@ -132,6 +134,21 @@ def validate_scenario_plugins(cfg: Any, *, import_plugins: bool = True) -> list[
     orbit_model = str(orbit_cfg.get("model", "two_body") or "two_body").strip().lower()
     game_cfg = dict(getattr(cfg, "metadata", {}).get("game", {}) or {})
     game_controlled_object_id = str(game_cfg.get("controlled_object_id", "chaser") or "chaser")
+    for index, pointer in enumerate(getattr(cfg.simulator, "system_force_models", []) or []):
+        pointer_path = f"simulator.system_force_models[{index}]"
+        if plugin_spec_field(pointer, "builtin"):
+            errs.append(f"{pointer_path}: use an importable module and class_name or function, not builtin.")
+            continue
+        if plugin_spec_field(pointer, "function") and plugin_spec_field(pointer, "params"):
+            errs.append(f"{pointer_path}: function system force models do not accept params; use a class.")
+        errs.extend(_validate_pointer(
+            pointer, _CONTRACTS["system_force_model"], pointer_path, import_plugins=import_plugins
+        ))
+        for nested_path, nested_pointer in iter_nested_plugin_specs(pointer, pointer_path):
+            errs.extend(_validate_pointer(
+                nested_pointer, PluginContract(allow_function=True), nested_path,
+                import_plugins=import_plugins,
+            ))
     for object_id, agent in configured_objects(cfg).items():
         if not getattr(agent, "enabled", False):
             continue
@@ -318,10 +335,14 @@ def _validate_object_propagation(agent: Any, propagation_method: str, path: str)
         errs.append(f"{path}.mission_strategy/mission_execution are not supported for passive general-propagation SGP4 objects.")
     if list(getattr(agent, "mission_objectives", []) or []):
         errs.append(f"{path}.mission_objectives are not supported for passive general-propagation SGP4 objects.")
-    allowed_general_keys = {"model", "output_frame", "frame_transform", "max_tle_age_days_warning"}
+    allowed_general_keys = {"model", "output_frame", "frame_transform", "max_tle_age_days_warning", "numeric_backend"}
     unknown_general_keys = sorted(str(key) for key in general if str(key) not in allowed_general_keys)
     if unknown_general_keys:
         errs.append(f"{path}.general has unsupported field(s): {', '.join(unknown_general_keys)}.")
+    try:
+        normalize_numeric_backend(general.get("numeric_backend", "rust"), error_message=f"{path}.general.numeric_backend must be 'python' or 'rust'.")
+    except ValueError as exc:
+        errs.append(str(exc))
     if general.get("max_tle_age_days_warning") is not None:
         try:
             max_age = float(general.get("max_tle_age_days_warning"))
@@ -347,6 +368,23 @@ def _validate_object_propagation(agent: Any, propagation_method: str, path: str)
 def _validate_object_knowledge(knowledge: dict[str, Any], path: str) -> list[str]:
     raw = dict(knowledge or {})
     errs: list[str] = []
+    backend_values: list[tuple[str, Any]] = [(f"{path}.numeric_backend", raw.get("numeric_backend", "rust"))]
+    estimation = raw.get("estimation")
+    if isinstance(estimation, dict):
+        backend_values.append((f"{path}.estimation.numeric_backend", estimation.get("numeric_backend", "rust")))
+        estimation_ekf = estimation.get("ekf")
+        if isinstance(estimation_ekf, dict):
+            backend_values.append(
+                (f"{path}.estimation.ekf.numeric_backend", estimation_ekf.get("numeric_backend", "rust"))
+            )
+    top_level_ekf = raw.get("ekf")
+    if isinstance(top_level_ekf, dict):
+        backend_values.append((f"{path}.ekf.numeric_backend", top_level_ekf.get("numeric_backend", "rust")))
+    for backend_path, backend_value in backend_values:
+        try:
+            normalize_numeric_backend(backend_value, error_message=f"{backend_path} must be 'python' or 'rust'.")
+        except ValueError as exc:
+            errs.append(str(exc))
     if "sensor" in raw:
         errs.append(
             f"{path}.sensor: unsupported modeled-sensor configuration block. "
@@ -758,6 +796,7 @@ def _validate_rcs_cluster(raw: Any, path: str) -> list[str]:
         return enabled_errs
     errs: list[str] = []
     allowed = {
+        "numeric_backend",
         "enabled",
         "allocation_mode",
         "pulse_quantum_s",
@@ -768,6 +807,10 @@ def _validate_rcs_cluster(raw: Any, path: str) -> list[str]:
         "thrusters",
     }
     errs.extend(_validate_allowed_keys(raw, allowed, path))
+    try:
+        normalize_numeric_backend(raw.get("numeric_backend", "rust"), error_message=f"{path}.numeric_backend must be python or rust.")
+    except ValueError as exc:
+        errs.append(str(exc))
     mode = str(raw.get("allocation_mode", "force_torque")).strip()
     if mode not in {"force_torque", "force_only", "torque_only"}:
         errs.append(f"{path}.allocation_mode: must be one of force_torque, force_only, torque_only.")
@@ -921,6 +964,7 @@ def _validate_reaction_wheels(raw: Any, path: str) -> list[str]:
         return enabled_errs
     errs: list[str] = []
     allowed = {
+        "numeric_backend",
         "enabled",
         "max_torque_nm",
         "max_momentum_nms",
@@ -932,6 +976,10 @@ def _validate_reaction_wheels(raw: Any, path: str) -> list[str]:
         "coulomb_friction_nm",
     }
     errs.extend(_validate_allowed_keys(raw, allowed, path))
+    try:
+        normalize_numeric_backend(raw.get("numeric_backend", "rust"), error_message=f"{path}.numeric_backend must be python or rust.")
+    except ValueError as exc:
+        errs.append(str(exc))
     max_torque, torque_errs = _finite_vector_values(raw.get("max_torque_nm"), f"{path}.max_torque_nm", required=True)
     errs.extend(torque_errs)
     wheel_count = len(max_torque) if max_torque is not None else 0

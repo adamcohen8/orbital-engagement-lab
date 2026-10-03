@@ -103,6 +103,14 @@ def observation_covariance(
     uncertainty = dict(observation.get("uncertainty", {}) or {})
     matrix = uncertainty.get("matrix")
     if uncertainty.get("representation") == "covariance" and matrix is not None:
+        matrix_array = np.asarray(matrix, dtype=float)
+        # Dynamics OD explicitly falls back to a position-only fit when a
+        # packet mixes position and PV rows.  A PV row's 6x6 covariance still
+        # carries the valid marginal position covariance in its leading block;
+        # use that block for the 3D residual instead of rejecting the packet
+        # after ingestion has accepted the documented fallback.
+        if int(dimension) == 3 and matrix_array.shape == (6, 6):
+            matrix = matrix_array[:3, :3]
         cov = validate_covariance_block(
             matrix,
             dimension=dimension,

@@ -29,6 +29,17 @@ def test_analysis_workflow_resource_routes_typed_problems_without_expanding_exec
 
     assert '"workflow_id": "study_lifecycle"' in workflow.text
     payload = json.loads(workflow.text)
+    source_study = next(
+        item for item in payload["workflows"]
+        if item["workflow_id"] == "source_schedule_power_study"
+    )
+    assert source_study["evidence"].startswith("oel.source_schedule_power_study.v1")
+    assert source_study["mcp_tools"] == []
+    orbit_bound = next(
+        item for item in payload["workflows"] if item["workflow_id"] == "orbit_bound_source_study"
+    )
+    assert orbit_bound["evidence"].startswith("oel.orbit_bound_source_study.v1")
+    assert orbit_bound["mcp_tools"] == []
     constellation = next(item for item in payload["workflows"] if item["workflow_id"] == "constellation_design")
     assert constellation["evidence"] == "oel.constellation_design_evidence.v1"
     assert constellation["authoritative_replay"] == "python -m sim.constellation_design replay"

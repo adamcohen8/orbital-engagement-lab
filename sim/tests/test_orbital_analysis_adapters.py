@@ -155,7 +155,12 @@ def test_history_coverage_rejects_mismatched_frame_epoch() -> None:
         )
 
 
-def test_scenario_adapter_writes_coverage_and_link_review_tables(tmp_path) -> None:
+@pytest.mark.parametrize("numeric_backend", ["python", "rust"])
+def test_scenario_adapter_writes_coverage_and_link_review_tables(tmp_path, numeric_backend) -> None:
+    if numeric_backend == "rust":
+        native = pytest.importorskip("oel_rust_orbit")
+        if not hasattr(native, "coverage_surface_targets_ecef"):
+            pytest.skip("installed Rust wheel predates coverage kernels")
     config = {
         "scenario_name": "orbital_analysis_adapter_smoke",
         "objects": {
@@ -198,6 +203,9 @@ def test_scenario_adapter_writes_coverage_and_link_review_tables(tmp_path) -> No
             },
         },
     }
+    if numeric_backend == "rust":
+        for family in ("coverage", "directed_links"):
+            config["outputs"]["orbital_analysis"][family][0]["numeric_backend"] = "rust"
     result = SimulationSession.from_config(SimulationConfig.from_dict(config)).run()
     orbital_summary = result.summary["orbital_analysis"]
     assert orbital_summary["coverage_analysis_count"] == 1

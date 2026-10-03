@@ -36,6 +36,35 @@ authoritative-check fields before the lifecycle accepts it. This is a
 fail-closed source-contract check, not a second physics implementation or a
 replacement for the domain's authoritative replay.
 
+When a `spacecraft_power` step directly depends on a `mission_scheduling` step,
+the lifecycle additionally requires the power summary's
+`source_product_sha256s` to include that schedule's
+`schedule_semantic_sha256`. The separate schedule-power workflow retains and
+authoritatively replays both full domain packets and checks that the selected
+asset's exact activities, times, and declared loads match the power problem.
+Other plan dependencies remain order and criterion relationships unless their
+own capability contract defines a content-binding rule.
+
+The `oel.source_schedule_power_study.v1` wrapper accepts a source plan for
+verified collection and directed-link products. It retains those products and
+their source-built schedule, then builds the schedule-power study above. Its
+inspector checks the exact source-packet inventory, replays source extraction
+and scheduling, compares all retained schedule files, replays power, and
+inspects the lifecycle bundle. The source plan binds opportunity epochs; this
+wrapper does not prove that opportunity geometry and the separately supplied
+power orbit history came from the same propagated state.
+
+The opt-in `oel.orbit_bound_source_study.v1` wrapper retains one
+`oel.orbit_history_product.v1` exported from a completed-run review store. Its
+single-asset source plan requires the history's semantic SHA-256. Inspection
+recomputes each collection product from that history, recreates directed-link
+products from exact recorded parent sample indices and station inputs, and
+requires the power packet's normalized history to equal the retained parent.
+The orbit-history manifest records hashes of the source review database and
+effective configuration. Rechecking those hashes against a still-available
+source run is a separate provenance audit; retained inspection validates the
+exported history and its downstream uses.
+
 ## Record semantics
 
 - `oel.study_request.v1` states the question, capabilities, assumptions,

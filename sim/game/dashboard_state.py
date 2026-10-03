@@ -6,6 +6,10 @@ from .camera import *
 
 class DashboardStateMixin:
     def __post_init__(self) -> None:
+        if _prediction_backend_options(self.numeric_backend)["numeric_backend"] == "rust":
+            from sim.flight_software.rust_game_backend import extension
+
+            extension()
         try:
             import pygame
         except ImportError as exc:  # pragma: no cover - exercised only without optional dependency.

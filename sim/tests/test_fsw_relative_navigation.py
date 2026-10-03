@@ -4,6 +4,8 @@ import numpy as np
 
 from sim.flight_software import (
     FrameId,
+    GnssOwnStateMeasurement,
+    IdealOwnStateMeasurement,
     IdealTrackedObjectStateMeasurement,
     InputEvent,
     InputKind,
@@ -33,6 +35,13 @@ def _navigator() -> OrbitNavigator:
         inertial_frame=INERTIAL_FRAME,
         relative_frame=RELATIVE_FRAME,
     )
+
+
+def _gnss_event(sequence: int, tick: int) -> InputEvent:
+    time = clock(tick)
+    payload = GnssOwnStateMeasurement((7_000_000.0, 0.0, 0.0), (0.0, 7_500.0, 0.0))
+    measurement = MeasurementEvent("gnss", payload.schema, time, INERTIAL_FRAME, payload)
+    return InputEvent(PacketId("gnss", "boot", sequence), InputKind.MEASUREMENT, time, time, Quality(), measurement)
 
 
 def test_range_rate_los_and_angular_rate_reconstruct_typed_relative_state() -> None:
@@ -70,6 +79,61 @@ def test_sensor_fault_and_out_of_order_packets_do_not_overwrite_last_track() -> 
 
     navigator.ingest((fault_event(1, 4, "relative", active=False), relative_event(2, 1, range_m=20.0)))
     assert navigator.solution(clock(4)).relative_track("target").range_m == 500.0  # type: ignore[union-attr]
+
+
+def test_delayed_fresh_ekf_measurement_is_rejected_without_raising() -> None:
+    navigator = OrbitNavigator(
+        initialization=NavigationInitializationMode.IDEAL,
+        body_frame=BODY_FRAME,
+        inertial_frame=INERTIAL_FRAME,
+        relative_frame=RELATIVE_FRAME,
+        filter_kind=OrbitFilterKind.EKF,
+    )
+    navigator.ingest((ideal_event(0, 0),))
+    propagated = navigator.solution(clock(10))
+
+    navigator.ingest((_gnss_event(1, 5),))
+    solution = navigator.solution(clock(10))
+
+    assert solution.own_state_epoch == propagated.own_state_epoch
+    assert solution.own_state_valid
+    assert solution.belief.own_state is not None
+    assert solution.belief.own_state.validity.value == "degraded"
+
+
+def test_delayed_relative_ekf_measurement_is_rejected_without_raising() -> None:
+    navigator = OrbitNavigator(
+        initialization=NavigationInitializationMode.IDEAL,
+        body_frame=BODY_FRAME,
+        inertial_frame=INERTIAL_FRAME,
+        relative_frame=RELATIVE_FRAME,
+        filter_kind=OrbitFilterKind.EKF,
+    )
+    navigator.ingest((ideal_event(0, 0), relative_event(0, 0)))
+    navigator.solution(clock(10))
+
+    navigator.ingest((relative_event(1, 5, sensor_id="relative-delayed"),))
+    track = navigator.solution(clock(10)).relative_track("target")
+
+    assert track is not None
+    assert track.epoch == clock(10)
+
+
+def test_partial_ideal_own_state_does_not_refresh_orbit_epoch() -> None:
+    navigator = _navigator()
+    navigator.ingest((ideal_event(0, 0),))
+    before = navigator.solution(clock(40))
+    time = clock(40)
+    payload = IdealOwnStateMeasurement(attitude_quat_body_from_inertial=(1.0, 0.0, 0.0, 0.0))
+    measurement = MeasurementEvent("attitude-only", payload.schema, time, BODY_FRAME, payload)
+    event = InputEvent(PacketId("attitude-only", "boot", 0), InputKind.MEASUREMENT, time, time, Quality(), measurement)
+
+    navigator.ingest((event,))
+    after = navigator.solution(clock(40))
+
+    assert after.own_state_epoch == before.own_state_epoch == clock(0)
+    assert after.position_eci_m == before.position_eci_m
+    assert after.velocity_eci_m_s == before.velocity_eci_m_s
 
 
 def test_relative_sensor_frame_is_transformed_with_onboard_believed_mounting() -> None:

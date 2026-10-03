@@ -21,46 +21,96 @@ export async function upsertLeaderboardIfBetter({
   submittedAt,
   emailVerified,
 }) {
+  const candidateScore = Number(score ?? 0);
+  const privateRow = {
+    challenge_id: challengeId,
+    player_id: playerId,
+    attempt_id: attemptId,
+    score: candidateScore,
+    metrics: metrics ?? {},
+  };
+  const updatedAt = new Date().toISOString();
+  const inserted = await supabaseRest("leaderboard_entries?on_conflict=challenge_id,player_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+    body: JSON.stringify([{ ...privateRow, updated_at: updatedAt }]),
+  });
+  let privateChanged = Array.isArray(inserted) && inserted.length > 0;
+  if (!privateChanged) {
+    const updateQuery = new URLSearchParams({
+      challenge_id: `eq.${challengeId}`,
+      player_id: `eq.${playerId}`,
+      score: `lt.${candidateScore}`,
+    });
+    const updated = await supabaseRest(`leaderboard_entries?${updateQuery.toString()}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({ ...privateRow, updated_at: updatedAt }),
+    });
+    privateChanged = Array.isArray(updated) && updated.length > 0;
+  }
+
+  // Re-read the private winner after the conditional write.  A retry creates a
+  // new attempt row, so the winner's attempt_id may differ from this request's
+  // attemptId even when it is the same packet and score.  Mirroring the stored
+  // winner makes public repair independent of request retry identity and also
+  // lets a lower-scoring concurrent request repair a stale public row.
   const currentQuery = new URLSearchParams({
     challenge_id: `eq.${challengeId}`,
     player_id: `eq.${playerId}`,
-    select: "score",
+    select: "score,attempt_id,metrics",
     limit: "1",
   });
   const current = await supabaseRest(`leaderboard_entries?${currentQuery.toString()}`);
-  if (!shouldReplaceLeaderboardScore(current?.[0]?.score, score)) return false;
+  const winner = current?.[0];
+  if (winner?.attempt_id) {
+    const publicRow = await publicLeaderboardRow({
+      challengeId,
+      playerId,
+      attemptId: winner.attempt_id,
+      score: winner.score,
+      metrics: winner.metrics,
+      username,
+      emailVerified,
+    });
+    await upsertPublicLeaderboardIfBetter({ publicRow, updatedAt, repairEqual: true });
+  }
+  return privateChanged;
+}
 
-  const publicRow = await publicLeaderboardRow({
-    challengeId,
-    playerId,
-    attemptId,
-    score,
-    metrics,
-    username,
-    submittedAt,
-    emailVerified,
-  });
-  const updatedAt = new Date().toISOString();
-  await supabaseRest("leaderboard_entries?on_conflict=challenge_id,player_id", {
+async function upsertPublicLeaderboardIfBetter({ publicRow, updatedAt, repairEqual }) {
+  const inserted = await supabaseRest("public_leaderboard?on_conflict=challenge_id,username", {
     method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates" },
-    body: JSON.stringify([
-      {
-        challenge_id: challengeId,
-        player_id: playerId,
-        attempt_id: attemptId,
-        score: score ?? 0,
-        metrics: metrics ?? {},
-        updated_at: updatedAt,
-      },
-    ]),
-  });
-  await supabaseRest("public_leaderboard?on_conflict=challenge_id,username", {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates" },
+    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
     body: JSON.stringify([{ ...publicRow, updated_at: updatedAt }]),
   });
-  return true;
+  if (Array.isArray(inserted) && inserted.length > 0) return true;
+
+  const candidateScore = Number(publicRow.score ?? 0);
+  const lowerQuery = new URLSearchParams({
+    challenge_id: `eq.${publicRow.challenge_id}`,
+    username: `eq.${publicRow.username}`,
+    score: `lt.${candidateScore}`,
+  });
+  const updated = await supabaseRest(`public_leaderboard?${lowerQuery.toString()}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ ...publicRow, updated_at: updatedAt }),
+  });
+  if (Array.isArray(updated) && updated.length > 0) return true;
+  if (!repairEqual) return false;
+
+  const equalQuery = new URLSearchParams({
+    challenge_id: `eq.${publicRow.challenge_id}`,
+    username: `eq.${publicRow.username}`,
+    score: `eq.${candidateScore}`,
+  });
+  const repaired = await supabaseRest(`public_leaderboard?${equalQuery.toString()}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ ...publicRow, updated_at: updatedAt }),
+  });
+  return Array.isArray(repaired) && repaired.length > 0;
 }
 
 async function publicLeaderboardRow({
@@ -110,4 +160,12 @@ async function publicLeaderboardRow({
     submitted_at: publicSubmittedAt,
     email_verified: Boolean(publicEmailVerified),
   };
+}
+
+export async function publishUnclaimedAttempt(attemptId) {
+  const result = await supabaseRest("rpc/publish_unclaimed_arcade_attempt", {
+    method: "POST",
+    body: JSON.stringify({ p_attempt_id: attemptId }),
+  });
+  return result === true;
 }

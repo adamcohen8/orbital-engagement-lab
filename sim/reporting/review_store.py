@@ -135,7 +135,8 @@ def write_single_run_review_store(
             from sim.ground_segment.artifacts import insert_ground_review
             insert_ground_review(conn, payload.get("ground_segment", []))
             _insert_events(conn, t_s=t_s, summary=summary, thrust_hist=thrust_hist,
-                           impulsive_maneuvers=payload.get("impulsive_maneuvers", ()))
+                           impulsive_maneuvers=payload.get("impulsive_maneuvers", ()),
+                           collision_events=payload.get("collision_events", ()))
             _insert_mission_recovery(conn, summary=summary)
             _insert_metrics(conn, summary=summary)
             _insert_artifacts(conn, artifacts=artifacts, outdir=outdir, generated_utc=generated_utc)
@@ -167,8 +168,9 @@ def refresh_review_schema(db_path: str | Path) -> Path:
 
 
 def _create_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(
+    schema_sql = (
         """
+        BEGIN;
         CREATE TABLE run_metadata (
             run_id TEXT PRIMARY KEY,
             scenario_name TEXT,
@@ -925,8 +927,19 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             source TEXT,
             created_utc TEXT
         );
+        COMMIT;
         """
     )
+    try:
+        conn.executescript(schema_sql)
+    except BaseException:
+        # executescript does not roll back an explicit failed transaction.
+        # Preserve its original exception even for an already closed handle.
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+        raise
 
 
 def _insert_run_metadata(
@@ -1436,7 +1449,11 @@ def _insert_relative_state(
             continue
         n = int(min(t_s.size, deputy.shape[0], chief.shape[0]))
         for i in range(n):
-            rel = eci_relative_to_ric_rect(deputy[i, :6], chief[i, :6])
+            rel = (
+                eci_relative_to_ric_rect(deputy[i, :6], chief[i, :6])
+                if np.isfinite(deputy[i, :6]).all() and np.isfinite(chief[i, :6]).all()
+                else np.full(6, np.nan)
+            )
             rng = float(np.linalg.norm(rel[:3]))
             range_rate = (
                 float(np.dot(rel[:3], rel[3:]) / rng)
@@ -2415,8 +2432,25 @@ def _insert_events(
     summary: dict[str, Any],
     thrust_hist: dict[str, np.ndarray],
     impulsive_maneuvers: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+    collision_events: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
 ) -> None:
     rows = []
+    for index, impact in enumerate(collision_events):
+        event_time = float(impact["time_s"])
+        object_ids = list(impact["object_ids"])
+        rows.append((
+            f"spherical_collision:{index}",
+            event_time,
+            _sample_index_for_time(t_s, event_time),
+            ",".join(object_ids),
+            "spherical_collision",
+            "info",
+            f"Elastic spherical collision between {object_ids[0]} and {object_ids[1]}; "
+            f"closing speed {float(impact['closing_speed_m_s']):.9g} m/s; "
+            f"pre/post ECI velocities (km/s): {impact['pre_velocity_eci_km_s']} -> "
+            f"{impact['post_velocity_eci_km_s']}",
+            "collision_dynamics",
+        ))
     if bool(summary.get("terminated_early", False)):
         event_time = _float_or_none(summary.get("termination_time_s"))
         rows.append(

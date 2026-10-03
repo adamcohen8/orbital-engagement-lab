@@ -28,6 +28,7 @@ def evaluate_surface_targets_ecef(
     max_range_km: float | None = None,
     angular_tolerance_rad: float = 1.0e-12,
     range_tolerance_km: float = 1.0e-9,
+    numeric_backend: str = "rust",
 ) -> SurfaceTargetGeometry:
     """Evaluate clear-line-of-sight hard-cone geometry to convex Earth targets.
 
@@ -35,6 +36,32 @@ def evaluate_surface_targets_ecef(
     normals. Positive normal clearance is equivalent to an unobstructed open
     segment for a convex ellipsoid; exact tangency is blocked.
     """
+
+    backend = str(numeric_backend).strip().lower()
+    if backend not in {"python", "rust"}:
+        raise ValueError(f"Unknown coverage numeric backend {numeric_backend!r}.")
+    if backend == "rust":
+        from sim.rust_coverage_backend import surface_targets_ecef
+
+        result = surface_targets_ecef(
+            observer_ecef_km,
+            target_ecef_km,
+            target_outward_normal_ecef,
+            boresight_ecef,
+            half_angle_rad,
+            max_range_km,
+            angular_tolerance_rad=angular_tolerance_rad,
+            range_tolerance_km=range_tolerance_km,
+        )
+        return SurfaceTargetGeometry(
+            range_km=result.range_km,
+            cosine_off_axis=result.cosine_off_axis,
+            horizon_clearance_km=result.horizon_clearance_km,
+            visible=result.visible,
+            inside_pattern=result.inside_pattern,
+            inside_range=result.inside_range,
+            available=result.available,
+        )
 
     observer = np.asarray(observer_ecef_km, dtype=float).reshape(3)
     targets = np.asarray(target_ecef_km, dtype=float)

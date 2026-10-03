@@ -99,3 +99,27 @@ result came from the current dirty release worktree at commit `1093ca29`; rerun
 the maintained cases after later performance changes instead of treating this
 snapshot as a permanent product claim. These values do not generalize to richer
 attitude-control, geometry, sensing, estimation, or artifact workflows.
+
+## Full-force Rust ONP orbit determination
+
+The bounded OD benchmark generates 100 ECI position/velocity observations at
+60-second intervals, fits the first 80, and holds out the last 20. Its ONP
+configuration uses RK4 with 10-second orbit substeps, GGM03C 8×8 spherical
+harmonics, NRLMSISE-00 drag, SRP, and DE440 Sun/Moon gravity. It measures the
+complete OD fit and writes both the OD report and a summary that fails the run
+if the solver does not converge, the holdout is unacceptable, the batched Rust
+force path is unavailable, or fitting exceeds 300 seconds:
+
+```bash
+.venv/bin/python rust/oel-orbit/benchmarks/compare_onp_od_full_force.py \
+  --output-root outputs/benchmarks/onp_od_full_force
+```
+
+On the local Apple M2, the fixed native Jacobian steps of 1 m and 0.1 mm/s
+reduced one matched synthetic fit from 637.50 s (24 evaluations, no solver
+convergence) to 148.24 s (5 evaluations, converged). Position RMS was
+1.614 m on the fit and 1.870 m on holdout after the change. This is a
+workload-specific timing result, not a runtime bound for arbitrary force
+models, arc lengths, observation noise, or hardware. The force model and
+exact-epoch evaluation remained unchanged; the gain comes from a better-scaled
+numerical Jacobian in the state-only native OD fit.

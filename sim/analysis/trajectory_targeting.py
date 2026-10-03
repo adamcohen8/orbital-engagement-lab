@@ -409,11 +409,12 @@ def _variable_fields_for_segment(segment: Mapping[str, Any]) -> set[str]:
     return set()
 
 
-def _propagator(settings: PropagationSettings) -> OrbitPropagator:
+def _propagator(settings: PropagationSettings, *, numeric_backend: str) -> OrbitPropagator:
     return OrbitPropagator(
         model="two_body",
         integrator=settings.integrator,
         plugins=[_FORCE_PLUGINS[name] for name in settings.force_model],
+        numeric_backend=numeric_backend,
     )
 
 
@@ -516,12 +517,25 @@ def _propagate_duration(
     start_time_s: float,
     duration_s: float,
     settings: PropagationSettings,
+    numeric_backend: str = "rust",
 ) -> tuple[np.ndarray, int]:
+    if numeric_backend == "rust":
+        from sim.rust_targeting_backend import zonal_coast_history
+
+        widths = []
+        remaining = float(duration_s)
+        while remaining > 0.0:
+            width = min(settings.step_s, remaining)
+            widths.append(width)
+            remaining -= width
+        rows = zonal_coast_history(state, widths, mu_km3_s2=settings.mu_km3_s2,
+                                   force_model=settings.force_model)
+        return rows[-1], len(widths)
     current = np.asarray(state, dtype=float).copy()
     t_s = float(start_time_s)
     remaining = float(duration_s)
     steps = 0
-    propagator = _propagator(settings)
+    propagator = _propagator(settings, numeric_backend=numeric_backend)
     context = OrbitContext(mu_km3_s2=settings.mu_km3_s2, mass_kg=settings.mass_kg)
     while remaining > 0.0:
         step = min(settings.step_s, remaining)
@@ -586,6 +600,7 @@ def _refine_event(
     target: float,
     continuous_target: float,
     settings: PropagationSettings,
+    numeric_backend: str = "rust",
 ) -> tuple[np.ndarray, float, int, tuple[float, float], int]:
     lower_state = np.asarray(left_state, dtype=float).copy()
     lower_time = float(left_time_s)
@@ -600,7 +615,7 @@ def _refine_event(
             lower_state,
             start_time_s=lower_time,
             duration_s=midpoint_time - lower_time,
-            settings=settings,
+            settings=settings, numeric_backend=numeric_backend,
         )
         propagation_steps += midpoint_steps
         midpoint_value = _quantity_value(quantity, midpoint_state, midpoint_time, settings)
@@ -631,7 +646,7 @@ def _refine_event(
             lower_state,
             start_time_s=lower_time,
             duration_s=event_time - lower_time,
-            settings=settings,
+            settings=settings, numeric_backend=numeric_backend,
         )
         propagation_steps += event_steps
         event_value = _quantity_value(quantity, event_state, event_time, settings)
@@ -668,6 +683,7 @@ def _propagate_to_event(
     start_time_s: float,
     stop: Mapping[str, Any],
     settings: PropagationSettings,
+    numeric_backend: str = "rust",
 ) -> tuple[np.ndarray, float, int, dict[str, Any]]:
     quantity = str(stop["quantity"])
     target = float(stop["target"])
@@ -683,21 +699,52 @@ def _propagate_to_event(
             current,
             start_time_s=current_time,
             duration_s=minimum_elapsed,
-            settings=settings,
+            settings=settings, numeric_backend=numeric_backend,
         )
         current_time += minimum_elapsed
         elapsed = minimum_elapsed
         steps += minimum_steps
     current_value = _quantity_value(quantity, current, current_time, settings)
     armed = abs(_signed_residual(quantity, current_value, target)) > settings.event_value_tolerance
+    forecast_rows = None
+    forecast_index = 0
     while elapsed < max_duration:
         step = min(settings.step_s, max_duration - elapsed)
-        next_state, duration_steps = _propagate_duration(
-            current,
-            start_time_s=current_time,
-            duration_s=step,
-            settings=settings,
-        )
+        if numeric_backend == "rust":
+            if forecast_rows is None or forecast_index == len(forecast_rows):
+                from sim.rust_targeting_backend import zonal_coast_history
+
+                widths = []
+                future_elapsed = elapsed
+                for _ in range(256):
+                    if future_elapsed >= max_duration:
+                        break
+                    width = min(settings.step_s, max_duration - future_elapsed)
+                    widths.append(width)
+                    future_elapsed += width
+                try:
+                    forecast_rows = zonal_coast_history(
+                        current, widths, mu_km3_s2=settings.mu_km3_s2,
+                        force_model=settings.force_model,
+                    )[1:]
+                    forecast_index = 0
+                except (ValueError, ArithmeticError):
+                    # A speculative failure must not precede an earlier event.
+                    forecast_rows = None
+            if forecast_rows is not None:
+                next_state = forecast_rows[forecast_index]
+                forecast_index += 1
+                duration_steps = 1
+            else:
+                next_state, duration_steps = _propagate_duration(
+                    current, start_time_s=current_time, duration_s=step,
+                    settings=settings, numeric_backend=numeric_backend,
+                )
+        else:
+            next_state, duration_steps = _propagate_duration(
+                current, start_time_s=current_time, duration_s=step, settings=settings,
+                numeric_backend=numeric_backend,
+            )
         next_time = current_time + step
         next_elapsed = elapsed + step
         next_value = _quantity_value(quantity, next_state, next_time, settings)
@@ -730,7 +777,7 @@ def _propagate_to_event(
                     quantity=quantity,
                     target=target,
                     continuous_target=continuous_target,
-                    settings=settings,
+                    settings=settings, numeric_backend=numeric_backend,
                 )
             except EventRefinementError as exc:
                 exc.receipt["direction"] = direction
@@ -778,12 +825,18 @@ def _propagate_to_event(
 def execute_trajectory(
     problem: TrajectoryTargetingProblem | Mapping[str, Any],
     decision_values: Sequence[float] | None = None,
+    *, numeric_backend: str = "rust",
 ) -> dict[str, Any]:
     """Execute one materialized event/burn trajectory through the OEL propagator."""
 
     parsed = (
         problem if isinstance(problem, TrajectoryTargetingProblem) else TrajectoryTargetingProblem.from_mapping(problem)
     )
+    backend = str(numeric_backend).strip().lower()
+    if backend not in {"python", "rust"}:
+        raise TrajectoryTargetingError("numeric_backend must be python or rust.")
+    if backend == "rust":
+        _validate_native_jacobian_envelope(parsed)
     values = (
         np.asarray([variable.initial for variable in parsed.variables], dtype=float)
         if decision_values is None
@@ -827,7 +880,7 @@ def execute_trajectory(
                 state,
                 start_time_s=time_s,
                 duration_s=duration,
-                settings=parsed.propagation,
+                settings=parsed.propagation, numeric_backend=backend,
             )
             time_s += duration
             event_receipt = None
@@ -837,7 +890,7 @@ def execute_trajectory(
                     state,
                     start_time_s=time_s,
                     stop=segment["stop"],
-                    settings=parsed.propagation,
+                    settings=parsed.propagation, numeric_backend=backend,
                 )
             except (MissedEventError, EventRefinementError) as exc:
                 exc.receipt["propagation_steps"] = propagation_steps + int(
@@ -875,8 +928,9 @@ def execute_trajectory(
                 float(receipt.get("duration_s", 0.0)) for receipt in segment_receipts if receipt["type"] == "coast"
             ),
         },
+        "numeric_backend": backend,
         "propagator": {
-            **_propagator(parsed.propagation).propagation_metadata(),
+            **_propagator(parsed.propagation, numeric_backend=backend).propagation_metadata(),
             **parsed.propagation.to_dict(),
         },
     }
@@ -919,6 +973,7 @@ def evaluate_terminal_constraints(
 def finite_difference_jacobian(
     problem: TrajectoryTargetingProblem | Mapping[str, Any],
     decision_values: Sequence[float],
+    *, numeric_backend: str = "rust",
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Return a central finite-difference Jacobian and evaluation accounting."""
 
@@ -928,10 +983,19 @@ def finite_difference_jacobian(
     values = np.asarray(decision_values, dtype=float)
     if values.shape != (len(parsed.variables),):
         raise TrajectoryTargetingError("decision_values must match the number of variables.")
+    backend = str(numeric_backend).strip().lower()
+    if backend not in {"python", "rust"}:
+        raise TrajectoryTargetingError("numeric_backend must be python or rust.")
+    if backend == "rust":
+        _validate_native_jacobian_envelope(parsed)
+    batch_fixed = backend == "rust" and all(
+        segment["type"] == "impulsive_burn" or "duration_s" in segment for segment in parsed.segments
+    )
     jacobian = np.empty((len(parsed.constraints), len(parsed.variables)), dtype=float)
     evaluations = 0
     propagation_steps = 0
     effective_perturbations: list[float] = []
+    native_trials: list[list[dict[str, Any]]] = []
     for column, variable in enumerate(parsed.variables):
         perturbation = float(variable.perturbation)
         if variable.field == "duration_s":
@@ -945,8 +1009,12 @@ def finite_difference_jacobian(
         minus = values.copy()
         plus[column] += perturbation
         minus[column] -= perturbation
+        if batch_fixed:
+            native_trials.append(_materialized_segments(parsed, plus))
+            native_trials.append(_materialized_segments(parsed, minus))
+            continue
         try:
-            plus_execution = execute_trajectory(parsed, plus)
+            plus_execution = execute_trajectory(parsed, plus, numeric_backend=backend)
         except (MissedEventError, EventRefinementError) as exc:
             exc.receipt["trajectory_evaluations"] = evaluations + 1
             exc.receipt["propagation_steps"] = propagation_steps + int(
@@ -956,7 +1024,7 @@ def finite_difference_jacobian(
         evaluations += 1
         propagation_steps += int(plus_execution["resources"]["propagation_steps"])
         try:
-            minus_execution = execute_trajectory(parsed, minus)
+            minus_execution = execute_trajectory(parsed, minus, numeric_backend=backend)
         except (MissedEventError, EventRefinementError) as exc:
             exc.receipt["trajectory_evaluations"] = evaluations + 1
             exc.receipt["propagation_steps"] = propagation_steps + int(
@@ -972,11 +1040,36 @@ def finite_difference_jacobian(
             evaluate_terminal_constraints(parsed, minus_execution)["normalized_residuals"], dtype=float
         )
         jacobian[:, column] = (plus_residuals - minus_residuals) / (2.0 * perturbation)
+    if batch_fixed:
+        from sim.rust_targeting_backend import fixed_duration_rollouts
+
+        rows = fixed_duration_rollouts(
+            np.asarray(parsed.initial_state_eci_km_km_s, dtype=float), native_trials,
+            step_s=parsed.propagation.step_s, mu_km3_s2=parsed.propagation.mu_km3_s2,
+            force_model=parsed.propagation.force_model,
+        )
+        evaluations = len(rows)
+        propagation_steps = int(np.sum(rows[:, 7]))
+        for column, perturbation in enumerate(effective_perturbations):
+            residuals = []
+            for row in rows[2 * column:2 * column + 2]:
+                execution = {"final_state_eci_km_km_s": row[:6], "elapsed_time_s": row[6]}
+                residuals.append(np.asarray(
+                    evaluate_terminal_constraints(parsed, execution)["normalized_residuals"], dtype=float,
+                ))
+            jacobian[:, column] = (residuals[0] - residuals[1]) / (2.0 * perturbation)
     return jacobian, {
         "trajectory_evaluations": evaluations,
         "propagation_steps": propagation_steps,
         "effective_perturbations": effective_perturbations,
     }
+
+
+def _validate_native_jacobian_envelope(problem: TrajectoryTargetingProblem) -> None:
+    if problem.propagation.integrator != "rk4":
+        raise TrajectoryTargetingError(
+            "Rust targeting Jacobians require RK4 trajectories with built-in zonal forces."
+        )
 
 
 def _canonical_sha256(value: Mapping[str, Any]) -> str:
@@ -999,6 +1092,7 @@ def _failure_result(
     problem: TrajectoryTargetingProblem,
     *,
     problem_sha256: str,
+    numeric_backend: str,
     status: str,
     message: str,
     history: list[dict[str, Any]],
@@ -1011,6 +1105,8 @@ def _failure_result(
         "schema_version": TRAJECTORY_TARGETING_EVIDENCE_SCHEMA,
         "problem_name": problem.name,
         "problem_sha256": problem_sha256,
+        "numeric_backend": numeric_backend,
+        "execution_sha256": _canonical_sha256({"problem_sha256": problem_sha256, "numeric_backend": numeric_backend}),
         "status": status,
         "converged": False,
         "message": message,
@@ -1032,12 +1128,18 @@ def _failure_result(
 
 def solve_trajectory_target(
     problem: TrajectoryTargetingProblem | Mapping[str, Any],
+    *, numeric_backend: str = "rust",
 ) -> dict[str, Any]:
     """Solve a public single-shooting problem and independently repropagate it."""
 
     parsed = (
         problem if isinstance(problem, TrajectoryTargetingProblem) else TrajectoryTargetingProblem.from_mapping(problem)
     )
+    backend = str(numeric_backend).strip().lower()
+    if backend not in {"python", "rust"}:
+        raise TrajectoryTargetingError("numeric_backend must be python or rust.")
+    if backend == "rust" and parsed.variables:
+        _validate_native_jacobian_envelope(parsed)
     problem_sha256 = _canonical_sha256(parsed.to_dict())
     decision_values = np.asarray([variable.initial for variable in parsed.variables], dtype=float)
     history: list[dict[str, Any]] = []
@@ -1047,7 +1149,7 @@ def solve_trajectory_target(
 
     if not parsed.variables:
         try:
-            execution = execute_trajectory(parsed, decision_values)
+            execution = execute_trajectory(parsed, decision_values, numeric_backend=backend)
         except (MissedEventError, EventRefinementError) as exc:
             _record_failed_evaluation(resources, exc)
             status = "event_refinement_failed" if isinstance(exc, EventRefinementError) else "missed_event"
@@ -1061,6 +1163,7 @@ def solve_trajectory_target(
                 best_execution={"status": status, "event": exc.receipt},
                 best_constraints=None,
                 decision_values=decision_values,
+                numeric_backend=backend,
             )
         resources["trajectory_evaluations"] += 1
         resources["propagation_steps"] += int(execution["resources"]["propagation_steps"])
@@ -1076,12 +1179,13 @@ def solve_trajectory_target(
                 best_execution=execution,
                 best_constraints=constraints,
                 decision_values=decision_values,
+                numeric_backend=backend,
             )
-        return _successful_result(parsed, problem_sha256, decision_values, history, resources, execution, constraints)
+        return _successful_result(parsed, problem_sha256, decision_values, history, resources, execution, constraints, numeric_backend=backend)
 
     for iteration in range(parsed.solver.max_iterations + 1):
         try:
-            execution = execute_trajectory(parsed, decision_values)
+            execution = execute_trajectory(parsed, decision_values, numeric_backend=backend)
         except (MissedEventError, EventRefinementError) as exc:
             _record_failed_evaluation(resources, exc)
             status = "event_refinement_failed" if isinstance(exc, EventRefinementError) else "missed_event"
@@ -1095,6 +1199,7 @@ def solve_trajectory_target(
                 best_execution={"status": status, "event": exc.receipt},
                 best_constraints=best_constraints,
                 decision_values=decision_values,
+                numeric_backend=backend,
             )
         resources["trajectory_evaluations"] += 1
         resources["propagation_steps"] += int(execution["resources"]["propagation_steps"])
@@ -1120,13 +1225,19 @@ def solve_trajectory_target(
                 resources,
                 execution,
                 constraint_evaluation,
+                numeric_backend=backend,
             )
         if iteration >= parsed.solver.max_iterations:
             history_row["disposition"] = "iteration_limit"
             history.append(history_row)
             break
         try:
-            jacobian, jacobian_resources = finite_difference_jacobian(parsed, decision_values)
+            if backend == "python":
+                jacobian, jacobian_resources = finite_difference_jacobian(parsed, decision_values, numeric_backend=backend)
+            else:
+                jacobian, jacobian_resources = finite_difference_jacobian(
+                    parsed, decision_values, numeric_backend=backend,
+                )
         except (MissedEventError, EventRefinementError) as exc:
             _record_failed_evaluation(resources, exc, default_evaluations=0)
             status = "event_refinement_failed" if isinstance(exc, EventRefinementError) else "missed_event"
@@ -1142,6 +1253,7 @@ def solve_trajectory_target(
                 best_execution=execution,
                 best_constraints=constraint_evaluation,
                 decision_values=decision_values,
+                numeric_backend=backend,
             )
         except TrajectoryTargetingError as exc:
             history_row["disposition"] = "jacobian_failed"
@@ -1156,6 +1268,7 @@ def solve_trajectory_target(
                 best_execution=execution,
                 best_constraints=constraint_evaluation,
                 decision_values=decision_values,
+                numeric_backend=backend,
             )
         resources["trajectory_evaluations"] += int(jacobian_resources["trajectory_evaluations"])
         resources["jacobian_evaluations"] += 1
@@ -1180,6 +1293,7 @@ def solve_trajectory_target(
                 best_execution=execution,
                 best_constraints=constraint_evaluation,
                 decision_values=decision_values,
+                numeric_backend=backend,
             )
         correction, *_ = np.linalg.lstsq(jacobian, -residuals, rcond=parsed.solver.rank_rcond)
         correction_norm = float(np.linalg.norm(correction))
@@ -1193,7 +1307,7 @@ def solve_trajectory_target(
         while scale >= parsed.solver.minimum_line_search_scale:
             candidate_values = decision_values + scale * correction
             try:
-                candidate_execution = execute_trajectory(parsed, candidate_values)
+                candidate_execution = execute_trajectory(parsed, candidate_values, numeric_backend=backend)
                 candidate_constraints = evaluate_terminal_constraints(parsed, candidate_execution)
             except TrajectoryTargetingError as exc:
                 _record_failed_evaluation(resources, exc)
@@ -1223,6 +1337,7 @@ def solve_trajectory_target(
                 best_execution=execution,
                 best_constraints=constraint_evaluation,
                 decision_values=decision_values,
+                numeric_backend=backend,
             )
         history.append(history_row)
     return _failure_result(
@@ -1235,6 +1350,7 @@ def solve_trajectory_target(
         best_execution=best_execution,
         best_constraints=best_constraints,
         decision_values=decision_values,
+        numeric_backend=backend,
     )
 
 
@@ -1246,8 +1362,9 @@ def _successful_result(
     resources: dict[str, int],
     solve_execution: Mapping[str, Any],
     solve_constraints: Mapping[str, Any],
+    *, numeric_backend: str,
 ) -> dict[str, Any]:
-    repropagation = execute_trajectory(problem, decision_values)
+    repropagation = execute_trajectory(problem, decision_values, numeric_backend=numeric_backend)
     repropagation_constraints = evaluate_terminal_constraints(problem, repropagation)
     resources["trajectory_evaluations"] += 1
     resources["propagation_steps"] += int(repropagation["resources"]["propagation_steps"])
@@ -1259,6 +1376,8 @@ def _successful_result(
         "schema_version": TRAJECTORY_TARGETING_EVIDENCE_SCHEMA,
         "problem_name": problem.name,
         "problem_sha256": problem_sha256,
+        "numeric_backend": numeric_backend,
+        "execution_sha256": _canonical_sha256({"problem_sha256": problem_sha256, "numeric_backend": numeric_backend}),
         "status": "converged" if verified else "repropagation_failed",
         "converged": verified,
         "message": (

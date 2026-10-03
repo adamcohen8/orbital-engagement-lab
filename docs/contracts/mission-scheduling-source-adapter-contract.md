@@ -18,6 +18,13 @@ Every source plan declares one Julian-date UTC epoch, one relative-seconds
 scheduling horizon, the scheduler's per-asset constraints, collection-product
 references, and directed-link-product references. Source IDs are unique,
 portable identifiers and become part of generated opportunity IDs.
+For the optional single-asset orbit-bound route, the plan also declares
+`orbit_history_semantic_sha256`. Every collection source must cite this digest
+as `orbit_history_semantic_sha256`, and every directed-link manifest and packet
+must carry an identical `orbit_binding.parent_history_sha256`. Missing or
+mismatched citations fail source conversion and retained-source replay. The
+strict study inspector separately recomputes the products from the retained
+history; a matching citation alone is not physical proof.
 
 ## Collection Conversion
 

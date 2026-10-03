@@ -166,6 +166,35 @@ class MissionArchitectureMigrationTests(unittest.TestCase):
         )
         self.assertGreater(float(np.linalg.norm(np.array(out["thrust_eci_km_s2"], dtype=float))), 0.0)
 
+    def test_predictive_burn_respects_positive_lead_time_at_step_boundary(self) -> None:
+        execution = PredictiveBurnExecution(lead_time_s=1.0, alignment_tolerance_deg=180.0)
+        controller = _ConstantOrbitController([2.0e-5, 0.0, 0.0])
+        truth = _truth()
+        first = execution.update(
+            intent={"desired_state_eci_6": np.array([7100.0, 0.0, 0.0, 0.0, 7.4, 0.0])},
+            truth=truth,
+            own_knowledge={},
+            orbit_controller=controller,
+            attitude_controller=_ZeroAttitudeController(),
+            t_s=0.0,
+            dt_s=1.0,
+            env={"attitude_disabled": True},
+        )
+        truth.t_s = 1.0
+        second = execution.update(
+            intent={"desired_state_eci_6": np.array([7100.0, 0.0, 0.0, 0.0, 7.4, 0.0])},
+            truth=truth,
+            own_knowledge={},
+            orbit_controller=controller,
+            attitude_controller=_ZeroAttitudeController(),
+            t_s=1.0,
+            dt_s=1.0,
+            env={"attitude_disabled": True},
+        )
+
+        self.assertTrue(np.allclose(first["thrust_eci_km_s2"], np.zeros(3)))
+        self.assertGreater(float(np.linalg.norm(second["thrust_eci_km_s2"])), 0.0)
+
     def test_impulsive_execution_averages_pulse_over_step_interval(self) -> None:
         execution = ImpulsiveExecution(
             require_attitude_alignment=False,

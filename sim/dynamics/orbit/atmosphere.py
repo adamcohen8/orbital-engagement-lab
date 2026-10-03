@@ -10,7 +10,12 @@ import numpy as np
 
 from sim.acceleration.settings import acceleration_enabled_from_mode
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
-from sim.dynamics.orbit.epoch import datetime_to_julian_date, julian_date_to_datetime, sun_position_eci_km_enhanced
+from sim.dynamics.orbit.epoch import (
+    datetime_to_julian_date,
+    julian_date_to_datetime,
+    resolve_sun_position_eci_km,
+    sun_position_eci_km_enhanced,
+)
 from sim.dynamics.orbit.frames import (
     FRAME_MODEL_IAU76_80_EOP,
     apparent_sidereal_time_hpop_like,
@@ -168,8 +173,21 @@ def _radial_altitude_km_from_eci(r_eci_km: np.ndarray) -> float:
 
 
 def _ecef_from_eci_for_atmosphere(r_eci_km: np.ndarray, t_s: float, env: dict) -> np.ndarray:
+    prepared = env.get("_prepared_density_frame")
+    if prepared is not None:
+        return prepared.rotation(float(t_s)) @ np.asarray(r_eci_km, dtype=float).reshape(3)
     frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", "simple"))).strip().lower()
     eop_path = env.get("density_eop_path", env.get("drag_eop_path"))
+    if env.get("_rust_numeric_backend") == "rust" and not _is_eop_frame_model(frame_model):
+        from sim.rust_environment_backend import try_rotation
+
+        rotation = try_rotation(
+            float(t_s),
+            jd_utc_start=None if env.get("jd_utc_start") is None else float(env["jd_utc_start"]),
+            earth_rotation_rad_s=7.2921159e-5,
+        )
+        if rotation is not None:
+            return rotation @ np.asarray(r_eci_km, dtype=float).reshape(3)
     return eci_to_ecef_harmonic(
         r_eci_km,
         float(t_s),
@@ -197,8 +215,17 @@ def _is_eop_frame_model(frame_model: str) -> bool:
 
 def _altitude_km_from_eci(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
     env = {} if env is None else env
+    coordinates = env.get("_native_density_coordinates")
+    if coordinates is not None:
+        return float(coordinates[0])
     r_ecef_km = _ecef_from_eci_for_atmosphere(r_eci_km, t_s, env)
     if str(env.get("geodetic_model", "")).lower() == "wgs84":
+        if env.get("_rust_numeric_backend") == "rust":
+            from sim.rust_environment_backend import try_geodetic
+
+            geodetic = try_geodetic(r_ecef_km)
+            if geodetic is not None:
+                return float(max(float(geodetic[2]), 0.0))
         alt_km = ecef_to_geodetic_altitude_km(r_ecef_km)
         return float(max(alt_km, 0.0))
     return float(max(0.0, np.linalg.norm(r_ecef_km) - EARTH_RADIUS_KM))
@@ -206,8 +233,17 @@ def _altitude_km_from_eci(r_eci_km: np.ndarray, t_s: float, env: dict | None = N
 
 def _spherical_lat_lon_deg_from_eci(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> tuple[float, float]:
     env = {} if env is None else env
+    coordinates = env.get("_native_density_coordinates")
+    if coordinates is not None:
+        return (float(coordinates[1]), float(coordinates[2]))
     r_ecef_km = _ecef_from_eci_for_atmosphere(r_eci_km, t_s, env)
     if str(env.get("geodetic_model", "")).lower() == "wgs84":
+        if env.get("_rust_numeric_backend") == "rust":
+            from sim.rust_environment_backend import try_geodetic
+
+            geodetic = try_geodetic(r_ecef_km)
+            if geodetic is not None:
+                return float(geodetic[0]), float(geodetic[1])
         lat, lon, _ = ecef_to_geodetic_deg_km(r_ecef_km)
         return float(lat), float(lon)
     r = float(np.linalg.norm(r_ecef_km))
@@ -226,8 +262,17 @@ def _altitude_lat_lon_deg_from_eci(
 ) -> tuple[float, float, float]:
     """Return atmosphere position coordinates from one ECI-to-ECEF conversion."""
     env = {} if env is None else env
+    coordinates = env.get("_native_density_coordinates")
+    if coordinates is not None:
+        return tuple(float(value) for value in coordinates)
     r_ecef_km = _ecef_from_eci_for_atmosphere(r_eci_km, t_s, env)
     if str(env.get("geodetic_model", "")).lower() == "wgs84":
+        if env.get("_rust_numeric_backend") == "rust":
+            from sim.rust_environment_backend import try_geodetic
+
+            geodetic = try_geodetic(r_ecef_km)
+            if geodetic is not None:
+                return float(max(float(geodetic[2]), 0.0)), float(geodetic[0]), float(geodetic[1])
         if acceleration_enabled_from_mode():
             lat_deg, lon_deg, alt_km = _compiled_ecef_to_geodetic_deg_km()(r_ecef_km)
         else:
@@ -244,6 +289,37 @@ def _altitude_lat_lon_deg_from_eci(
 
 
 def density_exponential(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) -> float:
+    if env is not None and env.get("_rust_numeric_backend") == "rust":
+        from sim.rust_environment_backend import try_exponential_density, try_radial_exponential_density
+        if env is None or _EXPONENTIAL_ENV_KEYS.isdisjoint(env):
+            ceiling_km = 1000.0
+            rho_ref = 1.225
+            reference_altitude_km = 0.0
+            scale_height_km = 8.5
+        else:
+            ceiling_km = float(env.get("exponential_ceiling_altitude_km", 1000.0))
+            rho_ref = float(env.get("exponential_reference_density_kg_m3", 1.225))
+            reference_altitude_km = float(env.get("exponential_reference_altitude_km", 0.0))
+            scale_height_km = float(env.get("exponential_scale_height_km", 8.5))
+        native = try_radial_exponential_density(
+            r_eci_km,
+            radius_km=EARTH_RADIUS_KM,
+            reference_density_kg_m3=rho_ref,
+            reference_altitude_km=reference_altitude_km,
+            scale_height_km=scale_height_km,
+            ceiling_km=ceiling_km,
+        )
+        if native is not None:
+            return native
+        native = try_exponential_density(
+            _radial_altitude_km_from_eci(r_eci_km),
+            reference_density_kg_m3=rho_ref,
+            reference_altitude_km=reference_altitude_km,
+            scale_height_km=scale_height_km,
+            ceiling_km=ceiling_km,
+        )
+        if native is not None:
+            return native
     alt_km = _radial_altitude_km_from_eci(r_eci_km)
     if env is None or _EXPONENTIAL_ENV_KEYS.isdisjoint(env):
         if alt_km > 1000.0:
@@ -311,6 +387,7 @@ def _local_solar_time_epoch_terms(
 
 
 def _local_solar_time_hr(lon_deg: float, dt_utc: datetime, env: dict) -> float:
+    """Legacy MSIS-86 solar-time convention; NRLMSISE uses a common frame."""
     jd = datetime_to_julian_date(dt_utc)
     frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", ""))).strip().lower()
     eop_path_raw = env.get("density_eop_path", env.get("drag_eop_path")) if _is_eop_frame_model(frame_model) else None
@@ -325,6 +402,37 @@ def _local_solar_time_hr(lon_deg: float, dt_utc: datetime, env: dict) -> float:
         str(env.get("eop_extrapolation", "error") or "error"),
     )
     hour_angle = (sidereal + math.radians(float(lon_deg)) - sun_ra + math.pi) % (2.0 * math.pi) - math.pi
+    return float((12.0 + hour_angle * 12.0 / math.pi) % 24.0)
+
+
+def _nrlmsise00_sun_longitude_rad(
+    dt_utc: datetime,
+    t_s: float,
+    env: dict,
+    *,
+    rotation: np.ndarray | None = None,
+) -> float:
+    """Resolve the Sun in the same Earth-fixed frame as density coordinates.
+
+    The ephemeris owner supplies J2000 vectors, including explicit/sampled
+    inputs and their coverage guards. Sidereal time alone cannot transform
+    their right ascension into the full IAU-76/80 density frame.
+    """
+    solar_env = env
+    if env.get("jd_utc") is None and env.get("jd_utc_start") is None:
+        solar_env = {**env, "jd_utc": datetime_to_julian_date(dt_utc)}
+    sun = resolve_sun_position_eci_km(solar_env, float(t_s))
+    sun_fixed = (
+        _ecef_from_eci_for_atmosphere(sun, t_s, env)
+        if rotation is None
+        else rotation @ sun
+    )
+    return math.atan2(float(sun_fixed[1]), float(sun_fixed[0]))
+
+
+def _nrlmsise00_local_solar_time_hr(lon_deg: float, dt_utc: datetime, t_s: float, env: dict) -> float:
+    sun_lon = _nrlmsise00_sun_longitude_rad(dt_utc, t_s, env)
+    hour_angle = (math.radians(float(lon_deg)) - sun_lon + math.pi) % (2.0 * math.pi) - math.pi
     return float((12.0 + hour_angle * 12.0 / math.pi) % 24.0)
 
 
@@ -411,11 +519,7 @@ def density_nrlmsise00(r_eci_km: np.ndarray, t_s: float, env: dict | None = None
         return float(max(0.0, custom_fn(alt_km, lat_deg, lon_deg, dt_utc, env_local)))
     lst_hr = env_source.get("nrlmsise00_lst_hr")
     if lst_hr is None:
-        frame_model = str(
-            env_source.get("density_frame_model", env_source.get("drag_frame_model", ""))
-        ).strip().lower()
-        if _is_eop_frame_model(frame_model):
-            lst_hr = _local_solar_time_hr(lon_deg, dt_utc, env_source)
+        lst_hr = _nrlmsise00_local_solar_time_hr(lon_deg, dt_utc, t_s, env_source)
 
     return float(
         max(
@@ -443,17 +547,7 @@ def density_msis86(r_eci_km: np.ndarray, t_s: float, env: dict | None = None) ->
         return float(max(0.0, custom_fn(alt_km, lat_deg, lon_deg, dt_utc, env)))
     if bool(env.get("msis86_hpop_angle_compat", True)):
         if env.get("msis86_lst_hr") is None:
-            frame_model = str(env.get("density_frame_model", env.get("drag_frame_model", ""))).strip().lower()
-            if _is_eop_frame_model(frame_model):
-                env["msis86_lst_hr"] = _local_solar_time_hr(lon_deg, dt_utc, env)
-            else:
-                eop_path = None
-                sidereal = apparent_sidereal_time_hpop_like(datetime_to_julian_date(dt_utc), eop_path)
-                env["msis86_lst_hr"] = (
-                    ((math.radians(float(lon_deg)) + sidereal) % (2.0 * math.pi))
-                    * 24.0
-                    / (2.0 * math.pi)
-                )
+            env["msis86_lst_hr"] = _local_solar_time_hr(lon_deg, dt_utc, env)
         lat_deg = math.radians(lat_deg)
         lon_deg = math.radians(lon_deg)
     return float(max(0.0, _msis86_backend()(alt_km, lat_deg, lon_deg, dt_utc, env)))

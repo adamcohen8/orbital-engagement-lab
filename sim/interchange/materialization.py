@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
+import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +19,18 @@ ONP_MATERIALIZATION_ADAPTER_ID = "oel.state_estimate_to_onp"
 ONP_MATERIALIZATION_ADAPTER_VERSION = "1"
 OGP_MATERIALIZATION_ADAPTER_ID = "oel.ogp_mean_elements_to_ogp"
 OGP_MATERIALIZATION_ADAPTER_VERSION = "1"
+
+
+def _ensure_distinct_materialization_paths(
+    paths: tuple[tuple[str, Path], ...],
+    error_type: type[ValueError] = ValueError,
+) -> None:
+    for index, (left_label, left_path) in enumerate(paths):
+        for right_label, right_path in paths[index + 1 :]:
+            if left_path == right_path:
+                raise error_type(
+                    f"Materialization targets must be distinct: {left_label} and {right_label} both resolve to {left_path}."
+                )
 
 
 class ONPMaterializationError(ValueError):
@@ -45,6 +59,10 @@ def materialize_onp(
         Path(manifest_path).expanduser().resolve()
         if manifest_path is not None
         else destination.with_name(f"{destination.stem}.handoff_manifest.json")
+    )
+    _ensure_distinct_materialization_paths(
+        (("source product", product_path), ("scenario", destination), ("manifest", manifest_target)),
+        ONPMaterializationError,
     )
     if not str(scenario_name or "").strip():
         raise ONPMaterializationError("scenario_name must be non-empty.")
@@ -158,6 +176,10 @@ def materialize_ogp(
         if manifest_path is not None
         else destination.with_name(f"{destination.stem}.handoff_manifest.json")
     )
+    _ensure_distinct_materialization_paths(
+        (("source product", product_path), ("scenario", destination), ("manifest", manifest_target)),
+        OGPMaterializationError,
+    )
     if not str(scenario_name or "").strip() or float(duration_s) <= 0.0 or float(dt_s) <= 0.0:
         raise OGPMaterializationError("scenario_name must be non-empty and duration_s/dt_s must be positive.")
     product = load_interchange_document(product_path)
@@ -236,6 +258,7 @@ def materialize_scenario_document(
 
     destination = Path(destination).expanduser().resolve()
     manifest_target = Path(manifest_target).expanduser().resolve()
+    _ensure_distinct_materialization_paths((("scenario", destination), ("manifest", manifest_target)))
     created_utc = str(base_manifest.get("created_utc", "") or _now_utc())
     try:
         artifact = ScenarioArtifact.from_dict(scenario)
@@ -280,9 +303,35 @@ def materialize_scenario_document(
             "status": "materializing",
         }
         write_handoff_manifest(pending_manifest, manifest_target)
-        temporary = destination.with_name(f".{destination.name}.materializing")
-        temporary.write_text(yaml_text, encoding="utf-8")
-        temporary.replace(destination)
+        temporary = _write_materialization_temp(destination, yaml_text)
+        try:
+            if overwrite:
+                temporary.replace(destination)
+            else:
+                try:
+                    os.link(temporary, destination)
+                except FileExistsError:
+                    existing_identical = _destination_matches_text(destination, yaml_text)
+                    if not existing_identical:
+                        manifest = _failed_manifest(
+                            base_manifest,
+                            output_status="not_written",
+                            failures=[
+                                {
+                                    "code": "output.exists",
+                                    "path": str(destination),
+                                    "message": (
+                                        "Destination appeared during materialization with different content; "
+                                        "pass overwrite=True explicitly to replace it."
+                                    ),
+                                }
+                            ],
+                            next_action="Choose a new scenario path or explicitly authorize overwrite.",
+                        )
+                        write_handoff_manifest(manifest, manifest_target)
+                        return _result("blocked", destination, manifest_target, manifest, product_report)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     from sim.api import SimulationWorkspace
 
@@ -296,9 +345,10 @@ def materialize_scenario_document(
             "status": "trust_required" if safe_validation.get("ok") else "not_run",
             "reason": "trust_not_granted" if safe_validation.get("ok") else "safe_validation_failed",
         }
+    destination_matches_generated = _destination_matches_text(destination, yaml_text)
     validation_ok = bool(safe_validation.get("ok", False)) and (
         not trust_plugins or bool(ordinary_validation.get("ok", False))
-    )
+    ) and destination_matches_generated
     scenario_digest = canonical_scenario_digest(artifact.to_artifact_dict())
     output_status = "validated" if validation_ok else "validation_failed"
     failures = []
@@ -306,6 +356,14 @@ def materialize_scenario_document(
         failures.extend(_validation_failures("safe_validation", safe_validation))
     if trust_plugins and not ordinary_validation.get("ok"):
         failures.extend(_validation_failures("ordinary_validation", ordinary_validation))
+    if not destination_matches_generated:
+        failures.append(
+            {
+                "code": "output.changed_during_validation",
+                "path": str(destination),
+                "message": "Scenario content changed during validation; materialization is not reported as successful.",
+            }
+        )
     manifest = deepcopy(base_manifest)
     manifest["output"] = {
         "kind": str(output_kind),
@@ -326,6 +384,19 @@ def materialize_scenario_document(
     )
     manifest = finalize_handoff_manifest(manifest)
     write_handoff_manifest(manifest, manifest_target)
+    if validation_ok and not _destination_matches_text(destination, yaml_text):
+        manifest["output"]["status"] = "validation_failed"
+        manifest["failures"].append(
+            {
+                "code": "output.changed_during_validation",
+                "path": str(destination),
+                "message": "Scenario content changed before materialization completed; success is withdrawn.",
+            }
+        )
+        manifest["recommended_next_action"] = "Restore or review the scenario content before treating it as materialized."
+        manifest = finalize_handoff_manifest(manifest)
+        write_handoff_manifest(manifest, manifest_target)
+        validation_ok = False
     return _result(
         "materialized" if validation_ok else "failed",
         destination,
@@ -333,6 +404,34 @@ def materialize_scenario_document(
         manifest,
         product_report,
     )
+
+
+def _write_materialization_temp(destination: Path, yaml_text: str) -> Path:
+    """Create and fully write a unique sibling file using exclusive creation."""
+
+    for _ in range(10):
+        temporary = destination.with_name(f".{destination.name}.materializing.{uuid.uuid4().hex}")
+        try:
+            descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
+        except FileExistsError:
+            continue
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(yaml_text)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+        return temporary
+    raise FileExistsError(f"Could not allocate a unique materialization file beside {destination}.")
+
+
+def _destination_matches_text(destination: Path, expected_text: str) -> bool:
+    try:
+        return destination.is_file() and destination.read_text(encoding="utf-8") == expected_text
+    except (OSError, UnicodeDecodeError):
+        return False
 
 
 def canonical_scenario_digest(scenario: Mapping[str, Any]) -> str:

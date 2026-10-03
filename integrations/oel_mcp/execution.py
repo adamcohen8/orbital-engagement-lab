@@ -81,6 +81,30 @@ class PreparedScenario:
     config_dict: dict[str, Any]
 
 
+def bounded_config_path_policy(
+    *,
+    config_path: str | Path,
+    path_policy: MCPPathPolicy,
+) -> ConfigPathPolicy:
+    """Build a config policy from only the MCP adapter's explicit roots.
+
+    ``ConfigPathPolicy.default`` adds repository, workspace, and config-directory
+    roots for ordinary CLI use. MCP callers have a narrower grant, so those
+    implicit roots must not be inherited during config loading or execution.
+    """
+
+    source = Path(config_path).expanduser().resolve()
+    return ConfigPathPolicy(
+        config_path=source,
+        workspace_root=Path(__file__).resolve().parents[2],
+        read_roots=tuple(path_policy.read_roots),
+        write_roots=tuple(path_policy.write_roots),
+        allow_external_config_paths=False,
+        allow_external_ai_prompt_files=False,
+        restrict_ai_prompt_to_read_roots=True,
+    )
+
+
 def prepare_scenario(
     *,
     config_path: str | Path,
@@ -108,13 +132,7 @@ def prepare_scenario(
     stats["print_summary"] = False
     outputs["stats"] = stats
     prepared["outputs"] = outputs
-    config_policy = ConfigPathPolicy.default(
-        config_path=source,
-        workspace_root=Path(__file__).resolve().parents[2],
-        read_roots=path_policy.read_roots,
-        write_roots=path_policy.write_roots,
-        allow_config_dir_writes=False,
-    )
+    config_policy = bounded_config_path_policy(config_path=source, path_policy=path_policy)
     config = scenario_config_from_dict(prepared, source_path=source, path_policy=config_policy)
     sealed_errors = validate_sealed_mode(config)
     ai_report = dict(config.outputs.ai_report or {})
@@ -437,6 +455,7 @@ __all__ = [
     "ExecutionApprovalPolicy",
     "MCPExecutionCancelled",
     "PreparedScenario",
+    "bounded_config_path_policy",
     "cancellation_callback",
     "complete_manifest",
     "ensure_new_output_dir",

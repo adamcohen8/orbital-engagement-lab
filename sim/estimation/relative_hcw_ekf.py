@@ -9,6 +9,7 @@ from sim.core.models import Measurement, StateBelief
 from sim.dynamics.orbit.environment import EARTH_J2, EARTH_RADIUS_KM
 from sim.dynamics.orbit.relative_linear import RelativeLinearDynamics
 from sim.estimation.orbit_ekf import _solve_innovation_gain_and_vector
+from sim.numeric_backend import normalize_numeric_backend
 
 HCW_MEASUREMENT_MODELS = {
     "relative_state",
@@ -47,6 +48,7 @@ class HCWRelativeEKFEstimator(Estimator):
     measurement_model: str = "relative_state"
     measurement_origin: str = "chief"
     meas_noise_covariance: np.ndarray | None = None
+    numeric_backend: str = "rust"
     last_update_diagnostics: HCWRelativeEKFUpdateDiagnostics | None = field(default=None, init=False, repr=False)
     _q: np.ndarray = field(default_factory=lambda: np.zeros((6, 6)), init=False, repr=False)
     _r: np.ndarray = field(default_factory=lambda: np.zeros((6, 6)), init=False, repr=False)
@@ -62,6 +64,7 @@ class HCWRelativeEKFEstimator(Estimator):
         self.process_noise_diag = _diag6(self.process_noise_diag, "process_noise_diag")
         self.measurement_model = normalize_hcw_measurement_model(self.measurement_model)
         self.measurement_origin = _normalize_measurement_origin(self.measurement_origin)
+        self.numeric_backend = _normalize_numeric_backend(self.numeric_backend)
         meas_dim = hcw_measurement_dimension(self.measurement_model)
         meas_noise = np.array(self.meas_noise_diag, dtype=float).reshape(-1)
         if meas_noise.size == 6 and meas_dim != 6:
@@ -177,7 +180,12 @@ class HCWRelativeEKFEstimator(Estimator):
         transition_key = (float(self.mean_motion_rad_s), dt_s)
         phi = self._cached_transition if self._cached_transition_key == transition_key else None
         if phi is None:
-            phi = hcw_state_transition_matrix(float(self.mean_motion_rad_s), dt_s)
+            if self.numeric_backend == "rust":
+                from sim.rust_relative_backend import hcw_state_transition_matrix as rust_hcw_state_transition_matrix
+
+                phi = rust_hcw_state_transition_matrix(float(self.mean_motion_rad_s), dt_s)
+            else:
+                phi = hcw_state_transition_matrix(float(self.mean_motion_rad_s), dt_s, numeric_backend=self.numeric_backend)
             self._cached_transition_key = transition_key
             self._cached_transition = phi
         x = np.asarray(x_prev, dtype=float).reshape(6)
@@ -214,6 +222,7 @@ class SSJ2RelativeEKFEstimator(HCWRelativeEKFEstimator):
             earth_radius_km=float(self.earth_radius_km),
             reference_eccentricity=self.reference_eccentricity,
             maximum_supported_eccentricity=float(self.maximum_supported_eccentricity),
+            numeric_backend=self.numeric_backend,
         )
 
     @classmethod
@@ -229,12 +238,14 @@ class SSJ2RelativeEKFEstimator(HCWRelativeEKFEstimator):
         j2: float = EARTH_J2,
         earth_radius_km: float = EARTH_RADIUS_KM,
         maximum_supported_eccentricity: float = 0.01,
+        numeric_backend: str = "rust",
     ) -> SSJ2RelativeEKFEstimator:
         dynamics = RelativeLinearDynamics.ss_j2_from_chief_state(
             chief_state_eci_km_s,
             j2=j2,
             earth_radius_km=earth_radius_km,
             maximum_supported_eccentricity=maximum_supported_eccentricity,
+            numeric_backend=numeric_backend,
         )
         return cls(
             mean_motion_rad_s=dynamics.mean_motion_rad_s,
@@ -249,6 +260,7 @@ class SSJ2RelativeEKFEstimator(HCWRelativeEKFEstimator):
             earth_radius_km=earth_radius_km,
             reference_eccentricity=dynamics.reference_eccentricity,
             maximum_supported_eccentricity=maximum_supported_eccentricity,
+            numeric_backend=numeric_backend,
         )
 
     def _predict(
@@ -276,8 +288,17 @@ class SSJ2RelativeEKFEstimator(HCWRelativeEKFEstimator):
         return self._relative_dynamics.metadata()
 
 
-def hcw_state_transition_matrix(mean_motion_rad_s: float, dt_s: float) -> np.ndarray:
-    return RelativeLinearDynamics.hcw(float(mean_motion_rad_s)).state_transition_matrix(float(dt_s))
+def hcw_state_transition_matrix(
+    mean_motion_rad_s: float,
+    dt_s: float,
+    *,
+    numeric_backend: str = "rust",
+) -> np.ndarray:
+    if _normalize_numeric_backend(numeric_backend) == "rust":
+        from sim.rust_relative_backend import hcw_state_transition_matrix as rust_hcw_state_transition_matrix
+
+        return rust_hcw_state_transition_matrix(float(mean_motion_rad_s), float(dt_s))
+    return RelativeLinearDynamics.hcw(float(mean_motion_rad_s), numeric_backend="python").state_transition_matrix(float(dt_s))
 
 
 def normalize_hcw_measurement_model(model: str) -> str:
@@ -319,6 +340,8 @@ def hcw_measurement_vector(model: str, state: np.ndarray, *, measurement_origin:
     origin = _normalize_measurement_origin(measurement_origin)
     x = np.asarray(state, dtype=float).reshape(6)
     sign = 1.0 if origin == "chief" else -1.0
+    if normalized == "relative_state":
+        return sign * x
     rel_r = sign * x[:3]
     rel_v = sign * x[3:]
     rng_km = float(np.linalg.norm(rel_r))
@@ -330,8 +353,6 @@ def hcw_measurement_vector(model: str, state: np.ndarray, *, measurement_origin:
         range_rate = float(np.dot(rel_v, los))
     az = float(np.arctan2(los[1], los[0])) if rng_km > 0.0 else 0.0
     el = float(np.arcsin(np.clip(los[2], -1.0, 1.0))) if rng_km > 0.0 else 0.0
-    if normalized == "relative_state":
-        return sign * x
     if normalized == "relative_range":
         return np.array([rng_km], dtype=float)
     if normalized == "relative_range_rate":
@@ -400,6 +421,11 @@ def _diag6(value: np.ndarray, field_name: str) -> np.ndarray:
     if np.any(~np.isfinite(arr)) or np.any(arr < 0.0):
         raise ValueError(f"{field_name} must be finite and non-negative.")
     return arr
+
+
+def _normalize_numeric_backend(value: str) -> str:
+    normalized = normalize_numeric_backend("python" if value is None else value, error_message="numeric_backend must be 'python' or 'rust'.")
+    return normalized
 
 
 def _validated_update_epochs(

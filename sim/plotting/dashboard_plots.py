@@ -17,7 +17,7 @@ from sim.plotting.single_run_context import (
     _save_show_close,
 )
 from sim.plotting.single_run_math import _cumulative_delta_v_m_s
-from sim.plotting.style import role_color
+from sim.plotting.style import role_color, tight_layout_oel_figure
 from sim.utils.figure_size import cap_figsize
 
 ArrayMap = dict[str, np.ndarray]
@@ -123,7 +123,7 @@ def plot_run_dashboard(
         ax_rate.legend(loc="best")
 
     fig.suptitle("Run Dashboard")
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig
 
@@ -167,7 +167,7 @@ def plot_rendezvous_summary(
     if subj is None or ref is None:
         for ax in axes.ravel():
             ax.text(0.5, 0.5, "No rendezvous pair available", ha="center", va="center", transform=ax.transAxes)
-        fig.tight_layout()
+        tight_layout_oel_figure(fig)
         _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
         return fig
 
@@ -275,7 +275,7 @@ def plot_rendezvous_summary(
 
     title = "Curvilinear Rendezvous Summary" if summary_frame == "curvilinear" else "Rendezvous Summary"
     fig.suptitle(f"{title} ({subj_id} vs {ref_id})")
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig
 
@@ -331,6 +331,6 @@ def plot_control_effort(
     axes[1].set_xlabel("time (s)")
     axes[1].grid(True, alpha=0.3)
     axes[1].legend(loc="best")
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig

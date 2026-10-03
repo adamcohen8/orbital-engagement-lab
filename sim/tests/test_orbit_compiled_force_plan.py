@@ -108,6 +108,75 @@ def test_compiled_force_plan_is_numerically_equivalent_for_drag_and_full_force_s
     )
 
 
+@pytest.mark.parametrize("solar_input", ["explicit", "sampled", "analytic", "override"])
+def test_fused_nrlmsise_uses_common_frame_and_current_solar_inputs(solar_input):
+    _require_compiled_acceleration()
+    state, env, context = _case()
+    # This supported fused envelope uses simple drag velocity and a full EOP
+    # density frame. The default EOP drag evaluator intentionally falls back.
+    env["drag_frame_model"] = "simple"
+    env.pop("moon_pos_eci_km")
+    if solar_input == "sampled":
+        env["sun_ephemeris_time_s"] = [0., 300.]
+        env["sun_ephemeris_eci_km"] = [env["sun_pos_eci_km"], -env["sun_pos_eci_km"]]
+    elif solar_input == "analytic":
+        env.pop("sun_pos_eci_km")
+    elif solar_input == "override":
+        env.pop("sun_pos_eci_km")
+        env["nrlmsise00_lst_hr"] = 6.0
+    fused = OrbitPropagator(plugins=[drag_plugin], acceleration_mode="auto")
+    reference = OrbitPropagator(plugins=[drag_plugin], acceleration_mode="off")
+    with acceleration_context("auto", allow_env_override=False):
+        for index in range(3):
+            if solar_input == "override" and index:
+                env["nrlmsise00_lst_hr"] += 6.0
+            expected = reference._propagate_builtin_rk4(
+                x_eci=state, dt_s=10., t_s=index*10., command_accel_eci_km_s2=np.zeros(3), env=env, ctx=context)
+            actual = fused._try_propagate_compiled_builtin_rk4(
+                x_eci=state, dt_s=10., t_s=index*10., command_accel_eci_km_s2=np.zeros(3), env=env, ctx=context)
+            assert actual is not None
+            np.testing.assert_allclose(actual, expected, rtol=0., atol=2e-11)
+            state = expected
+
+
+def test_fused_solar_endpoint_reloads_rewritten_eop_and_rejects_deleted_file(tmp_path):
+    _require_compiled_acceleration()
+    state, env, context = _case()
+    env.pop("sun_pos_eci_km")
+    env.pop("moon_pos_eci_km")
+    env["drag_frame_model"] = "simple"
+    path = tmp_path / "eop.txt"
+    path.write_text("NUM_OBSERVED_POINTS 2\n"
+                    "2022 03 31 59669 .1 .2 -.1 0 0 0 0 0 37\n"
+                    "2022 04 01 59670 .1 .2 -.1 0 0 0 0 0 37\n")
+    env["density_eop_path"] = str(path)
+    fused = OrbitPropagator(plugins=[drag_plugin], acceleration_mode="auto")
+    reference = OrbitPropagator(plugins=[drag_plugin], acceleration_mode="off")
+    args = dict(x_eci=state, dt_s=10., command_accel_eci_km_s2=np.zeros(3), env=env, ctx=context)
+    with acceleration_context("auto", allow_env_override=False):
+        assert fused._try_propagate_compiled_builtin_rk4(t_s=0., **args) is not None
+        old_key = fused._compiled_endpoint_cache_key
+        path.write_text(path.read_text().replace(".1 .2", "1.1 2.2"))
+        assert fused._compiled_endpoint_environment_signature(env, (drag_plugin,)) != old_key[1]
+        expected = reference._propagate_builtin_rk4(t_s=10., **args)
+        actual = fused._try_propagate_compiled_builtin_rk4(t_s=10., **args)
+        np.testing.assert_allclose(actual, expected, rtol=0., atol=2e-11)
+        path.unlink()
+        with pytest.raises(FileNotFoundError):
+            fused._try_propagate_compiled_builtin_rk4(t_s=20., **args)
+
+
+@pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf])
+def test_fused_nonfinite_solar_override_keeps_reference_handling(value):
+    _require_compiled_acceleration()
+    state, env, context = _case()
+    env.update(drag_frame_model="simple", nrlmsise00_lst_hr=value)
+    prop = OrbitPropagator(plugins=[drag_plugin], acceleration_mode="auto")
+    with acceleration_context("auto", allow_env_override=False):
+        assert prop._try_propagate_compiled_builtin_rk4(
+            x_eci=state, dt_s=10., t_s=0., command_accel_eci_km_s2=np.zeros(3), env=env, ctx=context) is None
+
+
 def test_eop_drag_avoids_the_incomplete_compiled_rotation_path() -> None:
     _require_compiled_acceleration()
     state, env, context = _case()
@@ -159,7 +228,7 @@ def test_compiled_force_plan_reuses_exact_previous_endpoint_environment() -> Non
         third_body_moon_plugin,
     ]
     with acceleration_context("auto", allow_env_override=False):
-        reference = OrbitPropagator(integrator="rk4", plugins=plugins, acceleration_mode="auto")
+        reference = OrbitPropagator(integrator="rk4", plugins=plugins, acceleration_mode="auto", numeric_backend="python")
         expected_first = reference._propagate_builtin_rk4(
             x_eci=state,
             dt_s=10.0,
@@ -177,7 +246,7 @@ def test_compiled_force_plan_reuses_exact_previous_endpoint_environment() -> Non
             ctx=context,
         )
 
-        accelerated = OrbitPropagator(integrator="rk4", plugins=plugins, acceleration_mode="auto")
+        accelerated = OrbitPropagator(integrator="rk4", plugins=plugins, acceleration_mode="auto", numeric_backend="python")
         original_resolver = propagator_module.resolve_sun_moon_positions
         with patch.object(
             propagator_module,

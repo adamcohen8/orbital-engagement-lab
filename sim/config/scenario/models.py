@@ -70,10 +70,25 @@ def _plain_config_data(value: Any) -> Any:
         if not value.force_models:
             data.pop("force_models", None)
         return data
+    if isinstance(value, SimulatorSection):
+        data = {item.name: _plain_config_data(getattr(value, item.name)) for item in fields(value)}
+        if not value.system_force_models:
+            data.pop("system_force_models", None)
+        if not value.collisions:
+            data.pop("collisions", None)
+        return data
     if isinstance(value, OutputsSection):
         data = {item.name: _plain_config_data(getattr(value, item.name)) for item in fields(value)}
         if not value.campaign_retention:
             data.pop("campaign_retention", None)
+        return data
+    if isinstance(value, MonteCarloConstraint):
+        data = {item.name: _plain_config_data(getattr(value, item.name)) for item in fields(value)}
+        # A path-backed constraint has no constant value.  Omit the dataclass
+        # default so round-tripping the normalized config preserves the
+        # authored one-of contract and does not look like an explicit null.
+        if value.right_path is not None and value.right_value is None:
+            data.pop("right_value", None)
         return data
     if is_dataclass(value) and not isinstance(value, type):
         return {item.name: _plain_config_data(getattr(value, item.name)) for item in fields(value)}
@@ -144,6 +159,7 @@ class AgentSection:
     force_models: list[AlgorithmPointer] = field(default_factory=list)
     bridge: BridgePointer | None = None
     knowledge: dict[str, Any] = field(default_factory=dict)
+    force_models: list[AlgorithmPointer] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -263,6 +279,8 @@ class SimulatorSection:
         default_factory=lambda: SimulatorPluginValidationSection()
     )
     termination: SimulatorTerminationSection = field(default_factory=lambda: SimulatorTerminationSection())
+    system_force_models: list[AlgorithmPointer] = field(default_factory=list)
+    collisions: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "acceleration", SimulatorAccelerationSection(self.acceleration))
@@ -541,6 +559,7 @@ class OutputsSection:
     review: OutputReviewSection = field(default_factory=OutputReviewSection)
     orbital_analysis: OutputOrbitalAnalysisSection = field(default_factory=OutputOrbitalAnalysisSection)
     resource_limits: OutputResourceLimitsSection = field(default_factory=OutputResourceLimitsSection)
+    campaign_retention: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "stats", OutputStatsSection(self.stats))
@@ -564,6 +583,7 @@ class MonteCarloVariation:
     high: float | None = None
     mean: float | None = None
     std: float | None = None
+    weights: list[float] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -709,6 +729,7 @@ class CovarianceSection:
     finite_difference: CovarianceFiniteDifferenceSection = field(default_factory=CovarianceFiniteDifferenceSection)
     process_noise: CovarianceProcessNoiseSection = field(default_factory=CovarianceProcessNoiseSection)
     write_review_tables: bool = True
+    numeric_backend: str = "rust"
 
 
 @dataclass(frozen=True)

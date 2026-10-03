@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orbital-engineering-lab"
-version = "0.31.0"
+version = "0.32.0"
 description = "Integrated spacecraft simulation and analysis platform for rendezvous, control, validation, and mission prototyping."
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
@@ -27,6 +27,8 @@ classifiers = [
   "Topic :: Scientific/Engineering",
 ]
 dependencies = [
+  "oel-rust-game>=0.5,<0.6",
+  "oel-rust-orbit>=0.17,<0.18",
   "numpy>=2.1,<2.5",
   "matplotlib>=3.8,<3.12",
   "tqdm>=4.65,<5",
@@ -49,6 +51,8 @@ dev = [
   "tomli>=2,<3; python_version < '3.11'",
 ]
 game = [
+  "oel-rust-game>=0.5,<0.6",
+  "oel-rust-orbit>=0.17,<0.18",
   "pygame>=2.5,<3; python_version < '3.14'",
   "pygame-ce>=2.5,<3; python_version >= '3.14'",
   "Pillow>=12,<13",
@@ -71,6 +75,8 @@ cross-platform = [
   "ruff==0.15.14",
   "setuptools>=83,<84",
   "tomli>=2,<3; python_version < '3.11'",
+  "oel-rust-game>=0.5,<0.6",
+  "oel-rust-orbit>=0.17,<0.18",
   "pygame>=2.5,<3; python_version < '3.14'",
   "pygame-ce>=2.5,<3; python_version >= '3.14'",
   "Pillow>=12,<13",
@@ -87,6 +93,8 @@ full = [
   "ruff==0.15.14",
   "setuptools>=83,<84",
   "tomli>=2,<3; python_version < '3.11'",
+  "oel-rust-game>=0.5,<0.6",
+  "oel-rust-orbit>=0.17,<0.18",
   "pygame>=2.5,<3; python_version < '3.14'",
   "pygame-ce>=2.5,<3; python_version >= '3.14'",
   "Pillow>=12,<13",
@@ -158,6 +166,7 @@ extend-exclude = [
   "examples/outputs",
   "validation/High Precision Orbit Propagator_4-2",
   "validation/data",
+  "validation/external",
 ]
 
 [tool.ruff.lint]

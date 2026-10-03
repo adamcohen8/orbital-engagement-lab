@@ -21,6 +21,7 @@ from sim.estimation.relative_hcw_ekf import (
     hcw_measurement_vector,
     normalize_hcw_measurement_model,
 )
+from sim.numeric_backend import normalize_numeric_backend
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,7 @@ class THRelativeEKFEstimator(Estimator):
     integration_substep_s: float = 10.0
     transition_model: str = "variational_stm"
     meas_noise_covariance: np.ndarray | None = None
+    numeric_backend: str = "rust"
     last_update_diagnostics: THRelativeEKFUpdateDiagnostics | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -73,6 +75,7 @@ class THRelativeEKFEstimator(Estimator):
         if not np.isfinite(self.integration_substep_s) or self.integration_substep_s <= 0.0:
             raise ValueError("integration_substep_s must be positive.")
         self.transition_model = _normalize_transition_model(self.transition_model)
+        self.numeric_backend = _normalize_numeric_backend(self.numeric_backend)
         self.process_noise_diag = _diag6(self.process_noise_diag, "process_noise_diag")
         self.measurement_model = normalize_hcw_measurement_model(self.measurement_model)
         self.measurement_origin = _normalize_measurement_origin(self.measurement_origin)
@@ -200,13 +203,59 @@ class THRelativeEKFEstimator(Estimator):
             return x.copy(), 0.5 * (p + p.T)
 
         chief_start = self._chief_state_at(from_t)
-        if self.transition_model == "closed_form_ya":
+        if self.numeric_backend == "rust":
+            from sim.rust_relative_backend import (
+                th_finite_difference_transition_matrix as rust_th_finite_difference_transition_matrix,
+            )
+            from sim.rust_relative_backend import (
+                th_propagate_relative_state as rust_th_propagate_relative_state,
+            )
+            from sim.rust_relative_backend import (
+                th_variational_propagate_relative_state_and_stm as rust_th_variational_propagate_relative_state_and_stm,
+            )
+            from sim.rust_relative_backend import (
+                ya_propagate_relative_state_and_stm as rust_ya_propagate_relative_state_and_stm,
+            )
+
+            if self.transition_model == "closed_form_ya":
+                x_pred, phi = rust_ya_propagate_relative_state_and_stm(
+                    x,
+                    dt_s,
+                    chief_start,
+                    mu_km3_s2=float(self.mu_km3_s2),
+                    max_step_s=float(self.integration_substep_s),
+                )
+            elif self.transition_model == "variational_stm":
+                x_pred, phi = rust_th_variational_propagate_relative_state_and_stm(
+                    x,
+                    dt_s,
+                    chief_start,
+                    mu_km3_s2=float(self.mu_km3_s2),
+                    max_step_s=float(self.integration_substep_s),
+                )
+            else:
+                x_pred = rust_th_propagate_relative_state(
+                    x,
+                    dt_s,
+                    chief_start,
+                    mu_km3_s2=float(self.mu_km3_s2),
+                    max_step_s=float(self.integration_substep_s),
+                )
+                phi = rust_th_finite_difference_transition_matrix(
+                    x,
+                    dt_s,
+                    chief_start,
+                    mu_km3_s2=float(self.mu_km3_s2),
+                    max_step_s=float(self.integration_substep_s),
+                )
+        elif self.transition_model == "closed_form_ya":
             x_pred, phi = ya_closed_form_propagate_relative_state_and_stm(
                 x,
                 dt_s,
                 chief_start,
                 mu_km3_s2=float(self.mu_km3_s2),
                 max_step_s=float(self.integration_substep_s),
+                numeric_backend=self.numeric_backend,
             )
         elif self.transition_model == "variational_stm":
             x_pred, phi = th_variational_propagate_relative_state_and_stm(
@@ -215,6 +264,7 @@ class THRelativeEKFEstimator(Estimator):
                 chief_start,
                 mu_km3_s2=float(self.mu_km3_s2),
                 max_step_s=float(self.integration_substep_s),
+                numeric_backend=self.numeric_backend,
             )
         else:
             x_pred = th_propagate_relative_state(
@@ -223,6 +273,7 @@ class THRelativeEKFEstimator(Estimator):
                 chief_start,
                 mu_km3_s2=float(self.mu_km3_s2),
                 max_step_s=float(self.integration_substep_s),
+                numeric_backend=self.numeric_backend,
             )
             phi = th_relative_transition_matrix(
                 x,
@@ -230,6 +281,7 @@ class THRelativeEKFEstimator(Estimator):
                 chief_start,
                 mu_km3_s2=float(self.mu_km3_s2),
                 max_step_s=float(self.integration_substep_s),
+                numeric_backend=self.numeric_backend,
             )
         q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
         p_pred = phi @ p @ phi.T + np.diag(self.process_noise_diag) * max(q_scale, 0.0)
@@ -267,11 +319,22 @@ def th_propagate_relative_state(
     *,
     mu_km3_s2: float = EARTH_MU_KM3_S2,
     max_step_s: float = 10.0,
+    numeric_backend: str = "rust",
 ) -> np.ndarray:
     """Propagate linearized eccentric-chief RIC relative motion."""
 
     rel = _state6(relative_state_ric, "relative_state_ric")
     chief = _state6(chief_state_eci_km_s, "chief_state_eci_km_s")
+    if _normalize_numeric_backend(numeric_backend) == "rust":
+        from sim.rust_relative_backend import th_propagate_relative_state as rust_th_propagate
+
+        return rust_th_propagate(
+            rel,
+            float(dt_s),
+            chief,
+            mu_km3_s2=float(mu_km3_s2),
+            max_step_s=float(max_step_s),
+        )
     state = np.hstack((chief, rel)).astype(float)
     propagated = _integrate_state(state, float(dt_s), float(mu_km3_s2), float(max_step_s), _th_combined_derivative)
     return propagated[6:12]
@@ -284,10 +347,21 @@ def th_relative_transition_matrix(
     *,
     mu_km3_s2: float = EARTH_MU_KM3_S2,
     max_step_s: float = 10.0,
+    numeric_backend: str = "rust",
 ) -> np.ndarray:
     """Return a finite-difference STM for the TH-integrated relative propagator."""
 
     x = _state6(relative_state_ric, "relative_state_ric")
+    if _normalize_numeric_backend(numeric_backend) == "rust":
+        from sim.rust_relative_backend import th_finite_difference_transition_matrix
+
+        return th_finite_difference_transition_matrix(
+            x,
+            float(dt_s),
+            _state6(chief_state_eci_km_s, "chief_state_eci_km_s"),
+            mu_km3_s2=float(mu_km3_s2),
+            max_step_s=float(max_step_s),
+        )
     phi = np.zeros((6, 6), dtype=float)
     base = th_propagate_relative_state(
         x,
@@ -295,6 +369,7 @@ def th_relative_transition_matrix(
         chief_state_eci_km_s,
         mu_km3_s2=mu_km3_s2,
         max_step_s=max_step_s,
+        numeric_backend=numeric_backend,
     )
     eps = np.array([1e-5, 1e-5, 1e-5, 1e-8, 1e-8, 1e-8], dtype=float)
     for idx in range(6):
@@ -306,6 +381,7 @@ def th_relative_transition_matrix(
             chief_state_eci_km_s,
             mu_km3_s2=mu_km3_s2,
             max_step_s=max_step_s,
+            numeric_backend=numeric_backend,
         )
         phi[:, idx] = (hp - base) / eps[idx]
     return phi
@@ -318,11 +394,22 @@ def th_variational_propagate_relative_state_and_stm(
     *,
     mu_km3_s2: float = EARTH_MU_KM3_S2,
     max_step_s: float = 10.0,
+    numeric_backend: str = "rust",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Propagate relative state and STM through the TH variational equations."""
 
     rel = _state6(relative_state_ric, "relative_state_ric")
     chief = _state6(chief_state_eci_km_s, "chief_state_eci_km_s")
+    if _normalize_numeric_backend(numeric_backend) == "rust":
+        from sim.rust_relative_backend import th_variational_propagate_relative_state_and_stm as rust_th_variational
+
+        return rust_th_variational(
+            rel,
+            float(dt_s),
+            chief,
+            mu_km3_s2=float(mu_km3_s2),
+            max_step_s=float(max_step_s),
+        )
     phi0 = np.eye(6, dtype=float).reshape(36)
     state = np.hstack((chief, rel, phi0)).astype(float)
     propagated = _integrate_state(
@@ -342,6 +429,7 @@ def th_variational_transition_matrix(
     *,
     mu_km3_s2: float = EARTH_MU_KM3_S2,
     max_step_s: float = 10.0,
+    numeric_backend: str = "rust",
 ) -> np.ndarray:
     """Return the variational STM for linearized eccentric-chief RIC motion."""
 
@@ -351,6 +439,16 @@ def th_variational_transition_matrix(
     # stage while retaining the exact chief and STM operation ordering.
     _state6(relative_state_ric, "relative_state_ric")
     chief = _state6(chief_state_eci_km_s, "chief_state_eci_km_s")
+    if _normalize_numeric_backend(numeric_backend) == "rust":
+        from sim.rust_relative_backend import th_variational_propagate_relative_state_and_stm as rust_th_variational
+
+        return rust_th_variational(
+            np.zeros(6, dtype=float),
+            float(dt_s),
+            chief,
+            mu_km3_s2=float(mu_km3_s2),
+            max_step_s=float(max_step_s),
+        )[1]
     state = np.hstack((chief, np.eye(6, dtype=float).reshape(36))).astype(float)
     propagated = _integrate_state(
         state,
@@ -369,6 +467,7 @@ def ya_closed_form_propagate_relative_state_and_stm(
     *,
     mu_km3_s2: float = EARTH_MU_KM3_S2,
     max_step_s: float = 10.0,
+    numeric_backend: str = "rust",
 ) -> tuple[np.ndarray, np.ndarray]:
     """Propagate RIC relative state with the closed-form YA STM.
 
@@ -381,6 +480,16 @@ def ya_closed_form_propagate_relative_state_and_stm(
 
     rel = _state6(relative_state_ric, "relative_state_ric")
     chief0 = _state6(chief_state_eci_km_s, "chief_state_eci_km_s")
+    if _normalize_numeric_backend(numeric_backend) == "rust":
+        from sim.rust_relative_backend import ya_propagate_relative_state_and_stm as rust_ya_propagate
+
+        return rust_ya_propagate(
+            rel,
+            float(dt_s),
+            chief0,
+            mu_km3_s2=float(mu_km3_s2),
+            max_step_s=float(max_step_s),
+        )
     chief1 = _propagate_chief_state(
         chief0,
         float(dt_s),
@@ -392,6 +501,7 @@ def ya_closed_form_propagate_relative_state_and_stm(
         chief0,
         chief1,
         mu_km3_s2=float(mu_km3_s2),
+        numeric_backend=numeric_backend,
     )
     return phi @ rel, phi
 
@@ -402,10 +512,22 @@ def ya_closed_form_transition_matrix(
     chief_end_eci_km_s: np.ndarray | None = None,
     *,
     mu_km3_s2: float = EARTH_MU_KM3_S2,
+    numeric_backend: str = "rust",
 ) -> np.ndarray:
     """Return the dimensional RIC STM implied by the Yamanaka-Ankersen solution."""
 
     chief0 = _state6(chief_start_eci_km_s, "chief_start_eci_km_s")
+    if _normalize_numeric_backend(numeric_backend) == "rust":
+        from sim.rust_relative_backend import ya_state_transition_matrix
+
+        chief1 = None if chief_end_eci_km_s is None else _state6(chief_end_eci_km_s, "chief_end_eci_km_s")
+        return ya_state_transition_matrix(
+            float(dt_s),
+            chief0,
+            chief1,
+            mu_km3_s2=float(mu_km3_s2),
+            max_step_s=10.0,
+        )
     chief1 = (
         _propagate_chief_state(chief0, float(dt_s), mu_km3_s2=float(mu_km3_s2), max_step_s=10.0)
         if chief_end_eci_km_s is None
@@ -726,6 +848,11 @@ def _normalize_transition_model(value: str) -> str:
     normalized = aliases.get(raw, raw)
     if normalized not in {"finite_difference", "variational_stm", "closed_form_ya"}:
         raise ValueError("transition_model must be 'finite_difference', 'variational_stm', or 'closed_form_ya'.")
+    return normalized
+
+
+def _normalize_numeric_backend(value: str) -> str:
+    normalized = normalize_numeric_backend("python" if value is None else value, error_message="numeric_backend must be 'python' or 'rust'.")
     return normalized
 
 

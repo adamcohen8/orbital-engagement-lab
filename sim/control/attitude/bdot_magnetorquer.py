@@ -37,7 +37,9 @@ class MagnetorquerBdotController(Controller):
             torque = -float(self.gain) * omega_perp * float(np.linalg.norm(b_body)) ** 2
             n = float(np.linalg.norm(torque))
             max_torque = float(max(self.max_torque_nm, 0.0))
-            if n > max_torque > 0.0:
+            if max_torque <= 0.0:
+                torque = np.zeros(3, dtype=float)
+            elif n > max_torque:
                 torque *= max_torque / n
         return Command(
             thrust_eci_km_s2=np.zeros(3, dtype=float),

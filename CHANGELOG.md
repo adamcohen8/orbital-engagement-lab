@@ -6,6 +6,83 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.32.0 - 2026-10-01
+
+### Runtime and compatibility
+
+- Promote Rust to the default numeric backend for implemented propagation,
+  estimation, control, geometry, analysis and Trainer paths. Explicit
+  `numeric_backend: python` and Trainer `--backend python` retain reference
+  execution. Missing native wheels or unsupported explicitly selected native
+  paths fail validation instead of silently changing the model.
+- Require the version-matched Rust orbit and game wheels in the core profile. Native runtime qualification remains specific
+  to each recorded host and interpreter.
+- Correct NRLMSISE-00 local solar time using Sun and state in the same
+  Earth-fixed frame with the selected ephemeris, including fused preparation.
+- Preserve the frozen Mendicant v0.7 evaluator and introduce a separately
+  frozen v0.8 evaluator for exact checkpoint coverage and input identity.
+
+### Integrated fixes and workflows
+
+- Add optional native kernels across ONP/OGP propagation, attitude, control,
+  targeting, tracking, covariance, coverage, environment and spacecraft paths.
+  Preserve Python policy, resource bounds, deterministic evidence and explicit
+  reference execution.
+- Add source-backed schedule and spacecraft power analysis workflows.
+- Retain the Hosted production human-approval boundary as an unresolved limit.
+
+- Evasion now cuts off player thrust when fuel is exhausted and continues the mission on a coast trajectory.
+
+- The Evasion level’s autonomous pursuer now uses the flagship RIC PD transfer guidance and gains, with the level’s existing ungated attitude behavior.
+
+- The installed public Trainer checks for signed updates from the level selector; its notice supports click, Ctrl+U, and Cmd+U on macOS to install and relaunch.
+
+- Standard installation includes RPO Trainer and per-user native desktop launchers for macOS, Windows, and Linux; `oel trainer` opens the Trainer directly.
+
+### Agent workflow
+
+- New managed workspaces receive the same operational agent bootstrap served
+  through MCP, with compact workflow routes to the separate study-planning
+  prototype and existing execution/evidence tools.
+- MCP discovery reports configured prerequisites and local entitlement status
+  separately from authorization. Additive structured recovery guidance identifies
+  agent repairs versus operator actions without exposing approval references.
+- Make the relative-coast acceptance example compatible with MCP's full-log
+  policy and keep retention-error suggestions valid for the active MCP interface.
+
+### Fixed
+
+- Apply configured target range, line-of-sight, field-of-view and dropout
+  conditions to v2 flight-software observations, including ideal navigation.
+  Preserve deterministic sampling and access-gate checkpoint state.
+- Publish the navigator's estimate separately from raw measurements, with
+  explicit frame, epoch and freshness telemetry. API belief histories now use
+  that estimate; unavailable components retain their vector slots as NaN.
+- Resolve relative Monte Carlo and sensitivity output directories before
+  reporting artifact paths, and check their workflow review evidence at CLI
+  completion so valid campaigns do not fail a single-run-only check.
+- Allow exact-profile qualification to refresh its dependency manifest only
+  after passing its gates on stable source. Clarify declared versus effective
+  maturity and the current v2 execution contract.
+
+### Added
+
+- Add instantaneous-Jacobi CR3BP zero-velocity movies: synchronize contours and
+  forbidden-region shading with maneuvering state samples, retaining fixed-C
+  mode and recording per-frame energy/time provenance.
+
+- Honor RKF78/adaptive and DOPRI5 selection for CR3BP state and reference/STM
+  propagation, including tolerances and runtime adaptive-step accounting;
+  preserve RK4 defaults for existing Trainer workflows.
+
+- Experimental CR3BP research frame/origin transforms, Jacobi diagnostics,
+  all five libration points, zero-velocity slices, and review-backed plots and
+  GIF/MP4 animations with provenance, contact sheets, and agent guidance.
+
+- Add a public ten-minute relative-coast exercise covering validation,
+  execution, review queries and interpretation limits in a managed workspace.
+
+
 ## 0.31.0 - 2026-09-24
 
 ### Public core

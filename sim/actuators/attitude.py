@@ -6,6 +6,7 @@ import numpy as np
 
 from sim.core.interfaces import Actuator
 from sim.core.models import Command
+from sim.numeric_backend import normalize_numeric_backend
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 
@@ -19,6 +20,7 @@ class ReactionWheelLimits:
     torque_time_constant_s: float = 0.0
     viscous_friction_nms: np.ndarray | float = 0.0
     coulomb_friction_nm: np.ndarray | float = 0.0
+    numeric_backend: str = "rust"
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,12 @@ class AttitudeActuator(Actuator):
     wheel_speed_rad_s: np.ndarray = field(default_factory=lambda: np.zeros(0))
     wheel_motor_torque_nm: np.ndarray = field(default_factory=lambda: np.zeros(0))
     cmg_torque_nm: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    _wheel_allocator_signature: tuple[tuple[int, int], tuple[float, ...]] | None = field(
+        default=None, init=False, repr=False
+    )
+    _wheel_allocator_pinv: np.ndarray | None = field(default=None, init=False, repr=False)
+    _wheel_staging_cache: tuple | None = field(default=None, init=False, repr=False)
+    _wheel_native_prepared: bytes | None = field(default=None, init=False, repr=False)
 
     def apply(self, command: Command, limits: dict, dt_s: float) -> Command:
         requested_torque = np.array(command.torque_body_nm, dtype=float)
@@ -172,29 +180,50 @@ class AttitudeActuator(Actuator):
         rw = self.reaction_wheels
         if rw is None:
             return torque_body_cmd_nm, {}
+        backend = normalize_numeric_backend(rw.numeric_backend, error_message="reaction-wheel numeric_backend must be python or rust")
 
         n_wheels = int(np.array(rw.max_torque_nm, dtype=float).reshape(-1).size)
         if n_wheels <= 0:
             return np.zeros(3, dtype=float), {}
 
-        g = self._resolve_wheel_axes(rw.wheel_axes_body, n=n_wheels)
-        max_torque_nm = np.abs(self._as_vector(rw.max_torque_nm, n=n_wheels, default=0.0))
-        max_momentum_nms = np.abs(self._as_vector(rw.max_momentum_nms, n=n_wheels, default=np.inf))
-        max_speed_rad_s = np.abs(self._as_vector(rw.max_speed_rad_s, n=n_wheels, default=np.inf))
-        torque_tau_s = float(max(rw.torque_time_constant_s, 0.0))
-        viscous_nms = np.abs(self._as_vector(rw.viscous_friction_nms, n=n_wheels, default=0.0))
-        coulomb_nm = np.abs(self._as_vector(rw.coulomb_friction_nm, n=n_wheels, default=0.0))
+        signature = tuple(
+            None if value is None else (np.asarray(value, dtype=float).shape,
+                                       np.asarray(value, dtype=float).tobytes())
+            for value in (rw.wheel_axes_body, rw.max_torque_nm, rw.max_momentum_nms,
+                          rw.max_speed_rad_s, rw.viscous_friction_nms,
+                          rw.coulomb_friction_nm, rw.wheel_inertia_kg_m2)
+        )
+        cached = self._wheel_staging_cache
+        if cached is None or cached[0] != signature:
+            g = self._resolve_wheel_axes(rw.wheel_axes_body, n=n_wheels)
+            max_torque_nm = np.abs(self._as_vector(rw.max_torque_nm, n=n_wheels, default=0.0))
+            max_momentum_nms = np.abs(self._as_vector(rw.max_momentum_nms, n=n_wheels, default=np.inf))
+            max_speed_rad_s = np.abs(self._as_vector(rw.max_speed_rad_s, n=n_wheels, default=np.inf))
+            viscous_nms = np.abs(self._as_vector(rw.viscous_friction_nms, n=n_wheels, default=0.0))
+            coulomb_nm = np.abs(self._as_vector(rw.coulomb_friction_nm, n=n_wheels, default=0.0))
 
-        # Derive wheel inertia from explicit input or from h_max / w_max when available.
-        j_kg_m2 = self._as_vector(rw.wheel_inertia_kg_m2, n=n_wheels, default=np.nan)
-        inferred_mask = ~np.isfinite(j_kg_m2)
-        if np.any(inferred_mask):
-            infer_ok = np.isfinite(max_momentum_nms) & np.isfinite(max_speed_rad_s) & (max_speed_rad_s > 0.0)
-            j_kg_m2[inferred_mask & infer_ok] = (
-                max_momentum_nms[inferred_mask & infer_ok] / max_speed_rad_s[inferred_mask & infer_ok]
+            # Derive wheel inertia from explicit input or from h_max / w_max when available.
+            j_kg_m2 = self._as_vector(rw.wheel_inertia_kg_m2, n=n_wheels, default=np.nan)
+            inferred_mask = ~np.isfinite(j_kg_m2)
+            if np.any(inferred_mask):
+                infer_ok = np.isfinite(max_momentum_nms) & np.isfinite(max_speed_rad_s) & (max_speed_rad_s > 0.0)
+                j_kg_m2[inferred_mask & infer_ok] = (
+                    max_momentum_nms[inferred_mask & infer_ok] / max_speed_rad_s[inferred_mask & infer_ok]
+                )
+                j_kg_m2[~np.isfinite(j_kg_m2)] = 5e-4
+            j_kg_m2 = np.clip(j_kg_m2, 1e-9, np.inf)
+            cached = (signature, g, max_torque_nm, max_momentum_nms, max_speed_rad_s,
+                      viscous_nms, coulomb_nm, j_kg_m2)
+            self._wheel_staging_cache = cached
+            prepared_values = (g, max_torque_nm, max_momentum_nms, max_speed_rad_s,
+                               viscous_nms, coulomb_nm, j_kg_m2)
+            self._wheel_native_prepared = (
+                b"".join(np.asarray(value, dtype="<f8").tobytes() for value in prepared_values)
+                if all(not np.any(np.isnan(value)) for value in prepared_values)
+                and np.all(np.isfinite(j_kg_m2)) else None
             )
-            j_kg_m2[~np.isfinite(j_kg_m2)] = 5e-4
-        j_kg_m2 = np.clip(j_kg_m2, 1e-9, np.inf)
+        _, g, max_torque_nm, max_momentum_nms, max_speed_rad_s, viscous_nms, coulomb_nm, j_kg_m2 = cached
+        torque_tau_s = float(max(rw.torque_time_constant_s, 0.0))
 
         if self.wheel_speed_rad_s.size != n_wheels:
             self.wheel_speed_rad_s = np.zeros(n_wheels, dtype=float)
@@ -204,60 +233,83 @@ class AttitudeActuator(Actuator):
             self.wheel_momentum_wheels_nms = np.zeros(n_wheels, dtype=float)
 
         wheel_torque_mode_flag = mode_flags.get("wheel_torque_cmd_nm", None)
+        signature = (g.shape, tuple(float(value) for value in g.reshape(-1)))
+        if signature != self._wheel_allocator_signature or self._wheel_allocator_pinv is None:
+            self._wheel_allocator_signature = signature
+            self._wheel_allocator_pinv = np.linalg.pinv(g)
         if wheel_torque_mode_flag is not None:
             tau_cmd = np.array(wheel_torque_mode_flag, dtype=float).reshape(-1)
             if tau_cmd.size != n_wheels:
-                tau_cmd = -np.linalg.pinv(g) @ np.array(torque_body_cmd_nm, dtype=float).reshape(3)
+                tau_cmd = -self._wheel_allocator_pinv @ np.array(torque_body_cmd_nm, dtype=float).reshape(3)
         else:
-            tau_cmd = -np.linalg.pinv(g) @ np.array(torque_body_cmd_nm, dtype=float).reshape(3)
+            tau_cmd = -self._wheel_allocator_pinv @ np.array(torque_body_cmd_nm, dtype=float).reshape(3)
         tau_cmd = np.clip(tau_cmd, -max_torque_nm, max_torque_nm)
 
-        # First-order wheel motor torque lag.
-        if dt_s <= 0.0 or torque_tau_s <= 0.0:
-            tau_motor = tau_cmd
+        native_result = None
+        if backend == "rust" and self._wheel_native_prepared is not None and np.isfinite(dt_s) and np.isfinite(torque_tau_s):
+            from sim.rust_control_backend import reaction_wheel_step
+
+            native_result = reaction_wheel_step(
+                self._wheel_native_prepared, self.wheel_motor_torque_nm,
+                self.wheel_speed_rad_s, tau_cmd, dt_s, torque_tau_s,
+            )
+        if native_result is not None:
+            tau_motor_eff = native_result[:n_wheels]
+            omega_next = native_result[n_wheels:2*n_wheels]
+            h_next = native_result[2*n_wheels:3*n_wheels]
+            realized_tau_net = native_result[3*n_wheels:4*n_wheels]
+            self.wheel_momentum_nms = native_result[4*n_wheels:4*n_wheels+3]
+            torque_body_nm = native_result[4*n_wheels+3:]
+            self.wheel_motor_torque_nm = tau_motor_eff
+            self.wheel_speed_rad_s = omega_next
+            self.wheel_momentum_wheels_nms = h_next
         else:
-            alpha = float(np.clip(dt_s / torque_tau_s, 0.0, 1.0))
-            tau_motor = self.wheel_motor_torque_nm + alpha * (tau_cmd - self.wheel_motor_torque_nm)
-        tau_motor = np.clip(tau_motor, -max_torque_nm, max_torque_nm)
-        tau_motor_eff = tau_motor.copy()
+            # First-order wheel motor torque lag.
+            if dt_s <= 0.0 or torque_tau_s <= 0.0:
+                tau_motor = tau_cmd
+            else:
+                alpha = float(np.clip(dt_s / torque_tau_s, 0.0, 1.0))
+                tau_motor = self.wheel_motor_torque_nm + alpha * (tau_cmd - self.wheel_motor_torque_nm)
+            tau_motor = np.clip(tau_motor, -max_torque_nm, max_torque_nm)
+            tau_motor_eff = tau_motor.copy()
 
-        # Friction torque opposes wheel spin and reduces achievable wheel acceleration.
-        omega = np.array(self.wheel_speed_rad_s, dtype=float)
-        tau_fric = viscous_nms * omega + coulomb_nm * np.sign(omega)
-        tau_net = tau_motor_eff - tau_fric
+            # Friction torque opposes wheel spin and reduces achievable wheel acceleration.
+            omega = np.array(self.wheel_speed_rad_s, dtype=float)
+            tau_fric = viscous_nms * omega + coulomb_nm * np.sign(omega)
+            tau_net = tau_motor_eff - tau_fric
 
-        # Prevent driving further into momentum saturation.
-        h_now = j_kg_m2 * omega
-        sat_hi = (h_now >= (max_momentum_nms - 1e-12)) & (tau_net > 0.0)
-        sat_lo = (h_now <= (-max_momentum_nms + 1e-12)) & (tau_net < 0.0)
-        sat_h = sat_hi | sat_lo
-        tau_net[sat_h] = 0.0
-        tau_motor_eff[sat_h] = tau_fric[sat_h]
+            # Prevent driving further into momentum saturation.
+            h_now = j_kg_m2 * omega
+            sat_hi = (h_now >= (max_momentum_nms - 1e-12)) & (tau_net > 0.0)
+            sat_lo = (h_now <= (-max_momentum_nms + 1e-12)) & (tau_net < 0.0)
+            sat_h = sat_hi | sat_lo
+            tau_net[sat_h] = 0.0
+            tau_motor_eff[sat_h] = tau_fric[sat_h]
 
-        omega_prop = omega + dt_s * (tau_net / j_kg_m2)
-        sat_speed_hi = (omega_prop >= max_speed_rad_s) & (tau_net > 0.0)
-        sat_speed_lo = (omega_prop <= -max_speed_rad_s) & (tau_net < 0.0)
-        sat_speed = sat_speed_hi | sat_speed_lo
-        tau_net[sat_speed] = 0.0
-        tau_motor_eff[sat_speed] = tau_fric[sat_speed]
-        omega_next = omega + dt_s * (tau_net / j_kg_m2)
-        omega_next = np.clip(omega_next, -max_speed_rad_s, max_speed_rad_s)
-        h_next = np.clip(j_kg_m2 * omega_next, -max_momentum_nms, max_momentum_nms)
-        omega_next = h_next / j_kg_m2
+            omega_prop = omega + dt_s * (tau_net / j_kg_m2)
+            sat_speed_hi = (omega_prop >= max_speed_rad_s) & (tau_net > 0.0)
+            sat_speed_lo = (omega_prop <= -max_speed_rad_s) & (tau_net < 0.0)
+            sat_speed = sat_speed_hi | sat_speed_lo
+            tau_net[sat_speed] = 0.0
+            tau_motor_eff[sat_speed] = tau_fric[sat_speed]
+            omega_next = omega + dt_s * (tau_net / j_kg_m2)
+            omega_next = np.clip(omega_next, -max_speed_rad_s, max_speed_rad_s)
+            h_next = np.clip(j_kg_m2 * omega_next, -max_momentum_nms, max_momentum_nms)
+            omega_next = h_next / j_kg_m2
 
-        # Clipping can reduce the actual momentum change below the requested
-        # net wheel torque.  Couple body torque to the realized momentum delta
-        # so saturation cannot create angular impulse from nowhere.
-        realized_tau_net = (
-            (h_next - h_now) / dt_s if dt_s > 0.0 else tau_net.copy()
-        )
+            # Clipping can reduce the actual momentum change below the requested
+            # net wheel torque.  Couple body torque to the realized momentum delta
+            # so saturation cannot create angular impulse from nowhere.
+            realized_tau_net = (
+                (h_next - h_now) / dt_s if dt_s > 0.0 else tau_net.copy()
+            )
 
-        self.wheel_motor_torque_nm = tau_motor_eff
-        self.wheel_speed_rad_s = omega_next
-        self.wheel_momentum_wheels_nms = h_next
-        self.wheel_momentum_nms = g @ h_next
+            self.wheel_motor_torque_nm = tau_motor_eff
+            self.wheel_speed_rad_s = omega_next
+            self.wheel_momentum_wheels_nms = h_next
+            self.wheel_momentum_nms = g @ h_next
 
-        torque_body_nm = -(g @ realized_tau_net)
+            torque_body_nm = -(g @ realized_tau_net)
         diag = {
             "rw_num_wheels": int(n_wheels),
             "rw_torque_cmd_nm": tau_cmd.tolist(),
@@ -269,6 +321,8 @@ class AttitudeActuator(Actuator):
             "rw_momentum_wheels_nms": h_next.tolist(),
             "rw_momentum_body_nms": self.wheel_momentum_nms.tolist(),
         }
+        if backend == "rust":
+            diag["rw_numeric_backend"] = backend
         return torque_body_nm, diag
 
     def _apply_magnetorquers(self, torque_body_cmd_nm: np.ndarray, mode_flags: dict) -> tuple[np.ndarray, dict]:

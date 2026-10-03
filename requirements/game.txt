@@ -1,2 +1,3 @@
 # Compatibility shim for environments that still install from requirements files.
 .[game]
+oel-rust-game>=0.5,<0.6

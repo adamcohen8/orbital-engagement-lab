@@ -32,10 +32,14 @@ def run_game_mode(
     presentation_vsync: str | None = None,
     presentation_diagnostics: bool | None = None,
     presentation_diagnostics_output: str | Path | None = None,
+    backend: str | None = None,
 ) -> GameRunResult:
     from sim.game.pygame_dashboard import PygameRPODashboard
 
     config = _force_game_acceleration_off_config(SimulationConfig.from_yaml(config_path))
+    from sim.game.backend import configure_game_backend, game_backend
+
+    config = configure_game_backend(config, backend)
     configured_controlled_object_id = _game_controlled_object_id(config, default="chaser")
     controlled_object_id = str(controlled_object_id or configured_controlled_object_id)
     config = _select_game_controlled_object(
@@ -118,7 +122,7 @@ def run_game_mode(
     maneuver_control_speed_multiple = _game_maneuver_control_speed_multiple(config)
     two_rail_speed_control = _game_two_rail_speed_control_enabled(config)
     burn_trace_enabled = _game_burn_trace_enabled()
-    trainer = RPOTrainingTracker(training_cfg)
+    trainer = RPOTrainingTracker(training_cfg, numeric_backend=game_backend(config))
     command_state = KeyboardCommandState()
     command_state.use_timing_accumulator = _game_timed_input_accumulator_enabled(config)
     player_max_accel_km_s2 = _max_accel_from_config(attempt_config, controlled_object_id)
@@ -162,6 +166,7 @@ def run_game_mode(
     anim_cfg = dict(config.scenario.outputs.animations or {})
     dashboard_target_id, dashboard_chaser_id = _dashboard_object_ids(training_cfg, anim_cfg)
     dashboard = PygameRPODashboard(
+        numeric_backend=game_backend(config),
         sandbox_3d_enabled=_game_3d_enabled(config),
         target_object_id=dashboard_target_id,
         chaser_object_id=dashboard_chaser_id,
@@ -294,7 +299,7 @@ def run_game_mode(
                 else None
             ),
         )
-        trainer = RPOTrainingTracker(training_cfg)
+        trainer = RPOTrainingTracker(training_cfg, numeric_backend=game_backend(config))
         guided_tutorial = GuidedTutorialRuntime()
         ric_primer = RICPrimerRuntime()
         ric_primer_enabled = _ric_primer_enabled(training_cfg, arcade_enabled=arcade_enabled) or bool(
@@ -368,7 +373,7 @@ def run_game_mode(
             effective_speed_multiple = current_speed_multiple
             level_title = _game_level_title(config)
             two_rail_speed_control = _game_two_rail_speed_control_enabled(config)
-            trainer = RPOTrainingTracker(training_cfg)
+            trainer = RPOTrainingTracker(training_cfg, numeric_backend=game_backend(config))
             guided_tutorial = GuidedTutorialRuntime()
             ric_primer = RICPrimerRuntime()
             ric_primer_enabled = _ric_primer_enabled(training_cfg, arcade_enabled=arcade_enabled)
@@ -936,7 +941,7 @@ def run_game_mode(
                         ),
                     )
                     player_max_accel_km_s2 = _max_accel_from_config(attempt_config, controlled_object_id)
-                    trainer = RPOTrainingTracker(training_cfg)
+                    trainer = RPOTrainingTracker(training_cfg, numeric_backend=game_backend(config))
                     guided_tutorial = GuidedTutorialRuntime()
                     ric_primer = RICPrimerRuntime()
                     ric_primer_enabled = _ric_primer_enabled(training_cfg, arcade_enabled=arcade_enabled)
@@ -1385,7 +1390,7 @@ def run_game_mode(
                     rng=_arcade_round_initial_state_rng(int(arcade_seed_value), arcade_round_index),
                 )
                 player_max_accel_km_s2 = _max_accel_from_config(attempt_config, controlled_object_id)
-                trainer = RPOTrainingTracker(training_cfg)
+                trainer = RPOTrainingTracker(training_cfg, numeric_backend=game_backend(config))
                 guided_tutorial = GuidedTutorialRuntime()
                 ric_primer = RICPrimerRuntime()
                 ric_primer_enabled = _ric_primer_enabled(training_cfg, arcade_enabled=arcade_enabled)

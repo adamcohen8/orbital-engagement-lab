@@ -18,14 +18,17 @@ def validate_covariance(matrix: Sequence[Sequence[float]], *, dimension: int) ->
     covariance = np.asarray(matrix, dtype=float)
     if covariance.shape != (dimension, dimension) or not np.all(np.isfinite(covariance)):
         raise ConjunctionProbabilityError(f"Covariance must be a finite {dimension}x{dimension} matrix.")
-    scale = max(1.0, float(np.max(np.abs(covariance))))
-    if float(np.max(np.abs(covariance - covariance.T))) > 1.0e-12 * scale:
+    scale = float(np.max(np.abs(covariance)))
+    if scale == 0.0:
+        return covariance
+    scaled = covariance / scale
+    if float(np.max(np.abs(scaled - scaled.T))) > 1.0e-12:
         raise ConjunctionProbabilityError("Covariance must be symmetric.")
-    covariance = 0.5 * (covariance + covariance.T)
-    minimum = float(np.min(np.linalg.eigvalsh(covariance)))
-    if minimum < -1.0e-12 * scale:
+    scaled = 0.5 * (scaled + scaled.T)
+    minimum = float(np.min(np.linalg.eigvalsh(scaled)))
+    if minimum < -1.0e-12:
         raise ConjunctionProbabilityError(f"Covariance must be positive semidefinite; minimum eigenvalue={minimum}.")
-    return covariance
+    return scaled * scale
 
 
 def ric_basis(state_eci_km_km_s: Sequence[float]) -> np.ndarray:
@@ -86,6 +89,7 @@ def collision_probability_2d(
     *,
     radial_order: int = 48,
     angular_order: int = 96,
+    numeric_backend: str = "rust",
 ) -> dict[str, Any]:
     """Integrate a bivariate Gaussian over a circular hard-body region.
 
@@ -94,6 +98,9 @@ def collision_probability_2d(
     from falling between a fixed set of physical-space nodes.
     """
 
+    backend = str(numeric_backend).strip().lower()
+    if backend not in {"python", "rust"}:
+        raise ConjunctionProbabilityError("numeric_backend must be python or rust.")
     mean = np.asarray(mean_plane_km, dtype=float)
     covariance = validate_covariance(covariance_plane_km2, dimension=2)
     radius = float(hard_body_radius_km)
@@ -139,19 +146,27 @@ def collision_probability_2d(
         standard_density = math.exp(-0.5 * z_value * z_value) / math.sqrt(2.0 * math.pi)
         return standard_density * cdf_interval(lower_y, upper_y)
 
+    callback = integrand
+    callback_args = ()
+    if backend == "rust":
+        from sim.rust_conjunction_probability_backend import integrand as native_integrand
+
+        callback = native_integrand()
+        callback_args = (float(mean[0]), sigma_x, radius, float(mean[1]), conditional_slope, conditional_sigma_y)
     integration_limit = max(100, int(radial_order) + int(angular_order))
 
     def integrate(*, absolute_tolerance: float, relative_tolerance: float, limit: int) -> tuple[float, float]:
         if not lower_z < upper_z:
             return 0.0, float(2.0 * ndtr(-standard_tail_limit))
         result = quad(
-            integrand,
+            callback,
             lower_z,
             upper_z,
             epsabs=absolute_tolerance,
             epsrel=relative_tolerance,
             limit=limit,
             full_output=1,
+            **({"args": callback_args} if backend == "rust" else {}),
         )
         if len(result) != 3:
             message = str(result[3]) if len(result) > 3 else "adaptive integration did not converge"
@@ -183,6 +198,7 @@ def collision_probability_2d(
     probability = float(min(max(probability, 0.0), 1.0))
     return {
         "collision_probability": probability,
+        **({"numeric_backend": backend} if backend == "rust" else {}),
         "method": "foster_2d_gaussian_disk_conditional_adaptive",
         "hard_body_radius_km": radius,
         "hard_body_radius_m": radius * 1000.0,

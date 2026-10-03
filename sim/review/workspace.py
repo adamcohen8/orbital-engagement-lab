@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from sim.review.evidence_capsule import (
+    MAX_REVIEW_HYDRATION_BYTES,
     MaterializedEvidence,
     evidence_file_mtime_ns,
     materialize_evidence,
@@ -53,7 +54,10 @@ class ReviewWorkspace:
             output_dir = root
             db_path = output_dir / "review" / "run.sqlite"
         try:
-            materialized = materialize_evidence(db_path)
+            materialized = materialize_evidence(
+                db_path,
+                max_original_bytes=MAX_REVIEW_HYDRATION_BYTES,
+            )
         except (FileNotFoundError, ValueError) as exc:
             raise ReviewStoreNotFoundError(f"Review store not found or invalid: {db_path}") from exc
         review_dir = db_path.parent
@@ -281,6 +285,66 @@ def _value_size_bytes(value: Any) -> int:
     if isinstance(value, str):
         return len(value.encode("utf-8"))
     return len(str(value).encode("utf-8"))
+
+
+def execute_bounded_review_query(
+    connection: sqlite3.Connection,
+    statement: str,
+    *,
+    max_rows: int = 10_000,
+    max_vm_steps: int = 250_000,
+    max_value_bytes: int = 1_000_000,
+    max_result_bytes: int = 4_000_000,
+) -> list[Any]:
+    """Execute a read-only review query with CPU, row, and byte bounds.
+
+    Qualification and maturation gates consume SQLite rows directly rather
+    than through ``ReviewWorkspace.query``.  Keep that gate-facing path under
+    the same bounded execution envelope so a recursive CTE or wide result
+    cannot run indefinitely or accumulate an unbounded list.
+    """
+
+    statement = _validate_select_sql(statement)
+    row_limit = max(int(max_rows), 1)
+    step_budget = max(int(max_vm_steps), 1)
+    value_budget = max(int(max_value_bytes), 1)
+    result_budget = max(int(max_result_bytes), 1)
+    if hasattr(connection, "setlimit"):
+        connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, value_budget)
+    steps = 0
+
+    def _abort_long_query() -> int:
+        nonlocal steps
+        steps += 1000
+        return 1 if steps > step_budget else 0
+
+    connection.set_progress_handler(_abort_long_query, 1000)
+    try:
+        cursor = connection.execute(statement)
+        rows: list[Any] = []
+        result_bytes = 0
+        for index in range(row_limit + 1):
+            row = cursor.fetchone()
+            if row is None:
+                break
+            if index >= row_limit:
+                raise ReviewQueryError("Review query exceeded the row limit.")
+            for value in row:
+                value_bytes = _value_size_bytes(value)
+                if value_bytes > value_budget:
+                    raise ReviewQueryError("Review query value exceeds the per-value byte budget.")
+                result_bytes += value_bytes
+                if result_bytes > result_budget:
+                    raise ReviewQueryError("Review query result exceeds the aggregate byte budget.")
+            rows.append(row)
+        return rows
+    except sqlite3.Error as exc:
+        message = str(exc)
+        if "interrupted" in message.lower():
+            message = "Review query exceeded the execution step budget."
+        raise ReviewQueryError(message) from exc
+    finally:
+        connection.set_progress_handler(None, 0)
 
 def _validate_select_sql(sql: str) -> str:
     statement = str(sql or "").strip()

@@ -367,10 +367,8 @@ def integrate_rkf78_hpop(
     if h <= 0.0:
         h = 0.01
     y = np.array(x, dtype=float, copy=True)
-    last_interval = False
     if h > (x_end - x_now):
         h = x_end - x_now
-        last_interval = True
 
     tol_per_unit = float(tolerance) / (x_end - x_now)
 
@@ -411,10 +409,9 @@ def integrate_rkf78_hpop(
         x_now += h
         h *= scale
         h_next = h
-        if last_interval:
+        if x_now >= x_end:
             return _finish(y, h_next, float(h / scale) if scale != 0.0 else float(h))
         if x_now + h > x_end:
-            last_interval = True
             h = x_end - x_now
         elif x_now + h + 0.5 * h > x_end:
             h = 0.5 * h

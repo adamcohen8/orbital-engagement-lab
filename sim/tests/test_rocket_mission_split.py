@@ -9,6 +9,7 @@ from sim.core.models import StateBelief, StateTruth
 from sim.mission.modules import (
     RocketGoNowExecution,
     RocketGoWhenPossibleExecution,
+    RocketMissionStrategy,
     RocketPredefinedOrbitMissionStrategy,
     RocketPursuitMissionStrategy,
     RocketWaitOptimalExecution,
@@ -81,6 +82,10 @@ class TestRocketMissionSplit(unittest.TestCase):
                     rocket_vehicle_cfg=object(),
                 )["launch_authorized"]
             )
+
+    def test_combined_rocket_strategy_rejects_unsupported_launch_mode(self):
+        with self.assertRaisesRegex(ValueError, "launch_mode"):
+            RocketMissionStrategy(launch_mode="wait_optimal_windwo")
 
 
 if __name__ == "__main__":

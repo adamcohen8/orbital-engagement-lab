@@ -4,13 +4,14 @@ import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import lru_cache
+from importlib import import_module
 from pathlib import Path
 from threading import local
 
 import numpy as np
 
 from sim.acceleration.settings import acceleration_enabled_from_mode
-from sim.dynamics.orbit.epoch import datetime_to_julian_date, gmst_angle_rad_from_jd
+from sim.dynamics.orbit.epoch import datetime_to_julian_date
 from sim.dynamics.orbit.nrlmsise00_coeff import PAVGM, PD, PDL, PDM, PMA, PS, PT, PTL, PTM
 
 
@@ -1397,6 +1398,22 @@ def _thread_model() -> _NRLMSISE00:
     return model
 
 
+@lru_cache(maxsize=1)
+def _native_density_kernel():
+    try:
+        return getattr(import_module("oel_rust_orbit"), "environment_nrlmsise00_density", None)
+    except ImportError:
+        return None
+
+
+@lru_cache(maxsize=1)
+def _native_low_altitude_density_kernel():
+    try:
+        return getattr(import_module("oel_rust_orbit"), "environment_nrlmsise00_low_altitude_density", None)
+    except ImportError:
+        return None
+
+
 def nrlmsise00_density(
     alt_km: float,
     lat_deg: float,
@@ -1412,11 +1429,20 @@ def nrlmsise00_density(
     dt_utc = dt_utc.astimezone(timezone.utc)
     f107a, f107, ap, ap_a = _solar_geomagnetic_inputs(dt_utc, env)
     jd_utc = datetime_to_julian_date(dt_utc)
-    lon_rad = math.radians(float(lon_deg))
     if lst_hr is None:
         lst_hr = env.get("nrlmsise00_lst_hr")
     if lst_hr is None:
-        lst_hr = ((lon_rad + gmst_angle_rad_from_jd(jd_utc)) % (2.0 * math.pi)) * 24.0 / (2.0 * math.pi)
+        # Direct geodetic callers need solar time too, rather than sidereal
+        # hours. The ECI density wrapper already supplies its resolved value.
+        from sim.dynamics.orbit.atmosphere import _nrlmsise00_local_solar_time_hr
+
+        t_s = float(env.get("sim_t_s", 0.0))
+        if env.get("jd_utc_start") is not None and "sim_t_s" not in env:
+            t_s = (jd_utc - float(env["jd_utc_start"])) * 86400.0
+        solar_env = {**env, "jd_utc": jd_utc}
+        if solar_env.get("jd_utc_start") is None:
+            solar_env["jd_utc_start"] = jd_utc - t_s / 86400.0
+        lst_hr = _nrlmsise00_local_solar_time_hr(lon_deg, dt_utc, t_s, solar_env)
     sec = dt_utc.hour * 3600.0 + dt_utc.minute * 60.0 + dt_utc.second + dt_utc.microsecond * 1e-6
     input_ = _Input(
         doy=int(math.floor(_day_of_year(dt_utc))),
@@ -1430,4 +1456,15 @@ def nrlmsise00_density(
         ap=ap,
         ap_a=ap_a,
     )
+    if env.get("_rust_numeric_backend") == "rust":
+        native_density = (
+            _native_density_kernel() if input_.alt >= 300.0
+            else _native_low_altitude_density_kernel()
+        )
+        if native_density is not None:
+            return float(native_density([
+                float(input_.doy), input_.sec, input_.alt, input_.g_lat, input_.g_long,
+                input_.lst, input_.f107a, input_.f107, input_.ap,
+                *[float(value) for value in input_.ap_a[1:8]],
+            ]))
     return _thread_model().density(input_)

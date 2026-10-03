@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from sim.dynamics.orbit.frames import FrameContext, eci_to_ecef_rotation_context
+from sim.numeric_backend import normalize_numeric_backend
 from sim.utils.geodesy import geodetic_to_ecef_km
 
 
@@ -53,6 +54,7 @@ class AccessConfig:
     require_ground_visibility: bool = False
     ground_site: GroundSite | None = None
     frame_context: FrameContext | None = None
+    numeric_backend: str = "rust"
 
     def __post_init__(self) -> None:
         if not np.isfinite(float(self.update_cadence_s)) or float(self.update_cadence_s) <= 0.0:
@@ -77,6 +79,8 @@ class AccessConfig:
             raise ValueError(
                 "ground visibility requires a FrameContext with an absolute jd_utc_start."
             )
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="numeric_backend must be python or rust.")
+        object.__setattr__(self, "numeric_backend", backend)
 
 
 class AccessModel:
@@ -155,6 +159,68 @@ class AccessModel:
             return False
         self._last_update_t_s = t_s
         return True
+
+    def evaluate_batch(
+        self,
+        observer_eci_km: np.ndarray,
+        target_eci_km: np.ndarray,
+        times_s: np.ndarray,
+        *,
+        boresight_eci: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, tuple[str, ...]]:
+        """Evaluate a sampled access history while preserving cadence state.
+
+        Rust is used only for the stateless range/cone gates.  Ground-site
+        visibility still uses the frame-aware scalar path because it depends on
+        the caller's EOP context and therefore must remain one authoritative
+        implementation.
+        """
+        times = np.asarray(times_s, dtype=float)
+        observer = np.asarray(observer_eci_km, dtype=float)
+        target = np.asarray(target_eci_km, dtype=float)
+        if times.ndim != 1 or not np.all(np.isfinite(times)) or np.any(np.diff(times) < 0.0):
+            raise ValueError("access times must be a finite nondecreasing vector")
+        shape = (times.size, 3)
+        if observer.shape != shape or target.shape != shape:
+            raise ValueError("observer and target must have shape (samples, 3)")
+        boresight = None if boresight_eci is None else np.asarray(boresight_eci, dtype=float)
+        if boresight is not None and boresight.shape == (3,):
+            boresight = np.broadcast_to(boresight, shape)
+        if boresight is not None and boresight.shape != shape:
+            raise ValueError("boresight must have shape (3,) or (samples, 3)")
+        if not np.all(np.isfinite(observer)) or not np.all(np.isfinite(target)) or (
+            boresight is not None and not np.all(np.isfinite(boresight))
+        ):
+            raise ValueError("access coordinates must be finite")
+        mask = np.zeros(times.size, dtype=bool)
+        reasons = []
+        geometry = None
+        if self.cfg.numeric_backend == "rust" and not self.cfg.require_ground_visibility:
+            from sim.rust_coverage_backend import access_batch
+
+            half_angle = self.cfg.fov_half_angle_rad
+            if half_angle is None:
+                half_angle = _solid_angle_to_half_angle_rad(self.cfg.solid_angle_sr)
+            _, available, geometry_reasons = access_batch(
+                observer, target, boresight_eci=boresight,
+                max_range_km=self.cfg.max_range_km, fov_half_angle_rad=half_angle,
+            )
+            geometry = (available, geometry_reasons)
+        for index, epoch in enumerate(times):
+            if not _cadence_due(float(epoch), self._last_update_t_s, self.cfg.update_cadence_s):
+                allowed, reason = False, "cadence"
+            elif geometry is not None:
+                allowed, reason = bool(geometry[0][index]), geometry[1][index]
+            else:
+                allowed, reason = self.evaluate(
+                    observer[index], target[index], float(epoch),
+                    boresight_eci=None if boresight is None else boresight[index],
+                )
+            mask[index] = allowed
+            reasons.append(reason)
+            if allowed:
+                self._last_update_t_s = float(epoch)
+        return mask, tuple(reasons)
 
 
 def _ground_site_geometry_eci(

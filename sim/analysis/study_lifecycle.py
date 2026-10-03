@@ -939,6 +939,20 @@ def _evidence_record(
                 "semantic_sha256": _semantic_sha256(value),
             }
         )
+    steps_by_id = {step["step_id"]: step for step in plan["steps"]}
+    for step in plan["steps"]:
+        if step["capability"] != "spacecraft_power":
+            continue
+        power_sources = set(values[step["step_id"]]["source_product_sha256s"])
+        for dependency_id in step["depends_on"]:
+            if steps_by_id[dependency_id]["capability"] != "mission_scheduling":
+                continue
+            schedule_digest = values[dependency_id]["schedule_semantic_sha256"]
+            if schedule_digest not in power_sources:
+                raise StudyLifecycleError(
+                    f"Power step {step['step_id']!r} does not bind the retained schedule "
+                    f"from dependency {dependency_id!r}."
+                )
     return (
         {
             "schema_version": STUDY_EVIDENCE_SCHEMA,

@@ -13,6 +13,7 @@ from sim.core.models import StateBelief
 from sim.digital_twin.mass_properties import resolve_inertia_kg_m2
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.dynamics.orbit.frames import frame_context_from_environment, transform_position
+from sim.numeric_backend import normalize_numeric_backend
 from sim.presets.rockets import BASIC_1ST_STAGE, BASIC_SSTO_ROCKET, BASIC_TWO_STAGE_STACK, RocketStackPreset
 from sim.rocket import (
     MaxQThrottleLimiterGuidance,
@@ -25,6 +26,7 @@ from sim.rocket import (
     TVCSteeringGuidance,
 )
 from sim.rocket.aero import RocketAeroConfig
+from sim.rocket.navigation import _orbital_elements_basic as _navigation_orbital_elements_basic
 from sim.runtime.commands import _rocket_state_to_truth
 from sim.runtime.compat import _module_obj
 from sim.runtime.models import AgentRuntime
@@ -170,6 +172,10 @@ def _create_rocket_runtime(
         default=np.array([[8.0e5, 0.0, 0.0], [0.0, 8.0e5, 0.0], [0.0, 0.0, 2.0e4]], dtype=float),
     )
     sim_cfg = RocketSimConfig(
+        numeric_backend=normalize_numeric_backend(
+            rocket_dyn.get("numeric_backend", "rust"),
+            field_name="simulator.dynamics.rocket.numeric_backend",
+        ),
         dt_s=float(cfg.simulator.dt_s),
         max_time_s=float(cfg.simulator.duration_s),
         target_altitude_km=float(rocket_dyn.get("target_altitude_km", 400.0)),
@@ -292,6 +298,15 @@ def _rocket_altitude_km(r_eci_km: np.ndarray, t_s: float, sim_cfg: RocketSimConf
 def _orbital_elements_basic(
     r_km: np.ndarray, v_km_s: np.ndarray, mu_km3_s2: float = EARTH_MU_KM3_S2
 ) -> tuple[float, float]:
+    if (
+        type(r_km) is np.ndarray
+        and type(v_km_s) is np.ndarray
+        and r_km.shape == (3,)
+        and v_km_s.shape == (3,)
+        and r_km.dtype == np.dtype("float64")
+        and v_km_s.dtype == np.dtype("float64")
+    ):
+        return _navigation_orbital_elements_basic(r_km, v_km_s, mu_km3_s2)
     r = float(np.linalg.norm(r_km))
     v2 = float(np.dot(v_km_s, v_km_s))
     if r <= 0.0:

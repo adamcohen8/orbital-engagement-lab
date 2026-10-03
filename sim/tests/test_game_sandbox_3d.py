@@ -6,6 +6,114 @@ import pytest
 from sim.game.dashboard_3d import SandboxCamera
 
 
+@pytest.mark.parametrize("backend", ["python", "rust"])
+def test_sandbox_camera_toggle_changes_rendered_ri_framing(monkeypatch, backend):
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setenv("SDL_AUDIODRIVER", "dummy")
+    pg = pytest.importorskip("pygame")
+    if backend == "rust":
+        pytest.importorskip("oel_rust_game")
+        pytest.importorskip("oel_rust_orbit")
+    from sim.api import SimulationConfig
+    from sim.game.backend import configure_game_backend
+    from sim.game.dashboard import PygameRPODashboard
+    from sim.game.runner_config import (
+        _game_camera_mode,
+        _game_camera_rule_mode,
+        _game_plot_prediction_full_trajectory_only,
+        _game_plot_prediction_in_zoom,
+        _game_target_centered_plot_planes,
+    )
+
+    source = SimulationConfig.from_yaml("sim/game/configs/game_training_rpo_sandbox.yaml")
+    config = configure_game_backend(source, backend)
+    dashboard = PygameRPODashboard(
+        fullscreen=False,
+        numeric_backend=backend,
+        camera_mode=_game_camera_mode(config),
+        camera_rule_mode=_game_camera_rule_mode(config),
+        plot_prediction_in_zoom=_game_plot_prediction_in_zoom(config),
+        plot_prediction_full_trajectory_only=_game_plot_prediction_full_trajectory_only(config),
+        target_centered_plot_planes=_game_target_centered_plot_planes(config),
+    )
+    try:
+        # A distant old trail and coast prediction previously held the same
+        # RI zoom in both modes, despite the HUD reporting a successful toggle.
+        rel = np.array([[0., -4., 0., 0., 0., 0.], [0., .05, 0., 0., 0., 0.]])
+        target = np.zeros_like(rel)
+        dashboard.rel_hist = list(rel)
+        dashboard.target_rel_hist = list(target)
+        dashboard.t_s = [0., 1.]
+        dashboard._frame_cache = {
+            "rel": rel,
+            "target_rel": target,
+            "target_reference_rel": target,
+            "ghost": rel.copy(),
+            "target_ghost": target,
+            "nmt": np.empty((0, 3)),
+            "nmt_bounds": (),
+            "pixel_polyline_cache": {},
+        }
+        dashboard._frame_cache_dirty = False
+        panel = pg.Rect(36, 124, 580, 360)
+
+        def ri_scale():
+            dashboard._draw_panel(panel, "RI Plane", 1, 0)
+            return dashboard._frame_cache["plot_transforms"][(1, 0)]["scale_x"]
+
+        full_scale = ri_scale()
+        assert dashboard.toggle_camera_rule_mode() == "current_pair"
+        assert dashboard._prediction_scales_current_camera() is False
+        pair_scale = ri_scale()
+        assert pair_scale > full_scale * 5
+        assert dashboard.toggle_camera_rule_mode() == "full_trajectory"
+        assert ri_scale() == pytest.approx(full_scale)
+    finally:
+        dashboard.close()
+
+
+@pytest.mark.parametrize("backend", ["python", "rust"])
+def test_sandbox_game_loop_c_key_switches_camera_in_both_backends(tmp_path, monkeypatch, backend):
+    from pathlib import Path
+
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setenv("SDL_AUDIODRIVER", "dummy")
+    pg = pytest.importorskip("pygame")
+    if backend == "rust":
+        pytest.importorskip("oel_rust_game")
+        pytest.importorskip("oel_rust_orbit")
+    from sim.game import game_loop
+    from sim.game.pygame_dashboard import PygameRPODashboard
+    from sim.game.tutorial_runtime import _sandbox_setup_from_config
+
+    monkeypatch.setattr(
+        game_loop, "_run_sandbox_setup_form", lambda dashboard, config, **kwargs: _sandbox_setup_from_config(config)
+    )
+    original = PygameRPODashboard.draw
+    modes = []
+
+    def draw(self, **kwargs):
+        original(self, **kwargs)
+        modes.append(self.camera_rule_mode)
+        frame = len(modes)
+        if frame == 1:
+            pg.event.post(pg.event.Event(pg.KEYDOWN, key=pg.K_SPACE))
+        elif frame in (2, 4):
+            pg.event.post(pg.event.Event(pg.KEYDOWN, key=pg.K_c))
+        elif frame >= 6:
+            pg.event.post(pg.event.Event(pg.QUIT))
+
+    monkeypatch.setattr(PygameRPODashboard, "draw", draw)
+    game_loop.run_game_mode(
+        Path(__file__).resolve().parents[1] / "game/configs/game_training_rpo_sandbox.yaml",
+        backend=backend,
+        music_enabled=False,
+        debrief_output_dir=tmp_path,
+    )
+    assert modes[2] == "current_pair"
+    assert modes[4] == "full_trajectory"
+
+
 def test_orthographic_basis_preserves_equal_world_scale():
     camera = SandboxCamera()
     radial_on_screen = camera.basis() @ np.array([1.0, 0.0, 0.0])

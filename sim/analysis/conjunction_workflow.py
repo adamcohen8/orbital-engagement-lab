@@ -31,10 +31,96 @@ CONJUNCTION_ASSESSMENT_PROBLEM_SCHEMA = "oel.conjunction_assessment_problem.v1"
 CONJUNCTION_ASSESSMENT_EVIDENCE_SCHEMA = "oel.conjunction_assessment_evidence.v1"
 _FORCE_PLUGINS = {"j2": j2_plugin, "j3": j3_plugin, "j4": j4_plugin}
 _ZERO_ACCELERATION = np.zeros(3, dtype=float)
+_PROBLEM_FIELDS = {
+    "schema_version",
+    "name",
+    "duration_s",
+    "propagation",
+    "primary",
+    "secondary",
+    "screening_objects",
+    "avoidance_candidates",
+}
+_OBJECT_FIELDS = {
+    "object_id",
+    "initial_state_eci_km_km_s",
+    "covariance_eci_km_at_tca",
+    "hard_body_radius_m",
+}
+_CANDIDATE_FIELDS = {
+    "name",
+    "burn_time_s",
+    "frame",
+    "burn_component",
+    "terminal_quantity",
+    "target_offset",
+    "tolerance",
+    "initial_delta_v_m_s",
+    "perturbation_m_s",
+    "max_abs_delta_v_m_s",
+}
+_PROPAGATION_FIELDS = {
+    "step_s",
+    "integrator",
+    "force_model",
+    "mu_km3_s2",
+    "central_body_radius_km",
+    "mass_kg",
+    "event_time_tolerance_s",
+    "event_value_tolerance",
+    "event_max_iterations",
+}
+_PROPAGATION_NUMERIC_FIELDS = {
+    "step_s",
+    "mu_km3_s2",
+    "central_body_radius_km",
+    "mass_kg",
+    "event_time_tolerance_s",
+    "event_value_tolerance",
+    "event_max_iterations",
+}
 
 
 class ConjunctionAssessmentError(ValueError):
     """Raised when a conjunction-assessment problem is invalid."""
+
+
+def _mapping_with_known_fields(
+    value: Any, *, field: str, allowed_fields: set[str]
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ConjunctionAssessmentError(f"{field} must be a mapping.")
+    raw = dict(value)
+    unknown = sorted(set(raw) - allowed_fields, key=str)
+    if unknown:
+        raise ConjunctionAssessmentError(
+            f"{field} contains unknown fields: {', '.join(str(item) for item in unknown)}."
+        )
+    return raw
+
+
+def _reject_boolean_values(value: Any, field: str) -> None:
+    """Reject JSON/Python booleans before numeric conversion erases their type."""
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ConjunctionAssessmentError(f"{field} must contain numeric values, not booleans.")
+    if isinstance(value, np.ndarray):
+        if value.dtype.kind == "b":
+            raise ConjunctionAssessmentError(f"{field} must contain numeric values, not booleans.")
+        if value.dtype.kind == "O":
+            for item in value.flat:
+                _reject_boolean_values(item, field)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _reject_boolean_values(item, field)
+
+
+def _physical_float(value: Any, field: str) -> float:
+    _reject_boolean_values(value, field)
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ConjunctionAssessmentError(f"{field} must be numeric.") from exc
 
 
 @dataclass(frozen=True)
@@ -46,11 +132,22 @@ class ConjunctionObject:
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> ConjunctionObject:
-        raw = dict(data)
+        raw = _mapping_with_known_fields(data, field="conjunction object", allowed_fields=_OBJECT_FIELDS)
         object_id = str(raw.get("object_id", "")).strip()
-        state = np.asarray(raw.get("initial_state_eci_km_km_s", []), dtype=float)
-        covariance = validate_covariance(raw.get("covariance_eci_km_at_tca", []), dimension=6)
-        radius = float(raw.get("hard_body_radius_m", 0.0))
+        raw_state = raw.get("initial_state_eci_km_km_s", [])
+        raw_covariance = raw.get("covariance_eci_km_at_tca", [])
+        raw_radius = raw.get("hard_body_radius_m", 0.0)
+        _reject_boolean_values(raw_state, "initial_state_eci_km_km_s")
+        _reject_boolean_values(raw_covariance, "covariance_eci_km_at_tca")
+        _reject_boolean_values(raw_radius, "hard_body_radius_m")
+        try:
+            state = np.asarray(raw_state, dtype=float)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ConjunctionAssessmentError(
+                "initial_state_eci_km_km_s must contain numeric values."
+            ) from exc
+        covariance = validate_covariance(raw_covariance, dimension=6)
+        radius = _physical_float(raw_radius, "hard_body_radius_m")
         if not object_id:
             raise ConjunctionAssessmentError("Every conjunction object requires object_id.")
         if state.shape != (6,) or not np.all(np.isfinite(state)) or float(np.linalg.norm(state[:3])) <= 0.0:
@@ -90,18 +187,22 @@ class AvoidanceCandidate:
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> AvoidanceCandidate:
-        raw = dict(data)
+        raw = _mapping_with_known_fields(data, field="avoidance candidate", allowed_fields=_CANDIDATE_FIELDS)
         item = cls(
             name=str(raw.get("name", "")).strip(),
-            burn_time_s=float(raw.get("burn_time_s", 0.0)),
+            burn_time_s=_physical_float(raw.get("burn_time_s", 0.0), "burn_time_s"),
             frame=str(raw.get("frame", "ric")).strip().lower(),
             burn_component=str(raw.get("burn_component", "i")).strip().lower(),
             terminal_quantity=str(raw.get("terminal_quantity", "position_x_km")).strip().lower(),
-            target_offset=float(raw.get("target_offset", 0.0)),
-            tolerance=float(raw.get("tolerance", 1.0e-5)),
-            initial_delta_v_m_s=float(raw.get("initial_delta_v_m_s", 0.0)),
-            perturbation_m_s=float(raw.get("perturbation_m_s", 1.0e-3)),
-            max_abs_delta_v_m_s=float(raw.get("max_abs_delta_v_m_s", 10.0)),
+            target_offset=_physical_float(raw.get("target_offset", 0.0), "target_offset"),
+            tolerance=_physical_float(raw.get("tolerance", 1.0e-5), "tolerance"),
+            initial_delta_v_m_s=_physical_float(
+                raw.get("initial_delta_v_m_s", 0.0), "initial_delta_v_m_s"
+            ),
+            perturbation_m_s=_physical_float(raw.get("perturbation_m_s", 1.0e-3), "perturbation_m_s"),
+            max_abs_delta_v_m_s=_physical_float(
+                raw.get("max_abs_delta_v_m_s", 10.0), "max_abs_delta_v_m_s"
+            ),
         )
         allowed_components = {"eci": {"x", "y", "z"}, "ric": {"r", "i", "c"}}
         if not item.name:
@@ -140,12 +241,20 @@ class ConjunctionAssessmentProblem:
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> ConjunctionAssessmentProblem:
-        raw = dict(data)
+        raw = _mapping_with_known_fields(data, field="conjunction assessment problem", allowed_fields=_PROBLEM_FIELDS)
         schema = str(raw.get("schema_version", CONJUNCTION_ASSESSMENT_PROBLEM_SCHEMA)).strip()
         if schema != CONJUNCTION_ASSESSMENT_PROBLEM_SCHEMA:
             raise ConjunctionAssessmentError(f"Unsupported schema {schema!r}.")
-        duration = float(raw.get("duration_s", 0.0))
-        propagation = PropagationSettings.from_mapping(raw.get("propagation"))
+        duration = _physical_float(raw.get("duration_s", 0.0), "duration_s")
+        propagation_raw = raw.get("propagation")
+        if propagation_raw is None:
+            propagation_raw = {}
+        propagation_values = _mapping_with_known_fields(
+            propagation_raw, field="propagation", allowed_fields=_PROPAGATION_FIELDS
+        )
+        for field in sorted(_PROPAGATION_NUMERIC_FIELDS & propagation_values.keys()):
+            _reject_boolean_values(propagation_values[field], f"propagation.{field}")
+        propagation = PropagationSettings.from_mapping(propagation_values)
         if not math.isfinite(duration) or duration <= propagation.step_s:
             raise ConjunctionAssessmentError("duration_s must be finite and greater than propagation.step_s.")
         problem = cls(
@@ -258,8 +367,12 @@ def assess_histories(
     secondary: ConjunctionObject,
     primary_history: StateHistory,
     secondary_history: StateHistory,
+    *,
+    numeric_backend: str = "rust",
+    probability_numeric_backend: str = "rust",
 ) -> dict[str, Any]:
-    closest = refine_time_of_closest_approach(primary_history, secondary_history)
+    _require_probability_backend(probability_numeric_backend)
+    closest = refine_time_of_closest_approach(primary_history, secondary_history, numeric_backend=numeric_backend)
     if closest["at_search_boundary"]:
         return {
             "primary_id": primary.object_id,
@@ -282,6 +395,7 @@ def assess_histories(
         frame["plane_miss_km"],
         projected["encounter_plane_covariance_km2"],
         (primary.hard_body_radius_m + secondary.hard_body_radius_m) / 1000.0,
+        numeric_backend=probability_numeric_backend,
     )
     return {
         "primary_id": primary.object_id,
@@ -295,10 +409,13 @@ def assess_histories(
     }
 
 
-def assess_cdm_message(message_or_path: Any, *, primary_radius_m: float, secondary_radius_m: float) -> dict[str, Any]:
+def assess_cdm_message(message_or_path: Any, *, primary_radius_m: float, secondary_radius_m: float,
+                       numeric_backend: str = "rust") -> dict[str, Any]:
     """Independently recompute one CDM's instantaneous geometry and educational Pc."""
 
     from sim.interchange.ccsds_cdm import CdmMessage, inspect_cdm, read_cdm_kvn
+
+    _require_probability_backend(numeric_backend)
 
     message = read_cdm_kvn(message_or_path) if not isinstance(message_or_path, CdmMessage) else message_or_path
     inspection = inspect_cdm(message)
@@ -322,6 +439,7 @@ def assess_cdm_message(message_or_path: Any, *, primary_radius_m: float, seconda
         frame["plane_miss_km"],
         projected["encounter_plane_covariance_km2"],
         (float(primary_radius_m) + float(secondary_radius_m)) / 1000.0,
+        numeric_backend=numeric_backend,
     )
     computed_miss_m = float(np.linalg.norm(relative[:3])) * 1000.0
     computed_speed_m_s = float(np.linalg.norm(relative[3:])) * 1000.0
@@ -409,11 +527,28 @@ def _targeter_problem(
     }
 
 
-def assess_conjunction(problem: ConjunctionAssessmentProblem | Mapping[str, Any]) -> dict[str, Any]:
-    parsed = (
-        problem
-        if isinstance(problem, ConjunctionAssessmentProblem)
-        else ConjunctionAssessmentProblem.from_mapping(problem)
+def _require_probability_backend(backend: str) -> None:
+    backend = str(backend).strip().lower()
+    if backend not in {"python", "rust"}:
+        raise ConjunctionAssessmentError("probability numeric backend must be python or rust.")
+    if backend == "rust":
+        from sim.rust_conjunction_probability_backend import integrand
+
+        integrand()
+
+
+def assess_conjunction(problem: ConjunctionAssessmentProblem | Mapping[str, Any], *,
+                       numeric_backend: str = "rust", probability_numeric_backend: str = "rust") -> dict[str, Any]:
+    _require_probability_backend(probability_numeric_backend)
+    numeric_backend = str(numeric_backend).strip().lower()
+    if numeric_backend not in {"python", "rust"}:
+        raise ConjunctionAssessmentError("numeric_backend must be 'python' or 'rust'.")
+    if numeric_backend == "rust":
+        from sim.rust_conjunction_backend import _kernels
+
+        _kernels()
+    parsed = ConjunctionAssessmentProblem.from_mapping(
+        problem.to_dict() if isinstance(problem, ConjunctionAssessmentProblem) else problem
     )
     primary_history = propagate_history(parsed.primary.initial_state_eci_km_km_s, parsed.duration_s, parsed.propagation)
     secondary_history = propagate_history(
@@ -423,7 +558,7 @@ def assess_conjunction(problem: ConjunctionAssessmentProblem | Mapping[str, Any]
         item.object_id: propagate_history(item.initial_state_eci_km_km_s, parsed.duration_s, parsed.propagation)
         for item in parsed.screening_objects
     }
-    baseline = assess_histories(parsed.primary, parsed.secondary, primary_history, secondary_history)
+    baseline = assess_histories(parsed.primary, parsed.secondary, primary_history, secondary_history, numeric_backend=numeric_backend, probability_numeric_backend=probability_numeric_backend)
     if baseline["status"] != "completed":
         canonical_problem = parsed.to_dict()
         return {
@@ -486,7 +621,7 @@ def assess_conjunction(problem: ConjunctionAssessmentProblem | Mapping[str, Any]
                 burn_frame=candidate.frame,
                 delta_v_m_s=burn_vector,
             )
-            assessment = assess_histories(parsed.primary, parsed.secondary, maneuvered_history, secondary_history)
+            assessment = assess_histories(parsed.primary, parsed.secondary, maneuvered_history, secondary_history, numeric_backend=numeric_backend, probability_numeric_backend=probability_numeric_backend)
             targeter_final = np.asarray(
                 targeter["authoritative_repropagation"]["execution"]["final_state_eci_km_km_s"], dtype=float
             )
@@ -497,7 +632,7 @@ def assess_conjunction(problem: ConjunctionAssessmentProblem | Mapping[str, Any]
             )
             continuity_error = float(np.max(np.abs(history_at_target_epoch - targeter_final)))
             rescreen = [
-                assess_histories(parsed.primary, item, maneuvered_history, screening_histories[item.object_id])
+                assess_histories(parsed.primary, item, maneuvered_history, screening_histories[item.object_id], numeric_backend=numeric_backend, probability_numeric_backend=probability_numeric_backend)
                 for item in parsed.screening_objects
             ]
             row.update(

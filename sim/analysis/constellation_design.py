@@ -296,7 +296,14 @@ class ConstellationDesignProblem:
             raise ConstellationDesignError(f"Problem exceeds the public bound of {MAX_PUBLIC_SAMPLES} samples.")
 
         propagation_raw = _mapping(raw["propagation"], "propagation")
-        _exact_fields(propagation_raw, {"model", "integration_step_s"}, "propagation")
+        _exact_fields(
+            {key: value for key, value in propagation_raw.items() if key != "numeric_backend"},
+            {"model", "integration_step_s"},
+            "propagation",
+        )
+        backend = str(propagation_raw.get("numeric_backend", "rust")).strip().lower()
+        if backend not in {"python", "rust"}:
+            raise ConstellationDesignError("propagation.numeric_backend must be python or rust.")
         model = _text(propagation_raw["model"], "propagation.model").lower()
         if model not in {"onp_two_body", "onp_j2"}:
             raise ConstellationDesignError("propagation.model must be onp_two_body or onp_j2.")
@@ -403,7 +410,10 @@ class ConstellationDesignProblem:
             initial_jd_utc=_finite(raw["initial_jd_utc"], "initial_jd_utc"),
             duration_s=duration,
             sample_step_s=sample_step,
-            propagation={"model": model, "integration_step_s": integration_step},
+            propagation={
+                "model": model, "integration_step_s": integration_step,
+                **{"numeric_backend": backend},
+            },
             coverage={"order": order, "half_angle_deg": half_angle, "required_multiplicity": multiplicity},
             ground_sites=tuple(sorted(sites, key=lambda item: item.site_id)),
             link_budget={field: link[field] for field in sorted(link)},
@@ -483,7 +493,10 @@ def _propagate_member(
     states = np.empty((times.size, 6), dtype=float)
     states[0] = state
     plugins = [j2_plugin] if problem.propagation["model"] == "onp_j2" else []
-    propagator = OrbitPropagator(model="two_body", integrator="rk4", plugins=plugins)
+    propagator = OrbitPropagator(
+        model="two_body", integrator="rk4", plugins=plugins,
+        numeric_backend=problem.propagation.get("numeric_backend", "rust"),
+    )
     context = OrbitContext(mu_km3_s2=EARTH_MU_KM3_S2, mass_kg=1.0)
     integration_step = float(problem.propagation["integration_step_s"])
     current_time = 0.0
@@ -522,6 +535,8 @@ def _propagate_member(
 
 
 def _evaluate_design(problem: ConstellationDesignProblem, design: ConstellationCandidate) -> dict[str, Any]:
+    backend = problem.propagation.get("numeric_backend", "rust")
+    _require_numeric_backend(backend)
     members = generate_constellation_members(design)
     histories = [_propagate_member(problem, member) for member in members]
     frame_context = FrameContext(jd_utc_start=problem.initial_jd_utc)
@@ -540,6 +555,7 @@ def _evaluate_design(problem: ConstellationDesignProblem, design: ConstellationC
                     half_angle_rad=math.radians(float(problem.coverage["half_angle_deg"])),
                     quat_body_from_sensor=_IDENTITY_QUATERNION,
                     max_cell_time_comparisons=MAX_PUBLIC_COVERAGE_COMPARISONS,
+                    numeric_backend=backend,
                 ),
                 history=history,
                 frame_context=frame_context,
@@ -601,6 +617,7 @@ def _evaluate_design(problem: ConstellationDesignProblem, design: ConstellationC
                     rx_line_loss_db=problem.link_budget["rx_line_loss_db"],
                     misc_loss_db=problem.link_budget["misc_loss_db"],
                     min_fixed_site_elevation_rad=math.radians(problem.link_budget["minimum_elevation_deg"]),
+                    numeric_backend=backend,
                 ),
                 tx_history=spacecraft_endpoint,
                 rx_history=site_endpoint,
@@ -654,6 +671,22 @@ def _evaluate_design(problem: ConstellationDesignProblem, design: ConstellationC
             "capacity_disposition": "unconstrained_per-link_estimate_not_a_scheduled_network_capacity_claim",
         },
     }
+
+
+def _require_numeric_backend(backend: str) -> None:
+    """Fail before member propagation when a selected native slice is absent."""
+    if backend not in {"python", "rust"}:
+        raise ConstellationDesignError("propagation.numeric_backend must be python or rust.")
+    if backend == "rust":
+        from sim.rust_orbit_backend import _extension
+
+        native = _extension()
+        for name in (
+            "rk4_step_eci", "coverage_surface_targets_tile_bytes",
+            "link_endpoint_kinematics", "link_terminal_pattern", "link_free_space_ledger",
+        ):
+            if not callable(getattr(native, name, None)):
+                raise RuntimeError(f"Rust constellation design requires native {name}")
 
 
 def solve_constellation_design(

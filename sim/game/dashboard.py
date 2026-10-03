@@ -111,3 +111,4 @@ class PygameRPODashboard(
     presentation_reconciliation_max_error_km: float = 0.25
 
     sandbox_3d_enabled: bool = False
+    numeric_backend: str = "rust"

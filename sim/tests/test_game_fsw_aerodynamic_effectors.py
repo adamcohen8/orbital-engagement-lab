@@ -47,3 +47,30 @@ def test_realized_effector_geometry_changes_stage_force_torque_and_mass_properti
         model.mass_properties(base_inertia, device_positions={"flap": 1.0}).inertia_body_kg_m2,
         base_inertia,
     )
+
+
+def test_surface_torque_weights_each_surface_force_at_its_own_center() -> None:
+    model = VariableGeometryAerodynamics(
+        VariableGeometryAerodynamicsConfig(
+            (
+                AerodynamicSurfaceGeometry("left", 1.0, 1.0, 0.0, (1.0, 0.0, 0.0)),
+                AerodynamicSurfaceGeometry("right", 1.0, 3.0, 0.0, (-1.0, 0.0, 0.0)),
+            )
+        )
+    )
+
+    effects, _ = model.evaluate(
+        _state(),
+        density_kg_m3=1.0e-10,
+        device_positions={"left": 1.0, "right": 1.0},
+    )
+
+    # The two equal-area surfaces have unequal force weights.  Their resultant
+    # drag is applied at a nonzero net moment arm, producing +z torque.
+    dynamic_pressure = 0.5 * 1.0e-10 * (7_700.0**2)
+    np.testing.assert_allclose(
+        effects.torque_body_n_m,
+        np.array([0.0, 0.0, 2.0 * dynamic_pressure]),
+        rtol=0.0,
+        atol=1.0e-12,
+    )

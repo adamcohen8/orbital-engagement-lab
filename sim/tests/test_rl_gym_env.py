@@ -225,6 +225,34 @@ class TestGymSimulationEnv(unittest.TestCase):
         self.assertEqual(summary["policy_label"], "simulator_metric_baseline")
         self.assertTrue(summary["uses_privileged_data"])
 
+    def test_policy_card_aggregate_preserves_metric_only_baseline_label(self):
+        card = build_policy_card(
+            GymEnvConfig(
+                scenario=_base_scenario(),
+                controlled_agent_id="chaser",
+                observation_fields=(ObservationField("metrics.range_km"),),
+                action_fields=(),
+            ),
+            policy_name="metric_policy",
+        )
+
+        self.assertEqual(card.observation_source["contract"], "simulator_metric_baseline")
+
+    def test_policy_card_aggregate_labels_metric_and_observer_agents_mixed(self):
+        card = build_policy_card(
+            MultiAgentEnvConfig(
+                scenario=_base_scenario(),
+                controlled_agent_ids=("chaser", "target"),
+                observation_fields_by_agent={
+                    "chaser": (ObservationField("metrics.range_km"),),
+                    "target": (ObservationField("belief.target.state[0]"),),
+                },
+            ),
+            policy_name="mixed_policy",
+        )
+
+        self.assertEqual(card.observation_source["contract"], "mixed")
+
     def test_invalid_observation_path_for_disabled_agent_fails_fast(self):
         scenario = _base_scenario()
         scenario["objects"]["target"]["enabled"] = False

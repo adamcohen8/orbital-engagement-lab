@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isnan
 
 import numpy as np
 
@@ -13,8 +14,35 @@ from sim.utils.geodesy import ecef_to_geodetic_deg_km, enu_to_ecef_rotation
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 
+def _norm3(vector: np.ndarray) -> float:
+    """Norm of the rocket vectors with NumPy's same dot/sqrt arithmetic."""
+    values = np.asarray(vector)
+    if values.dtype.kind != "f":
+        return float(np.linalg.norm(values))
+    flat = values.ravel(order="K")
+    return float(np.sqrt(flat.dot(flat)))
+
+
+def _cross3(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+    """Cross product for the three-component rocket vectors."""
+    return np.array([
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ], dtype=float)
+
+
+def _clip_scalar(value: float, lower: float, upper: float) -> float:
+    """NumPy scalar clip semantics without the array dispatch path."""
+    if isnan(value) or isnan(lower) or isnan(upper):
+        return float("nan")
+    if lower > upper or value > upper:
+        return upper
+    return lower if value < lower else value
+
+
 def _unit(v: np.ndarray, eps: float = 1e-12) -> np.ndarray:
-    n = float(np.linalg.norm(v))
+    n = float(_norm3(v))
     if n <= eps:
         return np.zeros_like(v)
     return v / n
@@ -23,15 +51,15 @@ def _unit(v: np.ndarray, eps: float = 1e-12) -> np.ndarray:
 def _orbital_elements_basic(
     r_km: np.ndarray, v_km_s: np.ndarray, mu_km3_s2: float = EARTH_MU_KM3_S2
 ) -> tuple[float, float]:
-    r = float(np.linalg.norm(r_km))
+    r = float(_norm3(r_km))
     v2 = float(np.dot(v_km_s, v_km_s))
     if r <= 0.0:
         return np.inf, np.inf
     eps = 0.5 * v2 - mu_km3_s2 / r
     a_km = np.inf if abs(eps) < 1e-14 else float(-mu_km3_s2 / (2.0 * eps))
-    h = np.cross(r_km, v_km_s)
-    e_vec = np.cross(v_km_s, h) / mu_km3_s2 - r_km / r
-    return a_km, float(np.linalg.norm(e_vec))
+    h = _cross3(r_km, v_km_s)
+    e_vec = _cross3(v_km_s, h) / mu_km3_s2 - r_km / r
+    return a_km, float(_norm3(e_vec))
 
 
 def _apo_peri_alt_km(
@@ -53,7 +81,7 @@ def _geodetic_state_from_eci(
 ) -> tuple[float, float, float]:
     frame_context = frame_context or frame_context_from_environment({"jd_utc_start": jd_utc_start})
     r_ecef = transform_position(
-        np.array(r_eci_km, dtype=float).reshape(3),
+        np.asarray(r_eci_km, dtype=float).reshape(3),
         "eci",
         "ecef",
         t_s=float(t_s),
@@ -133,6 +161,7 @@ def rocket_air_relative_state_eci_m_s(
         ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
         ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
         eop_extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
+        _numeric_backend=sim_cfg.numeric_backend,
     )
     wind_eci_m_s = _resolve_wind_eci_m_s(
         position_eci_km=position_eci_km,
@@ -183,8 +212,8 @@ def build_rocket_nav_state(
 ) -> RocketNavState:
     r = np.array(state.position_eci_km, dtype=float).reshape(3)
     v = np.array(state.velocity_eci_km_s, dtype=float).reshape(3)
-    r_norm = float(np.linalg.norm(r))
-    speed = float(np.linalg.norm(v))
+    r_norm = float(_norm3(r))
+    speed = float(_norm3(v))
     r_hat = _unit(r)
     vertical_speed = float(np.dot(v, r_hat)) if r_norm > 0.0 else 0.0
     horizontal_speed = float(max(speed * speed - vertical_speed * vertical_speed, 0.0) ** 0.5)
@@ -212,7 +241,7 @@ def build_rocket_nav_state(
         state=state,
     )
     v_rel_body_m_s = c_bn @ v_rel_eci_m_s
-    rel_speed_m_s = float(np.linalg.norm(v_rel_body_m_s))
+    rel_speed_m_s = float(_norm3(v_rel_body_m_s))
     q_dyn = 0.5 * float(max(atmos["density_kg_m3"], 0.0)) * rel_speed_m_s * rel_speed_m_s
     sound_speed = float(max(atmos["sound_speed_m_s"], 1e-6))
     mach = rel_speed_m_s / sound_speed
@@ -222,20 +251,20 @@ def build_rocket_nav_state(
         beta_deg = 0.0
     else:
         alpha_deg = float(np.rad2deg(np.arctan2(w, max(u, 1e-12))))
-        beta_deg = float(np.rad2deg(np.arcsin(np.clip(v_lat / rel_speed_m_s, -1.0, 1.0))))
+        beta_deg = float(np.rad2deg(np.arcsin(_clip_scalar(v_lat / rel_speed_m_s, -1.0, 1.0))))
 
-    stage_prop = np.array(state.stage_prop_remaining_kg, dtype=float).reshape(-1)
+    stage_prop = np.asarray(state.stage_prop_remaining_kg, dtype=float).reshape(-1)
     prop_remaining = float(np.sum(stage_prop))
     prop0 = sum(float(stage.propellant_mass_kg) for stage in vehicle_cfg.stack.stages)
     active_stage_index = int(state.active_stage_index)
     stages_complete = active_stage_index >= len(vehicle_cfg.stack.stages)
-    thrust_axis_body = _unit(np.array(state.thrust_vector_body, dtype=float).reshape(3))
+    thrust_axis_body = _unit(np.asarray(state.thrust_vector_body, dtype=float).reshape(3))
     thrust_axis_eci = c_bn.T @ thrust_axis_body
     if thrust_n is None:
         thrust_n = 0.0
         if active_stage_index < len(vehicle_cfg.stack.stages):
             stage = vehicle_cfg.stack.stages[active_stage_index]
-            thrust_n = float(np.clip(throttle_cmd, 0.0, 1.0)) * float(stage.max_thrust_n)
+            thrust_n = float(_clip_scalar(throttle_cmd, 0.0, 1.0)) * float(stage.max_thrust_n)
     weight_n = float(max(state.mass_kg, 0.0)) * 9.80665
 
     return RocketNavState(
@@ -259,7 +288,7 @@ def build_rocket_nav_state(
         qbar_times_alpha_pa_deg=float(max(q_dyn, 0.0) * abs(alpha_deg)),
         thrust_to_weight=float(0.0 if weight_n <= 0.0 else max(float(thrust_n), 0.0) / weight_n),
         propellant_remaining_kg=prop_remaining,
-        propellant_remaining_fraction=float(0.0 if prop0 <= 0.0 else np.clip(prop_remaining / prop0, 0.0, 1.0)),
+        propellant_remaining_fraction=float(0.0 if prop0 <= 0.0 else _clip_scalar(prop_remaining / prop0, 0.0, 1.0)),
         active_stage_index=active_stage_index,
         stages_complete=stages_complete,
         thrust_axis_eci=thrust_axis_eci,

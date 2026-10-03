@@ -18,6 +18,7 @@ from sim.flight_software.contracts import (
     FrameId,
     ThrusterOnOffCommand,
     ThrusterPulseCommand,
+    TimeValidity,
 )
 from sim.flight_software.schemas import (
     _canonical_json_bytes_trusted,
@@ -123,11 +124,16 @@ class ActuatorCommandBus:
         boundary_validated: bool,
     ) -> ActuatorCommandReceipt | None:
         self._publications.append((command, received_at))
-        fingerprint = (
-            _canonical_json_bytes_trusted(command)
-            if boundary_validated
-            else canonical_json_bytes(command)
-        )
+        encoder = getattr(self, "_native_evidence_encoder", None)
+        if boundary_validated and encoder is not None:
+            from sim.flight_software.schemas import _canonical_primitive_json_bytes
+            fingerprint = _canonical_primitive_json_bytes(encoder.convert(command))
+        else:
+            fingerprint = (
+                _canonical_json_bytes_trusted(command)
+                if boundary_validated
+                else canonical_json_bytes(command)
+            )
         previous = self._ledger.get(command.command_id)
         if previous is not None:
             previous_fingerprint, previous_disposition = previous
@@ -175,6 +181,24 @@ class ActuatorCommandBus:
     def snapshot_state(self) -> dict[str, object]:
         """Return deterministic replay state for a continuation checkpoint."""
 
+        encoder = getattr(self, "_native_evidence_encoder", None)
+        validator = getattr(self, "_native_boundary_validator", None)
+        if encoder is not None and validator is not None:
+            values = tuple(value for publication in self._publications for value in publication)
+            # Each record keeps its independent root and traversal diagnostics.
+            check_many = getattr(validator, "check_many", None)
+            if check_many is None:
+                for value in values:
+                    validator.check(value)
+            else:
+                check_many(values)
+            primitives = encoder.convert_many(values)
+            return {
+                "publications": [
+                    {"command": primitives[index], "received_at": primitives[index + 1]}
+                    for index in range(0, len(primitives), 2)
+                ]
+            }
         return {
             "publications": [
                 {"command": to_primitive(command), "received_at": to_primitive(received_at)}
@@ -232,6 +256,15 @@ class ActuatorCommandBus:
         active = self._accepted[identity][index]
         if active.expiry_time_ns is None or time_ns < active.expiry_time_ns:
             return ActuatorDemand(actuator_id, DemandMode.COMMANDED, active.command, active.command.payload)
+        # A pulse payload carries its own physical end event.  The generic
+        # latch policy is intended for stateful commands (for example a
+        # wrench or on/off state), and must not turn a finite pulse into a
+        # permanently enabled thruster after that end event.
+        if (
+            device.expiry_behavior is ExpiryBehavior.LATCH
+            and isinstance(active.command.payload, ThrusterPulseCommand)
+        ):
+            return ActuatorDemand(actuator_id, DemandMode.ZERO, active.command, None)
         if device.expiry_behavior is ExpiryBehavior.LATCH:
             return ActuatorDemand(actuator_id, DemandMode.LATCHED, active.command, active.command.payload)
         mode = DemandMode.ZERO if device.expiry_behavior is ExpiryBehavior.ZERO else DemandMode.IDLE
@@ -253,6 +286,13 @@ class ActuatorCommandBus:
             return CommandDisposition.REJECTED_TARGET, ("unknown_satellite_or_actuator",)
         if command.frame != device.command_frame:
             return CommandDisposition.REJECTED_FRAME, ("unexpected_command_frame",)
+        time_tags = [command.issued_at, command.validity.not_before, received_at]
+        if command.validity.expires_at is not None:
+            time_tags.append(command.validity.expires_at)
+        if isinstance(command.payload, ThrusterPulseCommand):
+            time_tags.append(command.payload.start_at)
+        if any(tag.validity is TimeValidity.INVALID for tag in time_tags):
+            return CommandDisposition.REJECTED_TIME, ("invalid_time_tag",)
         if not _same_clock_domain(command.issued_at, received_at) or not _same_clock_domain(
             command.validity.not_before, received_at
         ):

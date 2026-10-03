@@ -682,6 +682,9 @@ def _duration_ms(started: float) -> int:
 
 def _git_commit(root: Path) -> str:
     try:
+        repository = _run_command(["git", "rev-parse", "--show-toplevel"], cwd=root, timeout=30)
+        if Path(repository.stdout.strip()).resolve() != root.resolve():
+            return "unavailable_public_export"
         completed = _run_command(["git", "rev-parse", "HEAD"], cwd=root, timeout=30)
     except (OSError, RuntimeError):
         return "unavailable_public_export"

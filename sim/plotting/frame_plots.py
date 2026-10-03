@@ -8,6 +8,7 @@ import numpy as np
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
 from sim.dynamics.orbit.frames import FrameContext, frame_context_from_mapping, transform_position
 from sim.plotting.capability_common import _show_save_close
+from sim.plotting.style import tight_layout_oel_figure
 from sim.utils.figure_size import cap_figsize
 from sim.utils.frames import ric_dcm_ir_from_rv, ric_rect_to_curv
 from sim.utils.quaternion import dcm_to_quaternion_bn, quaternion_to_dcm_bn
@@ -78,7 +79,7 @@ def plot_quaternion_components(
             ax.grid(True, alpha=0.3)
         axes[0].set_title(f"Quaternion Components ({frame.upper()} frame)")
         axes[-1].set_xlabel("Time (s)")
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _show_save_close(fig, mode=mode, out_path=out_path)
 
 
@@ -110,7 +111,7 @@ def plot_body_rates(
             ax.grid(True, alpha=0.3)
         axes[0].set_title(f"Angular Velocity Components ({frame.upper()} frame)")
         axes[-1].set_xlabel("Time (s)")
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _show_save_close(fig, mode=mode, out_path=out_path)
 
 
@@ -274,7 +275,7 @@ def plot_trajectory_frame(
     ax.set_xlabel(xlbl)
     ax.set_ylabel(ylbl)
     ax.set_zlabel(zlbl)
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _show_save_close(fig, mode=mode, out_path=out_path)
 
 
@@ -326,7 +327,7 @@ def plot_multi_trajectory_frame(
     ax.set_zlabel(zlbl)
     handles, labels = ax.get_legend_handles_labels()
     _bottom_center_figure_legend(fig, handles, labels)
-    fig.tight_layout(rect=(0.0, 0.12, 1.0, 1.0))
+    tight_layout_oel_figure(fig, rect=(0.0, 0.12, 1.0, 1.0))
     _show_save_close(fig, mode=mode, out_path=out_path)
 
 
@@ -377,7 +378,7 @@ def plot_ric_2d_projections(
         ax.set_title(f"{xlbl}-{ylbl}")
         ax.grid(True, alpha=0.3)
     fig.suptitle(f"RIC 2D Projections ({'Rect' if frame == 'ric_rect' else 'Curvilinear'})")
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _show_save_close(fig, mode=mode, out_path=out_path)
 
 
@@ -464,5 +465,5 @@ def plot_multi_ric_2d_projections(
     handles, labels = axes[0].get_legend_handles_labels()
     _bottom_center_figure_legend(fig, handles, labels)
     fig.suptitle(f"RIC 2D Projections Multi ({'Rect' if frame == 'ric_rect' else 'Curvilinear'})")
-    fig.tight_layout(rect=(0.0, 0.17, 1.0, 1.0))
+    tight_layout_oel_figure(fig, rect=(0.0, 0.17, 1.0, 1.0))
     _show_save_close(fig, mode=mode, out_path=out_path)

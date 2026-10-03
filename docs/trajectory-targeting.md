@@ -43,6 +43,17 @@ evidence = solve_trajectory_target(problem)
 assert evidence["authoritative_repropagation"]["status"] == "verified"
 ```
 
+Python callers can select `solve_trajectory_target(problem, numeric_backend="rust")`
+with wheel 0.13.0 or newer for RK4 finite-difference trials using two-body
+and ordered built-in J2/J3/J4 forces. Fixed-duration trials use one native
+batch. Event coasts prepare bounded native coarse samples while Python retains
+crossing detection, angular unwrapping, refinement decisions, failure receipts,
+and propagation accounting. Direct `execute_trajectory` callers can select the
+same numerical backend. The solver retains Python iteration, line search,
+terminal constraints, and independent authoritative repropagation. Adaptive
+integrators reject explicit native Jacobian selection. The default is `numeric_backend="rust"`; select `numeric_backend="python"`
+for the independent Python reference implementation.
+
 ## Problem Contract
 
 The input contract is `oel.trajectory_targeting_problem.v1`. State values are

@@ -9,11 +9,12 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from integrations.oel_mcp.execution import ExecutionApprovalPolicy
+from integrations.oel_mcp.execution import ExecutionApprovalPolicy, bounded_config_path_policy
 from integrations.oel_mcp.policy import MCPPathPolicy
 from integrations.oel_mcp.public_handlers import PublicOELMCPHandlers
 from integrations.oel_mcp.public_registry import PUBLIC_TOOL_CONTRACTS
 from integrations.oel_mcp.sdk_protocol import build_sdk_server
+from sim.security.config_paths import ConfigPathSecurityError
 
 ROOT = Path(__file__).resolve().parents[2]
 HANDLING = {"marking": "PUBLIC", "release_scope": "public"}
@@ -87,6 +88,23 @@ def test_m4_registry_effects_and_deployment_views(tmp_path: Path) -> None:
         "idempotentHint": False,
         "openWorldHint": False,
     }
+
+
+def test_mcp_config_policy_does_not_union_repository_or_config_roots(tmp_path: Path) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    source = allowed / "scenario.yaml"
+    source.write_text("simulator: {}\n", encoding="utf-8")
+    policy = MCPPathPolicy.configured(read_roots=(allowed,), write_roots=(tmp_path,))
+    bounded = bounded_config_path_policy(config_path=source, path_policy=policy)
+
+    assert bounded.read_roots == (allowed.resolve(),)
+    with pytest.raises(ConfigPathSecurityError):
+        bounded.resolve_input_file(ROOT / "README.md", purpose="nested input")
+    prompt = tmp_path / "outside-prompt.txt"
+    prompt.write_text("prompt", encoding="utf-8")
+    with pytest.raises(ConfigPathSecurityError):
+        bounded.resolve_ai_prompt_file(prompt, purpose="AI prompt")
 
 
 def test_plan_validate_and_run_require_external_approval_and_bound_identity(tmp_path: Path) -> None:
@@ -164,6 +182,48 @@ def test_plan_validate_and_run_require_external_approval_and_bound_identity(tmp_
     assert provenance["artifacts_complete"] is True
     assert inspected["result"]["evidence_summary"]["mcp_execution_complete"] is True
     assert inspected["result"]["freshness"]["content_bound_execution_recorded"] is True
+
+    # A source mutation after inspection must be caught by the second
+    # content-bound manifest check before packet serialization.
+    from integrations.oel_mcp import reporting as reporting_module
+
+    original_inspect_output = reporting_module.inspect_output
+
+    def inspect_then_tamper(*args, **kwargs):
+        result = original_inspect_output(*args, **kwargs)
+        summary_path = Path(str(arguments["output_dir"])) / "master_run_summary.json"
+        summary_path.write_text(summary_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+        return result
+
+    with patch.object(reporting_module, "inspect_output", side_effect=inspect_then_tamper):
+        raced_packet = handlers.prepare_report_packet(
+            source_output_dir=arguments["output_dir"],
+            packet_output_dir=tmp_path / "raced-packet",
+            packet_id="raced-source",
+            query_names=[],
+            max_rows=10,
+            handling=HANDLING,
+            approval=WRITE_APPROVAL,
+        )
+    assert raced_packet["status"] == "failed"
+    assert "artifact records do not match" in raced_packet["error"]["message"]
+
+    # Report preparation must revalidate the original execution manifest;
+    # changing a source artifact after inspection cannot produce a trusted
+    # packet merely because the manifest still says it is complete.
+    summary_path = Path(str(arguments["output_dir"])) / "master_run_summary.json"
+    summary_path.write_text(summary_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    tampered_packet = handlers.prepare_report_packet(
+        source_output_dir=arguments["output_dir"],
+        packet_output_dir=tmp_path / "tampered-packet",
+        packet_id="tampered-source",
+        query_names=[],
+        max_rows=10,
+        handling=HANDLING,
+        approval=WRITE_APPROVAL,
+    )
+    assert tampered_packet["status"] == "failed"
+    assert "artifact records do not match" in tampered_packet["error"]["message"]
 
 
 def test_m5_2_completed_run_product_export_and_inspection(tmp_path: Path) -> None:

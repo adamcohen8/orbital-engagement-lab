@@ -293,6 +293,9 @@ class SingleRunPayloadAssembler:
         if resources:
             payload["spacecraft_resources"] = resources
         payload["impulsive_maneuvers"] = list(engine.impulsive_maneuvers)
+        payload["collision_events"] = list(engine.collision_events)
+        if engine.collision_events:
+            payload["summary"]["collisions"] = {"count": len(engine.collision_events)}
         if engine.impulsive_maneuvers:
             payload["summary"]["impulsive_maneuvers"] = {
                 "count": len(engine.impulsive_maneuvers),

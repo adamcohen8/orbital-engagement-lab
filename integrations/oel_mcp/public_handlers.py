@@ -20,6 +20,7 @@ from integrations.oel_mcp.contracts import (
 from integrations.oel_mcp.execution import (
     ExecutionApprovalPolicy,
     MCPExecutionCancelled,
+    bounded_config_path_policy,
     cancellation_callback,
     complete_manifest,
     ensure_new_output_dir,
@@ -78,7 +79,6 @@ from sim.review import (
 )
 from sim.review import render_review_animation as render_planned_review_animation
 from sim.review import render_review_plot as render_planned_review_plot
-from sim.security import ConfigPathPolicy
 from sim.study import compare_study_bundles, inspect_study_bundle, replay_study_bundle
 
 
@@ -632,12 +632,9 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
             materialized = prepared.output_dir / "mcp_execution_config.yaml"
             try:
                 materialized = write_materialized_config(prepared)
-                execution_path_policy = ConfigPathPolicy.default(
+                execution_path_policy = bounded_config_path_policy(
                     config_path=materialized,
-                    workspace_root=Path(__file__).resolve().parents[2],
-                    read_roots=self.path_policy.read_roots,
-                    write_roots=self.path_policy.write_roots,
-                    allow_config_dir_writes=False,
+                    path_policy=self.path_policy,
                 )
                 if progress:
                     progress(1, 3, "Validated and materialized the approved scenario.")
@@ -788,9 +785,14 @@ class PublicOELMCPHandlers(BaseOELMCPHandlers):
                         and summary.get("scenario_name")
                         and summary.get("samples") is not None
                     )
-            source_complete = bool(
-                (provenance["status"] == "completed" and provenance["artifacts_complete"])
-                or summary_complete
+            # An MCP manifest is the authoritative execution boundary when
+            # present.  A legacy summary may fill in provenance only for
+            # outputs that predate the manifest; it must not revive an
+            # explicitly cancelled or incomplete MCP execution.
+            source_complete = (
+                bool(provenance["status"] == "completed" and provenance["artifacts_complete"])
+                if provenance["available"]
+                else summary_complete
             )
             qa = dict(artifact.get("qa", {}) or {})
             plot_complete = (
@@ -1845,13 +1847,60 @@ def _frame_time_projection(
 
 def _incomplete_manifest_status(output_dir: Path) -> dict[str, Any] | None:
     provenance = _execution_provenance(output_dir)
-    if not provenance["available"] or provenance["status"] == "completed":
+    if not provenance["available"]:
         return None
+    if provenance["status"] == "completed" and provenance["artifacts_complete"]:
+        return None
+    if provenance["status"] == "completed":
+        return {
+            "code": "mcp_execution_artifact_integrity_failed",
+            "status": "completed",
+            "next_step": "Restore the manifest-listed artifacts or rerun the source workflow.",
+        }
     return {
         "code": "mcp_execution_not_completed",
         "status": provenance["status"],
         "next_step": "Use a completed execution or rerun the source workflow.",
     }
+
+
+def _manifest_artifacts_valid(manifest: dict[str, Any], output: Path) -> bool:
+    if not bool(manifest.get("artifacts_complete", False)):
+        return False
+    # Review plotting updates the human-readable index with generated-artifact
+    # links after the source run settles. It is derived navigation metadata, so
+    # it cannot be part of the immutable source-artifact integrity set.
+    mutable_paths = {(output / "index.md").resolve()}
+    records = [
+        dict(raw or {})
+        for raw in list(manifest.get("artifact_records", []) or [])
+        if Path(str(dict(raw or {}).get("path", "") or "")).resolve() not in mutable_paths
+    ]
+    artifacts = [
+        str(path)
+        for path in list(manifest.get("artifacts", []) or [])
+        if Path(str(path)).resolve() not in mutable_paths
+    ]
+    if not records or len(records) != len(artifacts):
+        return False
+    expected_paths = {str(path) for path in artifacts}
+    seen: set[str] = set()
+    for raw_record in records:
+        record = dict(raw_record or {})
+        raw_path = str(record.get("path", "") or "")
+        path = Path(raw_path)
+        try:
+            path.resolve().relative_to(output.resolve())
+        except ValueError:
+            return False
+        if raw_path not in expected_paths or raw_path in seen or not path.is_file() or path.is_symlink():
+            return False
+        if int(record.get("bytes", -1)) != path.stat().st_size:
+            return False
+        if str(record.get("sha256", "")) != _sha256_file(path):
+            return False
+        seen.add(raw_path)
+    return seen == expected_paths
 
 
 def _execution_provenance(output_dir: Path) -> dict[str, Any]:
@@ -1869,6 +1918,7 @@ def _execution_provenance(output_dir: Path) -> dict[str, Any]:
         "cancelled": False,
         "started_utc": None,
         "completed_utc": None,
+        "artifact_records_valid": False,
     }
     if not manifest_path.is_file():
         return empty
@@ -1876,6 +1926,7 @@ def _execution_provenance(output_dir: Path) -> dict[str, Any]:
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("The MCP execution manifest must contain a JSON object.")
+    artifact_records_valid = _manifest_artifacts_valid(payload, output_dir)
     return {
         "available": True,
         "status": str(payload.get("status", "")),
@@ -1884,11 +1935,12 @@ def _execution_provenance(output_dir: Path) -> dict[str, Any]:
         "source_config_sha256": str(payload.get("source_config_sha256", "")),
         "normalized_config_sha256": str(payload.get("normalized_config_sha256", "")),
         "resource_profile": str(payload.get("resource_profile", "")),
-        "artifacts_complete": bool(payload.get("artifacts_complete", False)),
+        "artifacts_complete": bool(payload.get("artifacts_complete", False)) and artifact_records_valid,
         "artifact_count": len(list(payload.get("artifacts", []) or [])),
         "cancelled": bool(payload.get("cancelled", False)),
         "started_utc": payload.get("started_utc"),
         "completed_utc": payload.get("completed_utc"),
+        "artifact_records_valid": artifact_records_valid,
     }
 
 

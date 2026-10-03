@@ -19,11 +19,17 @@ from sim.estimation.relative_hcw_ekf import (
     normalize_hcw_measurement_model,
 )
 from sim.estimation.relative_th_ekf import THRelativeEKFEstimator, YARelativeEKFEstimator
+from sim.numeric_backend import normalize_numeric_backend
 from sim.sensors.access import AccessConfig, AccessModel
 from sim.utils.frames import eci_relative_to_ric_rect, ric_rect_state_to_eci
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 KnowledgeSummaryValue = Any
+
+
+def _normalize_tracking_numeric_backend(value: str | None) -> str:
+    backend = normalize_numeric_backend("python" if value is None else value, error_message="knowledge numeric_backend must be python or rust")
+    return backend
 
 
 def _float_history() -> array[float]:
@@ -77,6 +83,8 @@ class KnowledgeConditionConfig:
             boresight = np.asarray(self.sensor_boresight_body, dtype=float).reshape(-1)
             if boresight.size != 3 or not np.all(np.isfinite(boresight)):
                 raise ValueError("sensor_boresight_body must contain three finite values.")
+            if float(np.linalg.norm(boresight)) <= 0.0:
+                raise ValueError("sensor_boresight_body must be nonzero when provided.")
 
     @classmethod
     def from_knowledge(cls, knowledge: dict, *, default_period_s: float) -> KnowledgeConditionConfig:
@@ -174,6 +182,10 @@ class TrackedObjectConfig:
     measurement_model: str = "state"
     ekf: KnowledgeEKFConfig = KnowledgeEKFConfig()
     maneuver_detection: EKFManeuverDetectionConfig = EKFManeuverDetectionConfig()
+    numeric_backend: str = "rust"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "numeric_backend", _normalize_tracking_numeric_backend(self.numeric_backend))
 
 
 class ObjectDetectionGate:
@@ -240,14 +252,24 @@ class ObjectDetectionGate:
                 boresight_body = np.array([1.0, 0.0, 0.0], dtype=float)
         b = np.array(boresight_body, dtype=float).reshape(3)
         bn = float(np.linalg.norm(b))
-        sensor_boresight_eci = None if bn <= 0.0 else (c_bn.T @ (b / bn))
+        if not np.isfinite(bn) or bn <= 0.0:
+            raise ValueError("sensor_boresight_body must be nonzero when provided.")
+        sensor_boresight_eci = c_bn.T @ (b / bn)
         return sensor_position_eci_km, sensor_velocity_eci_km_s, sensor_boresight_eci
 
 
 class _OtherObjectStateSensor(ObjectDetectionGate):
-    def __init__(self, conditions: KnowledgeConditionConfig, noise: KnowledgeNoiseConfig, rng: np.random.Generator):
+    def __init__(
+        self,
+        conditions: KnowledgeConditionConfig,
+        noise: KnowledgeNoiseConfig,
+        rng: np.random.Generator,
+        *,
+        numeric_backend: str = "rust",
+    ):
         super().__init__(conditions, rng)
         self.noise = noise
+        self.numeric_backend = _normalize_tracking_numeric_backend(numeric_backend)
 
     _detection_gate = ObjectDetectionGate.detect
 
@@ -278,7 +300,12 @@ class _OtherObjectStateSensor(ObjectDetectionGate):
         sensor_position_eci_km, sensor_velocity_eci_km_s, _ = self._sensor_state_eci(observer_truth)
         observer_state = np.hstack((sensor_position_eci_km, sensor_velocity_eci_km_s))
         truth_state = np.hstack((target_truth.position_eci_km, target_truth.velocity_eci_km_s))
-        ideal = _relative_measurement_vector(model, truth_state, observer_state)
+        ideal = _relative_measurement_vector(
+            model,
+            truth_state,
+            observer_state,
+            numeric_backend=self.numeric_backend,
+        )
         sigma = _relative_measurement_sigma(model, self.noise)
         bias = _relative_measurement_bias(model, self.noise)
         return Measurement(vector=ideal + bias + self.rng.normal(0.0, sigma, size=ideal.size), t_s=t_s)
@@ -465,6 +492,7 @@ class _Track:
                 meas_noise_diag=self._hcw_meas_noise_diag(),
                 measurement_model=self.measurement_model,
                 measurement_origin=self.hcw_measurement_origin,
+                numeric_backend=self.sensor.numeric_backend,
                 integration_substep_s=float(self.th_integration_substep_s),
             )
         elif self.estimator_type == "relative_th_ekf":
@@ -476,6 +504,7 @@ class _Track:
                 meas_noise_diag=self._hcw_meas_noise_diag(),
                 measurement_model=self.measurement_model,
                 measurement_origin=self.hcw_measurement_origin,
+                numeric_backend=self.sensor.numeric_backend,
                 integration_substep_s=float(self.th_integration_substep_s),
             )
         elif self.estimator_type == "relative_ss_j2_ekf":
@@ -486,6 +515,7 @@ class _Track:
                 meas_noise_diag=self._hcw_meas_noise_diag(),
                 measurement_model=self.measurement_model,
                 measurement_origin=self.hcw_measurement_origin,
+                numeric_backend=self.sensor.numeric_backend,
             )
         else:
             self.estimator = HCWRelativeEKFEstimator(
@@ -495,6 +525,7 @@ class _Track:
                 meas_noise_diag=self._hcw_meas_noise_diag(),
                 measurement_model=self.measurement_model,
                 measurement_origin=self.hcw_measurement_origin,
+                numeric_backend=self.sensor.numeric_backend,
             )
 
     def _measure_hcw(
@@ -631,29 +662,54 @@ class _Track:
         sensor_position_eci_km, sensor_velocity_eci_km_s, _ = self.sensor._sensor_state_eci(observer_truth)
         observer_state = np.hstack((sensor_position_eci_km, sensor_velocity_eci_km_s))
         z = np.asarray(measurement.vector, dtype=float).reshape(-1)
-        h_pred = _relative_measurement_vector(model, predicted.state, observer_state)
-        h_jac = _relative_measurement_jacobian(model, predicted.state, observer_state)
+        h_pred, h_jac = _relative_measurement_and_jacobian(
+            model,
+            predicted.state,
+            observer_state,
+            numeric_backend=self.sensor.numeric_backend,
+        )
         r = np.diag(_relative_measurement_sigma(model, self.sensor.noise) ** 2)
         innovation = _relative_innovation(model, z, h_pred)
         s = h_jac @ predicted.covariance @ h_jac.T + r
-        hp_t = predicted.covariance @ h_jac.T
-        try:
-            k_gain = np.linalg.solve(s.T, hp_t.T).T
-            s_y = np.linalg.solve(s, innovation)
-        except np.linalg.LinAlgError:
-            s_pinv = np.linalg.pinv(s)
-            k_gain = hp_t @ s_pinv
-            s_y = s_pinv @ innovation
-        x_upd = predicted.state + k_gain @ innovation
-        i_kh = np.eye(predicted.state.size) - k_gain @ h_jac
-        p_upd = i_kh @ predicted.covariance @ i_kh.T + k_gain @ r @ k_gain.T
-        p_upd = 0.5 * (p_upd + p_upd.T)
+        native_result = None
+        # Weakly observed and angular tracks amplify gain-solve roundoff over
+        # repeated updates. Use the native solve only for noise-dominated
+        # range models; retain the established solve elsewhere.
+        if (self.sensor.numeric_backend == "rust" and model in {"relative_range", "relative_range_rate"}
+                and np.all(np.diag(r) >= 0.9 * np.diag(s))):
+            from sim.rust_estimation_backend import ekf_update_innovation
+
+            try:
+                native_result = ekf_update_innovation(
+                    predicted.state, predicted.covariance, innovation, h_jac, r,
+                )
+            except ValueError as exc:
+                # A singular innovation covariance retains the Python owner's
+                # pseudoinverse policy, as in the ordinary orbit EKF path.
+                if "matrix must be positive definite" not in str(exc):
+                    raise
+        if native_result is not None:
+            x_upd, p_upd, _native_innovation, _native_s, nis = native_result
+        else:
+            hp_t = predicted.covariance @ h_jac.T
+            try:
+                k_gain = np.linalg.solve(s.T, hp_t.T).T
+                s_y = np.linalg.solve(s, innovation)
+            except np.linalg.LinAlgError:
+                s_pinv = np.linalg.pinv(s)
+                k_gain = hp_t @ s_pinv
+                s_y = s_pinv @ innovation
+            x_upd = predicted.state + k_gain @ innovation
+            i_kh = np.eye(predicted.state.size) - k_gain @ h_jac
+            p_upd = i_kh @ predicted.covariance @ i_kh.T + k_gain @ r @ k_gain.T
+            p_upd = 0.5 * (p_upd + p_upd.T)
+            nis = float(innovation.T @ s_y)
         self.estimator.last_update_diagnostics = OrbitEKFUpdateDiagnostics(
             measurement_available=True,
             update_applied=True,
             innovation=np.array(innovation, dtype=float),
             innovation_covariance=np.array(s, dtype=float),
-            nis=float(innovation.T @ s_y),
+            nis=float(nis),
             predicted_cov_trace=float(np.trace(predicted.covariance)),
             posterior_cov_trace=float(np.trace(p_upd)),
         )
@@ -789,13 +845,19 @@ class ObjectKnowledgeBase:
                     "measured_state requires measurement_model='state'."
                 )
             trng = np.random.default_rng(int(self._rng.integers(0, 2**31 - 1)) + i)
-            sensor = _OtherObjectStateSensor(cfg.conditions, cfg.sensor_noise, trng)
+            sensor = _OtherObjectStateSensor(
+                cfg.conditions,
+                cfg.sensor_noise,
+                trng,
+                numeric_backend=cfg.numeric_backend,
+            )
             ekf = (
                 OrbitEKFEstimator(
                     mu_km3_s2=mu_km3_s2,
                     dt_s=dt_s,
                     process_noise_diag=np.array(cfg.ekf.process_noise_diag, dtype=float),
                     meas_noise_diag=np.array(cfg.ekf.meas_noise_diag, dtype=float),
+                    numeric_backend=cfg.numeric_backend,
                 )
                 if estimator_type == "ekf"
                 else None
@@ -985,7 +1047,24 @@ def _normalize_measurement_model(model: str) -> str:
     return normalized
 
 
-def _relative_measurement_vector(model: str, target_state: np.ndarray, observer_state: np.ndarray) -> np.ndarray:
+def _relative_measurement_vector(
+    model: str,
+    target_state: np.ndarray,
+    observer_state: np.ndarray,
+    *,
+    numeric_backend: str = "rust",
+) -> np.ndarray:
+    backend = _normalize_tracking_numeric_backend(numeric_backend)
+    if backend == "rust" and model in {
+        "relative_range",
+        "relative_range_rate",
+        "relative_angles",
+        "relative_angles_range",
+        "relative_angles_range_rate",
+    }:
+        from sim.rust_tracking_backend import relative_measurement
+
+        return relative_measurement(target_state, observer_state, model)
     x = np.asarray(target_state, dtype=float).reshape(-1)
     obs = np.asarray(observer_state, dtype=float).reshape(-1)
     rel_r = x[:3] - obs[:3]
@@ -1058,17 +1137,59 @@ def _relative_measurement_bias(model: str, noise: KnowledgeNoiseConfig) -> np.nd
     return np.hstack((_expand3(noise.pos_bias_km), _expand3(noise.vel_bias_km_s)))
 
 
-def _relative_measurement_jacobian(model: str, target_state: np.ndarray, observer_state: np.ndarray) -> np.ndarray:
+def _relative_measurement_jacobian(
+    model: str,
+    target_state: np.ndarray,
+    observer_state: np.ndarray,
+    *,
+    numeric_backend: str = "rust",
+) -> np.ndarray:
+    backend = _normalize_tracking_numeric_backend(numeric_backend)
+    if backend == "rust" and model in {
+        "relative_range",
+        "relative_range_rate",
+        "relative_angles",
+        "relative_angles_range",
+        "relative_angles_range_rate",
+    }:
+        from sim.rust_tracking_backend import relative_measurement_and_jacobian
+
+        _, jacobian = relative_measurement_and_jacobian(target_state, observer_state, model)
+        return jacobian
     x = np.asarray(target_state, dtype=float).reshape(-1)
-    h0 = _relative_measurement_vector(model, x, observer_state)
+    h0 = _relative_measurement_vector(model, x, observer_state, numeric_backend=backend)
     jac = np.zeros((h0.size, x.size))
     eps = np.array([1e-3, 1e-3, 1e-3, 1e-6, 1e-6, 1e-6], dtype=float)
     for i in range(min(6, x.size)):
         xp = x.copy()
         xp[i] += eps[i]
-        hp = _relative_measurement_vector(model, xp, observer_state)
+        hp = _relative_measurement_vector(model, xp, observer_state, numeric_backend=backend)
         jac[:, i] = _relative_innovation(model, hp, h0) / eps[i]
     return jac
+
+
+def _relative_measurement_and_jacobian(
+    model: str,
+    target_state: np.ndarray,
+    observer_state: np.ndarray,
+    *,
+    numeric_backend: str = "rust",
+) -> tuple[np.ndarray, np.ndarray]:
+    backend = _normalize_tracking_numeric_backend(numeric_backend)
+    if backend == "rust" and model in {
+        "relative_range",
+        "relative_range_rate",
+        "relative_angles",
+        "relative_angles_range",
+        "relative_angles_range_rate",
+    }:
+        from sim.rust_tracking_backend import relative_measurement_and_jacobian
+
+        return relative_measurement_and_jacobian(target_state, observer_state, model)
+    return (
+        _relative_measurement_vector(model, target_state, observer_state, numeric_backend=backend),
+        _relative_measurement_jacobian(model, target_state, observer_state, numeric_backend=backend),
+    )
 
 
 def _relative_innovation(model: str, z: np.ndarray, h: np.ndarray) -> np.ndarray:

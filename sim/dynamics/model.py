@@ -23,6 +23,7 @@ from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
 from sim.dynamics.orbit.epoch import resolve_time_dependent_env
 from sim.dynamics.orbit.propagator import OrbitPropagator
 from sim.dynamics.spacecraft_geometry import GeometryAreaProfile, RectangularPrismGeometry
+from sim.numeric_backend import normalize_numeric_backend
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 
@@ -54,9 +55,12 @@ class OrbitalAttitudeDynamics(DynamicsModel):
     orbit_propagator: OrbitPropagator = field(default_factory=_owned_default_orbit_propagator)
     acceleration_mode: str = "off"
     resource_model: object | None = None
+    attitude_numeric_backend: str = "rust"
     _acceleration_enabled: bool = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        backend = normalize_numeric_backend(self.attitude_numeric_backend, error_message="attitude_numeric_backend must be python or rust")
+        object.__setattr__(self, "attitude_numeric_backend", backend)
         if self.geometry_area_profile is not None and self.use_rectangular_prism_for_aero_srp:
             raise ValueError("Use either geometry_area_profile or rectangular prism aero/SRP mode, not both.")
         if self.use_rectangular_prism_for_aero_srp:
@@ -96,6 +100,32 @@ class OrbitalAttitudeDynamics(DynamicsModel):
         return current
 
     def _step_mechanical(self, state: StateTruth, command: Command, env: dict, dt_s: float) -> StateTruth:
+        native_context = self._native_mechanical_context(command, env) if dt_s > 0.0 else None
+        if native_context is not None:
+            from sim.dynamics.attitude.rigid_body import _add_guardrail_counts
+
+            raw_state = np.concatenate((state.position_eci_km, state.velocity_eci_km_s,
+                                        state.attitude_quat_bn, state.angular_rate_body_rad_s))
+            acceleration = np.asarray(command.thrust_eci_km_s2, dtype=float)
+            if command.mode_flags.get("physical_force_eci_n") is not None and command.mode_flags.get("physical_force_body_n") is not None:
+                # The ordinary owner gives an explicitly provided zero wrench
+                # precedence over commanded acceleration.
+                acceleration = np.zeros(3, dtype=float)
+            values, counts = native_context.step(
+                raw_state.tolist(), float(dt_s), self.orbit_substep_s, self.attitude_substep_s,
+                acceleration.tolist(),
+                np.asarray(command.torque_body_nm, dtype=float).tolist(),
+            )
+            _add_guardrail_counts(counts)
+            vector = np.asarray(values, dtype=float)
+            self.orbit_propagator.last_numeric_path = "rust_native_mechanical"
+            min_mass_kg = float(command.mode_flags.get("min_mass_kg", 0.0))
+            if not np.isfinite(min_mass_kg):
+                min_mass_kg = 0.0
+            min_mass_kg = max(min_mass_kg, 0.0)
+            mass_next = max(min_mass_kg, state.mass_kg - float(command.mode_flags.get("delta_mass_kg", 0.0)))
+            return StateTruth(vector[:3].copy(), vector[3:6].copy(), vector[6:10].copy(),
+                              vector[10:13].copy(), mass_next, state.t_s + dt_s)
         propagate_attitude = self.propagate_attitude and not bool(env.get("attitude_disabled", False))
         force_eci_n = np.asarray(command.mode_flags.get("physical_force_eci_n", (0.0, 0.0, 0.0)), dtype=float)
         force_body_n = np.asarray(command.mode_flags.get("physical_force_body_n", (0.0, 0.0, 0.0)), dtype=float)
@@ -116,82 +146,86 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                 torque_body_nm=np.asarray(command.torque_body_nm, dtype=float),
                 dt_s=0.5 * float(dt_s),
                 acceleration_mode=self.acceleration_mode,
+                numeric_backend=self.attitude_numeric_backend,
             )
         if self.drag_area_m2 is not None and "drag_area_m2" not in env_local:
             env_local["drag_area_m2"] = float(self.drag_area_m2)
         if self.lift_area_m2 is not None and "lift_area_m2" not in env_local:
             env_local["lift_area_m2"] = float(self.lift_area_m2)
-        if (
-            self.lift_axis_body is not None
-            and float(self.lift_coefficient) != 0.0
-            and not bool(env_local.get("physical_aerodynamics", False))
-        ):
-            c_bn = quaternion_to_dcm_bn(q_force_evaluation)
-            lift_axis_body = np.array(self.lift_axis_body, dtype=float).reshape(3)
-            axis_norm = float(np.linalg.norm(lift_axis_body))
-            if axis_norm > 0.0:
-                env_local["lift_coefficient"] = float(self.lift_coefficient)
-                env_local["lift_direction_eci"] = c_bn.T @ (lift_axis_body / axis_norm)
         if self.srp_area_m2 is not None:
             env_local["srp_area_m2"] = float(self.srp_area_m2)
         area_profile = self.geometry_area_profile
         geom = self._rectangular_prism_geometry()
-        if area_profile is not None:
-            c_bn = quaternion_to_dcm_bn(q_force_evaluation)
-            omega_raw = env_local.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
+        base_env = dict(env_local)
+
+        def stage_environment(
+            position_eci_km: np.ndarray,
+            velocity_eci_km_s: np.ndarray,
+            t_s: float,
+            quat_bn: np.ndarray,
+        ) -> dict:
+            """Build force inputs at the attitude and translational stage time.
+
+            Directional projected areas must follow the attitude used by each
+            orbit stage.  Reusing a full-step midpoint area for every orbit
+            substep can apply the wrong force after a large attitude change.
+            """
+
+            stage_env = dict(base_env)
+            if (
+                self.lift_axis_body is not None
+                and float(self.lift_coefficient) != 0.0
+                and not bool(stage_env.get("physical_aerodynamics", False))
+            ):
+                c_bn = quaternion_to_dcm_bn(quat_bn)
+                lift_axis_body = np.array(self.lift_axis_body, dtype=float).reshape(3)
+                axis_norm = float(np.linalg.norm(lift_axis_body))
+                if axis_norm > 0.0:
+                    stage_env["lift_coefficient"] = float(self.lift_coefficient)
+                    stage_env["lift_direction_eci"] = c_bn.T @ (lift_axis_body / axis_norm)
+
+            if area_profile is None and not (
+                self.use_rectangular_prism_for_aero_srp
+                and geom is not None
+                and self.disturbance_model is not None
+            ):
+                return stage_env
+
+            c_bn = quaternion_to_dcm_bn(quat_bn)
+            omega_raw = stage_env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
             v_rel_eci_km_s = aero_core.atmosphere_relative_velocity_eci_km_s(
-                state.position_eci_km,
-                state.velocity_eci_km_s,
-                t_s=float(state.t_s),
+                position_eci_km,
+                velocity_eci_km_s,
+                t_s=float(t_s),
                 earth_rotation_rad_s=float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
-                frame_model=str(env_local.get("drag_frame_model", "inertial_z")),
-                jd_utc_start=env_local.get("jd_utc_start"),
-                eop_path=env_local.get("drag_eop_path"),
-                dut1_s=env_local.get("dut1_s"),
-                xp_arcsec=env_local.get("xp_arcsec"),
-                yp_arcsec=env_local.get("yp_arcsec"),
-                dat_s=env_local.get("dat_s"),
-                tt_minus_utc_s=env_local.get("tt_minus_utc_s"),
-                ddpsi_rad=float(env_local.get("ddpsi_rad", 0.0) or 0.0),
-                ddeps_rad=float(env_local.get("ddeps_rad", 0.0) or 0.0),
-                eop_extrapolation=str(env_local.get("eop_extrapolation", "error") or "error"),
+                frame_model=str(stage_env.get("drag_frame_model", "inertial_z")),
+                jd_utc_start=stage_env.get("jd_utc_start"),
+                eop_path=stage_env.get("drag_eop_path"),
+                dut1_s=stage_env.get("dut1_s"),
+                xp_arcsec=stage_env.get("xp_arcsec"),
+                yp_arcsec=stage_env.get("yp_arcsec"),
+                dat_s=stage_env.get("dat_s"),
+                tt_minus_utc_s=stage_env.get("tt_minus_utc_s"),
+                ddpsi_rad=float(stage_env.get("ddpsi_rad", 0.0) or 0.0),
+                ddeps_rad=float(stage_env.get("ddeps_rad", 0.0) or 0.0),
+                eop_extrapolation=str(stage_env.get("eop_extrapolation", "error") or "error"),
             )
             v_rel_body = c_bn @ v_rel_eci_km_s
-            env_local["drag_area_m2"] = area_profile.projected_area_for_direction_m2(-v_rel_body)
+            if area_profile is not None:
+                stage_env["drag_area_m2"] = area_profile.projected_area_for_direction_m2(-v_rel_body)
+                area_for_direction = area_profile.projected_area_for_direction_m2
+            else:
+                stage_env["drag_area_m2"] = geom.projected_area_m2(-v_rel_body)
+                area_for_direction = geom.projected_area_m2
 
-            srp_geometry = resolve_srp_geometry(state.position_eci_km, state.t_s, env_local)
+            srp_geometry = resolve_srp_geometry(position_eci_km, t_s, stage_env)
             sun_dir_eci = np.array(srp_geometry["sun_dir_sc_eci"], dtype=float)
             if float(np.linalg.norm(sun_dir_eci)) > 0.0:
                 sun_dir_body = c_bn @ sun_dir_eci
-                env_local["srp_area_m2"] = area_profile.projected_area_for_direction_m2(-sun_dir_body)
-        elif self.use_rectangular_prism_for_aero_srp and geom is not None and self.disturbance_model is not None:
-            c_bn = quaternion_to_dcm_bn(q_force_evaluation)
-            omega_raw = env_local.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
-            v_rel_eci_km_s = aero_core.atmosphere_relative_velocity_eci_km_s(
-                state.position_eci_km,
-                state.velocity_eci_km_s,
-                t_s=float(state.t_s),
-                earth_rotation_rad_s=float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
-                frame_model=str(env_local.get("drag_frame_model", "inertial_z")),
-                jd_utc_start=env_local.get("jd_utc_start"),
-                eop_path=env_local.get("drag_eop_path"),
-                dut1_s=env_local.get("dut1_s"),
-                xp_arcsec=env_local.get("xp_arcsec"),
-                yp_arcsec=env_local.get("yp_arcsec"),
-                dat_s=env_local.get("dat_s"),
-                tt_minus_utc_s=env_local.get("tt_minus_utc_s"),
-                ddpsi_rad=float(env_local.get("ddpsi_rad", 0.0) or 0.0),
-                ddeps_rad=float(env_local.get("ddeps_rad", 0.0) or 0.0),
-                eop_extrapolation=str(env_local.get("eop_extrapolation", "error") or "error"),
-            )
-            v_rel_body = c_bn @ v_rel_eci_km_s
-            env_local["drag_area_m2"] = geom.projected_area_m2(-v_rel_body)
+                stage_env["srp_area_m2"] = area_for_direction(-sun_dir_body)
+            return stage_env
 
-            srp_geometry = resolve_srp_geometry(state.position_eci_km, state.t_s, env_local)
-            sun_dir_eci = np.array(srp_geometry["sun_dir_sc_eci"], dtype=float)
-            if float(np.linalg.norm(sun_dir_eci)) > 0.0:
-                sun_dir_body = c_bn @ sun_dir_eci
-                env_local["srp_area_m2"] = geom.projected_area_m2(-sun_dir_body)
+        env_local = stage_environment(state.position_eci_km, state.velocity_eci_km_s, state.t_s, q_force_evaluation)
 
         x_orbit = np.empty(6, dtype=float)
         x_orbit[:3] = state.position_eci_km
@@ -214,37 +248,60 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                 dtype=float,
             ).reshape(3)
             command_acceleration_eci_km_s2 = total_force_eci_n / max(float(state.mass_kg), 1.0e-12) / 1.0e3
+        q_command = np.asarray(state.attitude_quat_bn, dtype=float).copy()
+        w_command = np.asarray(state.angular_rate_body_rad_s, dtype=float).copy()
+        t_local = float(state.t_s)
         x_orbit_next = x_orbit.copy()
-        if orbit_dt >= dt_s:
+        for h in self._substep_sequence(dt_s, orbit_dt):
+            q_stage = q_command
+            if propagate_attitude:
+                q_stage, _ = propagate_attitude_exponential_map(
+                    quat_bn=q_command,
+                    omega_body_rad_s=w_command,
+                    inertia_kg_m2=self.inertia_kg_m2,
+                    torque_body_nm=np.asarray(command.torque_body_nm, dtype=float),
+                    dt_s=0.5 * float(h),
+                    acceleration_mode=self.acceleration_mode,
+                )
+            stage_env = stage_environment(
+                x_orbit_next[:3],
+                x_orbit_next[3:],
+                t_local + 0.5 * float(h),
+                q_stage,
+            )
             x_orbit_next = self.orbit_propagator.propagate(
                 x_eci=x_orbit_next,
-                dt_s=dt_s,
-                t_s=state.t_s,
+                dt_s=h,
+                t_s=t_local,
                 command_accel_eci_km_s2=command_acceleration_eci_km_s2,
-                env=env_local,
+                env=stage_env,
                 ctx=orbit_ctx,
             )
-        else:
-            t_local = state.t_s
-            for h in self._substep_sequence(dt_s, orbit_dt):
-                x_orbit_next = self.orbit_propagator.propagate(
-                    x_eci=x_orbit_next,
-                    dt_s=h,
-                    t_s=t_local,
-                    command_accel_eci_km_s2=command_acceleration_eci_km_s2,
-                    env=env_local,
-                    ctx=orbit_ctx,
+            if propagate_attitude:
+                q_command, w_command = propagate_attitude_exponential_map(
+                    quat_bn=q_command,
+                    omega_body_rad_s=w_command,
+                    inertia_kg_m2=self.inertia_kg_m2,
+                    torque_body_nm=np.asarray(command.torque_body_nm, dtype=float),
+                    dt_s=float(h),
+                    acceleration_mode=self.acceleration_mode,
                 )
-                t_local += h
+            t_local += float(h)
 
         q_next = state.attitude_quat_bn.copy()
         w_next = state.angular_rate_body_rad_s.copy()
+        midpoint_truth = self._midpoint_translational_truth(
+            state=state,
+            x_orbit_next=x_orbit_next,
+            dt_s=dt_s,
+        )
+        env_local = stage_environment(
+            midpoint_truth.position_eci_km,
+            midpoint_truth.velocity_eci_km_s,
+            midpoint_truth.t_s,
+            q_force_evaluation,
+        )
         if propagate_attitude:
-            midpoint_truth = self._midpoint_translational_truth(
-                state=state,
-                x_orbit_next=x_orbit_next,
-                dt_s=dt_s,
-            )
             disturbance_cfg = getattr(self.disturbance_model, "config", None)
             if self.disturbance_model is not None and bool(getattr(disturbance_cfg, "use_drag", False)):
                 if "density_kg_m3" not in env_local:
@@ -342,6 +399,7 @@ class OrbitalAttitudeDynamics(DynamicsModel):
                         torque_body_nm=total_torque,
                         dt_s=float(h),
                         acceleration_mode=self.acceleration_mode,
+                        numeric_backend=self.attitude_numeric_backend,
                     )
 
         # Optional direct attitude state override for surrogate controller testing.
@@ -367,8 +425,291 @@ class OrbitalAttitudeDynamics(DynamicsModel):
             t_s=state.t_s + dt_s,
         )
 
+    def _native_mechanical_context(self, command: Command, env: dict):
+        """Select the exact fused point-mass/GG/magnetic split-step envelope."""
+        prop = self.orbit_propagator
+        if (
+            type(self) is not OrbitalAttitudeDynamics or type(prop) is not OrbitPropagator
+            or self.attitude_numeric_backend != "rust" or prop.numeric_backend != "rust"
+            or prop.model != "two_body" or prop.integrator != "rk4" or prop.plugins
+            or not self.propagate_attitude or bool(env.get("attitude_disabled", False))
+            or self.geometry_area_profile is not None or self.use_rectangular_prism_for_aero_srp
+            or self.lift_axis_body is not None
+        ):
+            return None
+        if command.mode_flags:
+            # Metadata does not change point-mass mechanics. Physical wrench
+            # inputs and overrides retain the existing coupled/Python owners.
+            flags = command.mode_flags
+            if dict(flags.get("attitude_state_override", {}) or {}):
+                return None
+            force_eci = np.asarray(flags.get("physical_force_eci_n", (0.0, 0.0, 0.0)), dtype=float)
+            force_body = np.asarray(flags.get("physical_force_body_n", (0.0, 0.0, 0.0)), dtype=float)
+            if np.any(force_eci) or np.any(force_body) or float(flags.get("mass_flow_kg_s", 0.0) or 0.0) > 0.0:
+                return None
+        model = self.disturbance_model
+        gravity_gradient = False
+        magnetic = False
+        if model is not None:
+            if type(model) is not DisturbanceTorqueModel:
+                return None
+            cfg = model.config
+            if (
+                not model._compiled_plan_supported
+                or cfg.numeric_backend != "rust"
+                or cfg.use_drag or cfg.use_srp
+                or float(model.mu_km3_s2) != float(self.mu_km3_s2)
+                or not np.array_equal(model._compiled_inertia, self.inertia_kg_m2)
+            ):
+                return None
+            gravity_gradient = bool(model._compiled_enabled[0])
+            magnetic = bool(model._compiled_enabled[1])
+        from sim.rust_orbit_backend import _extension
+
+        constructor = getattr(_extension(), "MechanicalContext", None)
+        if constructor is None:
+            return None
+        inertia = np.asarray(self.inertia_kg_m2, dtype=float).reshape(3, 3)
+        key = (float(self.mu_km3_s2), inertia.tobytes(), gravity_gradient)
+        if magnetic:
+            constructor = getattr(constructor, "with_magnetic", None)
+            if constructor is None:
+                return None
+            dipole = np.asarray(model.config.magnetic_dipole_body_a_m2, dtype=float).reshape(3)
+            field = np.asarray(env.get("magnetic_field_eci_t", (0.0, 0.0, 0.0)), dtype=float).reshape(3)
+            if not np.all(np.isfinite(dipole)) or not np.all(np.isfinite(field)):
+                return None
+            provided = "magnetic_field_eci_t" in env
+            key += (dipole.tobytes(), field.tobytes(), provided)
+        cached = getattr(prop, "_rust_mechanical_context_cache", None)
+        if cached is None or cached[0] != key:
+            native = (constructor(float(self.mu_km3_s2), inertia.ravel().tolist(), gravity_gradient,
+                                  dipole.tolist(), field.tolist(), provided)
+                      if magnetic else constructor(float(self.mu_km3_s2), inertia.ravel().tolist(), gravity_gradient))
+            cached = (key, native)
+            prop._rust_mechanical_context_cache = cached
+        return cached[1]
+
+    def try_native_mechanical_history(
+        self, state: StateTruth, command: Command, env: dict, widths_s: np.ndarray,
+    ) -> np.ndarray | None:
+        """Pure numerical history for a caller-owned constant-command interval.
+
+        This API executes no scenario lifecycle, controller or event boundaries.
+        The ordinary step method uses the same native numerical owner.
+        """
+        if self.resource_model is not None:
+            # Resource evolution belongs to step's outer interval owner.
+            return None
+        if command.mode_flags:
+            # This numerical history does not carry mass or override telemetry.
+            return None
+        native = self._native_mechanical_context(command, env)
+        if native is None:
+            return None
+        from sim.dynamics.attitude.rigid_body import _add_guardrail_counts
+
+        vector = np.concatenate((state.position_eci_km, state.velocity_eci_km_s,
+                                 state.attitude_quat_bn, state.angular_rate_body_rad_s))
+        raw, counts = native.history(
+            vector.tolist(), np.asarray(widths_s, dtype="<f8").tobytes(),
+            self.orbit_substep_s, self.attitude_substep_s,
+            np.asarray(command.thrust_eci_km_s2, dtype=float).tolist(),
+            np.asarray(command.torque_body_nm, dtype=float).tolist(),
+        )
+        _add_guardrail_counts(np.asarray(counts, dtype=np.int64))
+        self.orbit_propagator.last_numeric_path = "rust_native_mechanical_history"
+        return np.frombuffer(raw, dtype="<f8").copy().reshape(-1, 13)
+
+    def _try_native_coupled_step(self, state: StateTruth, command: Command, env: dict, dt_s: float) -> StateTruth | None:
+        """Exact native owner for point-mass physical wrench and GG/magnetic torques."""
+        prop = self.orbit_propagator
+        if (type(self) is not OrbitalAttitudeDynamics or type(prop) is not OrbitPropagator
+                or self.attitude_numeric_backend != "rust" or prop.numeric_backend != "rust"
+                or prop.model != "two_body" or prop.integrator != "rk4" or prop.state_frame != "eci"
+                or self.geometry_area_profile is not None
+                or self.use_rectangular_prism_for_aero_srp or self.lift_axis_body is not None
+                or not self.propagate_attitude or bool(env.get("attitude_disabled", False))
+                or dt_s <= 0.0 or not np.isfinite(dt_s)
+                or not np.isfinite(self.mu_km3_s2) or self.mu_km3_s2 <= 0.0
+                or not np.isfinite(state.t_s + dt_s)
+                or dict(command.mode_flags.get("attitude_state_override", {}) or {})):
+            return None
+        model = self.disturbance_model
+        enabled = np.zeros(4, dtype=np.int64)
+        dipole = np.zeros(3, dtype=float)
+        if model is not None:
+            if type(model) is not DisturbanceTorqueModel:
+                return None
+            cfg = model.config
+            if (not model._compiled_plan_supported or cfg.numeric_backend != "rust"
+                    or (not prop.plugins and (cfg.use_drag or cfg.use_srp)) or float(model.mu_km3_s2) != float(self.mu_km3_s2)
+                    or not np.array_equal(model.inertia_kg_m2, self.inertia_kg_m2)):
+                return None
+            enabled[:] = model._compiled_enabled
+            dipole = np.asarray(cfg.magnetic_dipole_body_a_m2, dtype=float).reshape(3)
+        inertia = np.asarray(self.inertia_kg_m2, dtype=float).reshape(3, 3)
+        force_eci = np.asarray(command.mode_flags.get("physical_force_eci_n", (0.0, 0.0, 0.0)), dtype=float).reshape(3)
+        force_body = np.asarray(command.mode_flags.get("physical_force_body_n", (0.0, 0.0, 0.0)), dtype=float).reshape(3)
+        torque = np.asarray(command.torque_body_nm, dtype=float).reshape(3)
+        field = np.asarray(env.get("magnetic_field_eci_t", (0.0, 0.0, 0.0)), dtype=float).reshape(3)
+        mass_flow = max(float(command.mode_flags.get("mass_flow_kg_s", 0.0)), 0.0)
+        minimum_mass = max(float(command.mode_flags.get("min_mass_kg", 0.0)), 0.0)
+        vector = np.concatenate((state.position_eci_km, state.velocity_eci_km_s,
+                                 state.attitude_quat_bn, state.angular_rate_body_rad_s,
+                                 np.asarray([state.mass_kg], dtype=float)))
+        if (not all(np.all(np.isfinite(value)) for value in (vector, inertia, force_eci, force_body, torque, dipole, field))
+                or not np.isfinite(mass_flow) or not np.isfinite(minimum_mass) or not np.isfinite(state.t_s)
+                or state.mass_kg <= 0.0 or abs(float(np.linalg.norm(state.attitude_quat_bn)) - 1.0) > 1e-10
+                or np.any(np.abs(state.angular_rate_body_rad_s) > 1e6) or np.any(np.abs(torque) > 1e12)):
+            return None
+        orbit_step = self._effective_substep(self.orbit_substep_s, dt_s)
+        attitude_step = self._effective_substep(self.attitude_substep_s, dt_s)
+        if not np.any(torque) and not np.any(state.angular_rate_body_rad_s) and not np.any(enabled):
+            attitude_step = orbit_step
+        maximum = min(orbit_step, attitude_step)
+        from sim.rust_orbit_backend import _extension
+
+        constructor = getattr(_extension(), "MechanicalContext", None)
+        if constructor is None or not hasattr(constructor, "coupled_step"):
+            return None
+        key = (float(self.mu_km3_s2), inertia.tobytes(), False)
+        cached = getattr(prop, "_rust_mechanical_context_cache", None)
+        if cached is None or cached[0] != key:
+            cached = (key, constructor(float(self.mu_km3_s2), inertia.ravel().tolist(), False))
+            prop._rust_mechanical_context_cache = cached
+        if prop.plugins:
+            function = getattr(cached[1], "coupled_force_step", None)
+            if function is None or model is None:
+                return None
+            inputs = self._native_coupled_force_inputs(state, env, model)
+            if inputs is None:
+                return None
+            force_context, disturbance_context, stage_callback = inputs
+            values, counts = function(
+                vector.tolist(), float(state.t_s), float(dt_s), float(maximum), force_eci.tolist(), force_body.tolist(),
+                mass_flow, minimum_mass, torque.tolist(), force_context, disturbance_context, stage_callback,
+            )
+        else:
+            values, counts = cached[1].coupled_step(
+                vector.tolist(), float(state.t_s), float(dt_s), float(maximum), force_eci.tolist(), force_body.tolist(),
+                mass_flow, minimum_mass, torque.tolist(), enabled.tolist(), dipole.tolist(), field.tolist(),
+                "magnetic_field_eci_t" in env,
+            )
+        from sim.dynamics.attitude.rigid_body import _add_guardrail_counts
+
+        _add_guardrail_counts(counts)
+        result = np.asarray(values, dtype=float)
+        prop.last_numeric_path = "rust_native_coupled_force_plan" if prop.plugins else "rust_native_coupled_mechanical"
+        return StateTruth(result[:3].copy(), result[3:6].copy(), result[6:10].copy(), result[10:13].copy(),
+                          float(result[13]), float(state.t_s + dt_s))
+
+    def _native_coupled_force_inputs(self, state: StateTruth, env: dict, model: DisturbanceTorqueModel):
+        """Retain native coefficients while visiting each authoritative stage environment."""
+        if self.rectangular_prism_dims_m is not None:
+            return None
+        from sim.dynamics.orbit.environment import srp_pressure_n_m2
+        from sim.dynamics.orbit.rust_force_plan import _CODES, make_plan
+        from sim.rust_orbit_backend import native_harmonic_degree_limit
+
+        prop = self.orbit_propagator
+        if any(plugin not in _CODES for plugin in prop.plugins) or not model._refresh_mutable_facet_staging():
+            return None
+        config = model.config
+        static_vectors = (model._compiled_magnetic_dipole, model._compiled_drag_cp_offset,
+                          model._compiled_drag_facet_normals, model._compiled_drag_facet_areas,
+                          model._compiled_drag_facet_cd, model._compiled_drag_facet_cp_offsets,
+                          model._compiled_srp_cp_offset, model._compiled_srp_facet_normals,
+                          model._compiled_srp_facet_areas, model._compiled_srp_facet_cp_offsets,
+                          config.sun_dir_eci, env.get("sun_dir_eci_unit", env.get("sun_dir_eci", config.sun_dir_eci)))
+        if (not all(np.all(np.isfinite(value)) for value in static_vectors)
+                or not all(np.isfinite(value) and value >= 0.0 for value in (
+                    config.drag_area_m2, config.drag_cd, config.srp_area_m2, config.srp_cr))):
+            return None
+        base_env = dict(env)
+        if self.drag_area_m2 is not None:
+            base_env["drag_area_m2"] = float(self.drag_area_m2)
+        if self.lift_area_m2 is not None:
+            base_env["lift_area_m2"] = float(self.lift_area_m2)
+        if self.srp_area_m2 is not None:
+            base_env["srp_area_m2"] = float(self.srp_area_m2)
+        initial6 = np.concatenate((state.position_eci_km, state.velocity_eci_km_s))
+        context = OrbitContext(self.mu_km3_s2, state.mass_kg, self.area_m2, self.cd, self.cr)
+        if any(_CODES[plugin] == 1 for plugin in prop.plugins):
+            from sim.dynamics.orbit.propagator import spherical_harmonics_plugin
+
+            if base_env.get("_compiled_spherical_harmonics_terms") is None:
+                spherical_harmonics_plugin(state.t_s, initial6, base_env, context)
+            harmonic = base_env.get("_compiled_spherical_harmonics_terms")
+            if (harmonic is None or not harmonic.all_normalized
+                    or harmonic.n_max > native_harmonic_degree_limit()):
+                return None
+        codes, _, _, dimensions, _, force_stage, force_context = make_plan(prop, initial6, state.t_s, base_env, context)
+        if (force_context is None or (1 in codes and dimensions[0] > native_harmonic_degree_limit())):
+            return None
+        disturbance_context = model._native_disturbance_context()
+        if disturbance_context is None:
+            return None
+        field = np.asarray(env.get("magnetic_field_eci_t", (0.0, 0.0, 0.0)), dtype=float).reshape(3).tolist()
+        provided = float("magnetic_field_eci_t" in env)
+        shared_drag_frame = str(base_env.get("drag_frame_model", "inertial_z")) == str(base_env.get("drag_frame_model", "simple"))
+
+        def stage_callback(t_s, raw_state):
+            x = np.asarray(raw_state, dtype=float).reshape(6)
+            result = list(force_stage(t_s, raw_state))
+            stage_env = dict(base_env)
+            epoch = resolve_time_dependent_env(base_env, t_s)
+            for key in ("sun_pos_eci_km", "moon_pos_eci_km"):
+                if key not in stage_env and key in epoch:
+                    stage_env[key] = epoch[key]
+            density = 0.0
+            wind = np.zeros(3)
+            wind_norm = 0.0
+            if config.use_drag:
+                if "density_kg_m3" in stage_env:
+                    density = float(stage_env["density_kg_m3"])
+                elif 2 in codes:
+                    density = float(result[9])
+                else:
+                    density = density_from_model(str(stage_env.get("atmosphere_model", "exponential")).lower(), x[:3], t_s, env=stage_env)
+                if "drag_v_rel_eci_m_s" in stage_env:
+                    wind = np.asarray(stage_env["drag_v_rel_eci_m_s"], dtype=float).reshape(3)
+                elif 2 in codes and shared_drag_frame:
+                    wind = np.asarray(result[10:13], dtype=float) * 1e3
+                else:
+                    omega_raw = stage_env.get("drag_earth_rotation_rad_s", EARTH_ROT_RATE_RAD_S)
+                    wind = aero_core.atmosphere_relative_velocity_eci_km_s(
+                        x[:3], x[3:], t_s=t_s,
+                        earth_rotation_rad_s=float(EARTH_ROT_RATE_RAD_S if omega_raw is None else omega_raw),
+                        frame_model=str(stage_env.get("drag_frame_model", "inertial_z")),
+                        jd_utc_start=stage_env.get("jd_utc_start"), eop_path=stage_env.get("drag_eop_path"),
+                        dut1_s=stage_env.get("dut1_s"), xp_arcsec=stage_env.get("xp_arcsec"), yp_arcsec=stage_env.get("yp_arcsec"),
+                        dat_s=stage_env.get("dat_s"), tt_minus_utc_s=stage_env.get("tt_minus_utc_s"),
+                        ddpsi_rad=float(stage_env.get("ddpsi_rad", 0.0) or 0.0), ddeps_rad=float(stage_env.get("ddeps_rad", 0.0) or 0.0),
+                        eop_extrapolation=str(stage_env.get("eop_extrapolation", "error") or "error"),
+                    ) * 1e3
+                wind_norm = float(stage_env["drag_v_rel_norm_m_s"]) if "drag_v_rel_eci_m_s" in stage_env and "drag_v_rel_norm_m_s" in stage_env else float(np.sqrt(np.dot(wind, wind)))
+            sun = np.zeros(3)
+            pressure = 0.0
+            if config.use_srp:
+                sun = np.asarray(stage_env.get("sun_dir_eci_unit", stage_env.get("sun_dir_eci", config.sun_dir_eci)), dtype=float).reshape(3)
+                norm = float(np.sqrt(np.dot(sun, sun)))
+                if norm > 0.0:
+                    if "sun_dir_eci_unit" not in stage_env:
+                        sun = sun / norm
+                    shadow = float(stage_env["srp_shadow_factor"]) if "srp_shadow_factor" in stage_env else float(srp_shadow_factor(x[:3], t_s, stage_env))
+                    if shadow > 0.0:
+                        pressure = srp_pressure_n_m2(stage_env) * float(stage_env.get("srp_distance_scale", 1.0)) * config.srp_cr * shadow
+            return result + field + [provided, float(density)] + wind.tolist() + [wind_norm] + sun.tolist() + [float(pressure)]
+
+        return force_context, disturbance_context, stage_callback
+
     def _step_coupled_v2(self, state: StateTruth, command: Command, env: dict, dt_s: float) -> StateTruth:
         """Run the production v2 stage-consistent coupled physics path."""
+
+        native = self._try_native_coupled_step(state, command, env, dt_s)
+        if native is not None:
+            return native
 
         force_eci_n = np.asarray(command.mode_flags.get("physical_force_eci_n", (0.0, 0.0, 0.0)), dtype=float)
         force_body_n = np.asarray(command.mode_flags.get("physical_force_body_n", (0.0, 0.0, 0.0)), dtype=float)
@@ -419,10 +760,18 @@ class OrbitalAttitudeDynamics(DynamicsModel):
             )
             total_torque = commanded_torque + disturbance
             omega = stage.angular_rate_body_rad_s
-            angular_acceleration = np.linalg.solve(
-                self.inertia_kg_m2,
-                total_torque - np.cross(omega, self.inertia_kg_m2 @ omega),
-            )
+            if self.attitude_numeric_backend == "rust":
+                from sim.dynamics.attitude.rigid_body import rigid_body_derivatives
+
+                _, angular_acceleration = rigid_body_derivatives(
+                    stage.attitude_quat_bn, omega, self.inertia_kg_m2, total_torque,
+                    numeric_backend="rust",
+                )
+            else:
+                angular_acceleration = np.linalg.solve(
+                    self.inertia_kg_m2,
+                    total_torque - np.cross(omega, self.inertia_kg_m2 @ omega),
+                )
             return CoupledDerivative(
                 position_rate_km_s=stage.velocity_eci_km_s,
                 velocity_rate_km_s2=acceleration,
@@ -448,6 +797,7 @@ class OrbitalAttitudeDynamics(DynamicsModel):
         integrator = CoupledSatelliteIntegrator(
             CoupledIntegratorConfig(orbit_step, attitude_step),
             derivative,
+            numeric_backend=self.orbit_propagator.numeric_backend,
         )
         initial = CoupledSatelliteState(
             position_eci_km=state.position_eci_km,

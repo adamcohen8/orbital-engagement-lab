@@ -7,10 +7,12 @@ from pathlib import Path
 import pytest
 
 from sim.review.evidence_capsule import (
+    MAX_REVIEW_HYDRATION_BYTES,
     EvidenceCapsuleError,
     create_evidence_capsule,
     evidence_file_exists,
     evidence_file_sha256,
+    materialize_evidence,
     materialized_evidence_file,
 )
 from sim.review.workspace import ReviewWorkspace
@@ -66,6 +68,38 @@ def test_capsule_rejects_compressed_content_drift(tmp_path: Path) -> None:
     with pytest.raises(EvidenceCapsuleError, match="size does not match"):
         with materialized_evidence_file(database):
             pass
+
+
+def test_capsule_rejects_oversized_original_before_hydration(tmp_path: Path) -> None:
+    database = _review_fixture(tmp_path)
+    create_evidence_capsule(database, remove_original=True)
+    manifest_path = database.parent / "evidence_capsule.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"][0]["original_bytes"] = MAX_REVIEW_HYDRATION_BYTES + 1
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(EvidenceCapsuleError, match="size budget"):
+        materialize_evidence(
+            database,
+            prefer_capsule=True,
+            max_original_bytes=MAX_REVIEW_HYDRATION_BYTES,
+        )
+
+
+def test_capsule_stops_a_stream_that_exceeds_a_misdeclared_original_size(tmp_path: Path) -> None:
+    database = _review_fixture(tmp_path)
+    create_evidence_capsule(database, remove_original=True)
+    manifest_path = database.parent / "evidence_capsule.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"][0]["original_bytes"] = 1
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(EvidenceCapsuleError, match="exceeds its declared size"):
+        materialize_evidence(
+            database,
+            prefer_capsule=True,
+            max_original_bytes=MAX_REVIEW_HYDRATION_BYTES,
+        )
 
 
 def test_capsule_manifest_records_sqlite_integrity_and_row_counts(tmp_path: Path) -> None:

@@ -144,6 +144,7 @@ def test_attitude_ekf_update_avoids_np_inv_and_preserves_symmetric_covariance() 
 
 def test_attitude_ekf_predict_reuses_nominal_propagation_exactly() -> None:
     estimator = AttitudeEKFEstimator(
+        numeric_backend="python",
         dt_s=0.1,
         inertia_kg_m2=np.diag([10.0, 12.0, 8.0]),
         process_noise_diag=np.arange(1.0, 8.0) * 1e-10,

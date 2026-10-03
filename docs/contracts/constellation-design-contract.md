@@ -15,6 +15,10 @@ and CLI façade is `sim.constellation_design`.
 - Walker RAAN and argument-of-latitude generation uses the declared integer
   `T/P/F` geometry; a shell substitutes an explicit RAAN span.
 - Every member is propagated serially by the configured public ONP path.
+- Optional `propagation.numeric_backend` selects `rust` (default) or `python`.
+  Rust selection remains in normalized input and forwards to ONP, coverage and
+  link owners. Link identities include their backend; replay requires the selected
+  evaluator. Missing required kernels fail before member propagation. Both selections remain in normalized problem identity.
 - Global coverage and ground links are evaluated by their existing public
   owners rather than reimplemented in the design layer.
 - Feasibility uses the two declared minimum service thresholds.

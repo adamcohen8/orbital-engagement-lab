@@ -1,7 +1,7 @@
 # Installing OEL On Windows, macOS, And Linux
 
 This is the authoritative managed- and source-installation guide for Orbital
-Engagement Lab. OEL supports CPython 3.10 through 3.14 on its declared Windows,
+Engineering Lab. OEL supports CPython 3.10 through 3.14 on its declared Windows,
 macOS, and Linux compatibility targets. Python 3.14 is recommended.
 
 ## Managed Installation
@@ -101,6 +101,9 @@ https://github.com/adamcohen8/orbital-engineering-lab.git
 
 The checkout directory may contain spaces. Run the commands below from the
 directory containing `pyproject.toml` and `run_simulation.py`.
+
+The Python distribution is named `orbital-engineering-lab`. Existing checkout
+URLs and `oel` command names remain usable during the repository transition.
 
 ## Windows PowerShell
 
@@ -226,6 +229,15 @@ When copying a command from a general OEL document, first activate the
 environment or replace its leading `python` with the explicit interpreter path
 for the current platform.
 
+## Native numeric runtime
+
+Version 0.32.0 requires matching `oel-rust-orbit` 0.17.x and `oel-rust-game`
+0.5.x wheels for core installation and runtime-built flight-software stacks. Source
+installations must first install wheels built for their host from the native
+crates; signed offline bundles retain the exact qualified wheel inventory.
+Rust is the default numeric engine. Explicit `numeric_backend: python` and
+Trainer `--backend python` retain reference execution.
+
 ## Install Profiles
 
 Choose only the profile required by the workflow:
@@ -234,7 +246,7 @@ Choose only the profile required by the workflow:
 | --- | --- |
 | `python -m pip install .` | Core CLI, YAML/API runtime, plotting, and review store |
 | `python -m pip install ".[dev]"` | Core plus tests and Ruff |
-| `python -m pip install ".[game]"` | RPO trainer and media dependencies |
+| `python -m pip install ".[game]"` | RPO trainer, native Rust backend, and media dependencies |
 | `python -m pip install ".[accel]"` | Separately qualified Numba acceleration |
 | `python -m pip install ".[validation]"` | OEL-native validation dependencies |
 | `python -m pip install ".[cross-platform]"` | Aggregate compatibility-acceptance profile |

@@ -73,7 +73,14 @@ class SingleRunHistoryStore:
         threshold = float(retained_start_time_s) - 1.0e-9
         retained: list[dict[str, Any]] = []
         for row in rows:
-            event_t = row.get("interval_end_t_s", row.get("t_s")) if isinstance(row, dict) else None
+            event_t = (
+                row.get(
+                    "interval_end_t_s",
+                    row.get("interval_end_time_s", row.get("t_s", row.get("time_s"))),
+                )
+                if isinstance(row, dict)
+                else None
+            )
             try:
                 t_s = float(event_t)
             except (TypeError, ValueError):

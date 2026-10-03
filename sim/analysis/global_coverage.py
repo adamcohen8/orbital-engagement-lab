@@ -24,6 +24,7 @@ from sim.analysis.healpix import (
 )
 from sim.analysis.observer_target_geometry import evaluate_surface_targets_ecef
 from sim.dynamics.orbit.frames import FrameContext, eci_to_ecef_rotation_context
+from sim.numeric_backend import normalize_numeric_backend
 from sim.utils.geodesy import WGS84_A_KM, WGS84_B_KM
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
@@ -53,6 +54,7 @@ class GlobalCoverageConfig:
     max_transition_refinement_evaluations: int = 5_000_000
     transition_time_tolerance_s: float | None = None
     transition_max_iterations: int | None = None
+    numeric_backend: str = "rust"
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -123,6 +125,8 @@ class GlobalCoverageConfig:
                 raise ValueError("transition_max_iterations must be a positive integer.")
             object.__setattr__(self, "transition_time_tolerance_s", tolerance)
             object.__setattr__(self, "transition_max_iterations", int(iterations))
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="numeric_backend must be python or rust.")
+        object.__setattr__(self, "numeric_backend", backend)
 
 
 @dataclass(frozen=True)
@@ -296,14 +300,7 @@ def estimate_global_coverage_resources(
     }
 
 
-def summarize_sampled_coverage_mask(
-    covered_by_sample: np.ndarray,
-    times_s: np.ndarray,
-    *,
-    cell_indices: np.ndarray | None = None,
-) -> CoverageCellMetrics:
-    """Convert a sampled boolean mask into frozen sparse interval semantics."""
-
+def _validated_sparse_coverage_inputs(covered_by_sample, times_s, cell_indices):
     mask = np.asarray(covered_by_sample, dtype=bool)
     times = np.asarray(times_s, dtype=float)
     if mask.ndim != 2:
@@ -323,6 +320,49 @@ def summarize_sampled_coverage_mask(
         if cells.size > 1 and np.any(cells[1:] <= cells[:-1]):
             raise ValueError("cell_indices must be unique and strictly increasing.")
 
+    return mask, times, cells
+
+
+def summarize_sampled_coverage_mask(
+    covered_by_sample: np.ndarray,
+    times_s: np.ndarray,
+    *,
+    cell_indices: np.ndarray | None = None,
+    numeric_backend: str = "rust",
+) -> CoverageCellMetrics:
+    """Convert a sampled boolean mask into frozen sparse interval semantics."""
+
+    backend = str(numeric_backend).strip().lower()
+    if backend not in {"python", "rust"}:
+        raise ValueError(f"Unknown coverage numeric backend {numeric_backend!r}.")
+    mask, times, cells = _validated_sparse_coverage_inputs(covered_by_sample, times_s, cell_indices)
+    if backend == "rust":
+        from sim.rust_coverage_backend import summarize_sampled_mask
+
+        result = summarize_sampled_mask(
+            mask,
+            times,
+            cell_indices=cells,
+        )
+        return CoverageCellMetrics(
+            cell_index=cells,
+            dwell_s=result.dwell_s,
+            interval_count=result.interval_count,
+            observed_acquisition_count=result.observed_acquisition_count,
+            max_complete_revisit_gap_s=result.max_complete_revisit_gap_s,
+            prefix_boundary_gap_s=result.prefix_boundary_gap_s,
+            suffix_boundary_gap_s=result.suffix_boundary_gap_s,
+            start_censored=result.start_censored,
+            end_censored=result.end_censored,
+            intervals=SparseCoverageIntervals(
+                cell_index=result.intervals.cell_index,
+                interval_offset=result.intervals.interval_offset,
+                start_sample_index=result.intervals.start_sample_index,
+                end_sample_index_exclusive=result.intervals.end_sample_index_exclusive,
+            ),
+        )
+
+    cell_count = mask.shape[1]
     padded = np.vstack((np.zeros((1, cell_count), dtype=bool), mask, np.zeros((1, cell_count), dtype=bool)))
     starts_at, starts_cell = np.nonzero((~padded[:-1]) & padded[1:])
     ends_at, ends_cell = np.nonzero(padded[:-1] & (~padded[1:]))
@@ -690,22 +730,38 @@ def evaluate_global_coverage(
         centers = cached_healpix_wgs84_centers(config.order, cells)
         latitude_chunks.append(np.rad2deg(centers.geodetic_latitude_rad))
         longitude_chunks.append(np.rad2deg(centers.longitude_rad))
-        mask = np.zeros((times.size, cells.size), dtype=bool)
-        for sample_index in range(times.size):
-            geometry = evaluate_surface_targets_ecef(
-                observer_ecef_km=positions_ecef[sample_index],
-                target_ecef_km=centers.ecef_km,
-                target_outward_normal_ecef=centers.outward_normal_ecef,
-                boresight_ecef=boresight_ecef[sample_index],
-                half_angle_rad=config.half_angle_rad,
-                max_range_km=config.max_range_km,
-                angular_tolerance_rad=_ANGULAR_TOLERANCE_RAD,
-                range_tolerance_km=_RANGE_TOLERANCE_KM,
+        mask = None
+        if config.numeric_backend == "rust":
+            from sim.rust_coverage_backend import try_surface_targets_tile
+
+            mask = try_surface_targets_tile(
+                positions_ecef, centers.ecef_km, centers.outward_normal_ecef,
+                boresight_ecef, config.half_angle_rad, config.max_range_km,
+                _ANGULAR_TOLERANCE_RAD, _RANGE_TOLERANCE_KM,
             )
-            mask[sample_index] = geometry.available
+        if mask is None:
+            mask = np.zeros((times.size, cells.size), dtype=bool)
+            for sample_index in range(times.size):
+                geometry = evaluate_surface_targets_ecef(
+                    observer_ecef_km=positions_ecef[sample_index],
+                    target_ecef_km=centers.ecef_km,
+                    target_outward_normal_ecef=centers.outward_normal_ecef,
+                    boresight_ecef=boresight_ecef[sample_index],
+                    half_angle_rad=config.half_angle_rad,
+                    max_range_km=config.max_range_km,
+                    angular_tolerance_rad=_ANGULAR_TOLERANCE_RAD,
+                    range_tolerance_km=_RANGE_TOLERANCE_KM,
+                    numeric_backend=config.numeric_backend,
+                )
+                mask[sample_index] = geometry.available
         covered_count += np.count_nonzero(mask, axis=1)
         metric_chunks.append(
-            summarize_sampled_coverage_mask(mask, times, cell_indices=cells)
+            summarize_sampled_coverage_mask(
+                mask,
+                times,
+                cell_indices=cells,
+                numeric_backend=config.numeric_backend,
+            )
         )
         if evaluator_at_time is not None:
             sampled_transition_count = int(np.count_nonzero(mask[1:] != mask[:-1]))
@@ -744,6 +800,7 @@ def evaluate_global_coverage(
                     evaluator_at_time=scalar_evaluator,
                     time_tolerance_s=config.transition_time_tolerance_s,
                     max_iterations=config.transition_max_iterations,
+                    numeric_backend=config.numeric_backend,
                 )
                 refinement_evaluation_count += sum(value.iterations for value in transitions)
                 refined_transitions.extend(

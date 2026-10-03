@@ -7,12 +7,17 @@ import pytest
 
 from sim.config.scenario_yaml import scenario_config_from_dict
 from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S
+from sim.dynamics.orbit.epoch import resolved_jd_utc
 from sim.dynamics.orbit.frames import (
     FRAME_MODEL_IAU76_80_EOP,
     FRAME_MODEL_SIMPLE_GMST,
     _interp_eop,
+    _nutation_iau1980_vallado_matrix,
+    _precession_iau1976_matrix,
+    _precession_nutation_matrix_approx,
     eci_to_ecef_harmonic,
     eci_to_ecef_rotation_context,
+    eci_to_ecef_rotation_hpop_like,
     frame_context_from_mapping,
     normalize_frame_model,
     teme_to_eci_matrix_vallado_iau80,
@@ -30,6 +35,21 @@ def _write_minimal_eop(path: Path) -> None:
                 "NUM_OBSERVED_POINTS 2",
                 "2024 01 01 60310.0 0.10 0.20 0.30 0 0 0 0 0 37",
                 "2024 01 02 60311.0 0.11 0.21 0.31 0 0 0 0 0 37",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_eop_with_dat_step(path: Path) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "VERSION test",
+                "NUM_OBSERVED_POINTS 3",
+                "2024 01 01 60310.0 0.10 0.20 0.30 0 0 0 0 0 36",
+                "2024 01 02 60311.0 0.11 0.21 0.31 0 0 0 0 0 37",
+                "2024 01 03 60312.0 0.12 0.22 0.32 0 0 0 0 0 37",
             ]
         ),
         encoding="utf-8",
@@ -74,6 +94,28 @@ def test_eop_out_of_range_requires_explicit_hold_policy(tmp_path: Path) -> None:
 
     held = _interp_eop(60309.0, str(eop_path), extrapolation="hold")
     assert held == pytest.approx((0.10, 0.20, 0.30, 37.0))
+
+
+def test_eop_dat_step_fails_closed_for_interpolation_and_elapsed_time(tmp_path: Path) -> None:
+    eop_path = tmp_path / "EOP-All.txt"
+    _write_eop_with_dat_step(eop_path)
+    jd_start = 2400000.5 + 60310.0
+
+    with pytest.raises(ValueError, match="DAT changes within the requested interpolation bracket"):
+        _interp_eop(60310.5, str(eop_path))
+    assert _interp_eop(60311.5, str(eop_path))[3] == pytest.approx(37.0)
+
+    with pytest.raises(ValueError, match="crosses a DAT leap-second boundary"):
+        eci_to_ecef_rotation_hpop_like(86400.0, jd_utc_start=jd_start, eop_path=str(eop_path))
+    with pytest.raises(ValueError, match="crosses a DAT leap-second boundary"):
+        frame_context_from_mapping(
+            {"model": "iau76_80_eop", "eop_path": str(eop_path)}, jd_utc_start=jd_start
+        ).at(86400.0)
+    with pytest.raises(ValueError, match="crosses a DAT leap-second boundary"):
+        resolved_jd_utc(
+            {"jd_utc_start": jd_start, "spherical_harmonics_frame_model": "iau76_80_eop",
+             "spherical_harmonics_eop_path": str(eop_path)}, 86400.0
+        )
 
 
 def test_onp_compiled_rotation_honors_eop_hold_policy(tmp_path: Path) -> None:
@@ -180,7 +222,87 @@ def test_manual_eop_frame_context_affects_rotation_without_eop_path() -> None:
     manual_ecef = transform_position(r_eci, "eci", "ecef", t_s=120.0, context=manual)
 
     assert manual.metadata()["polar_motion_applied"] is True
+    assert manual.metadata()["time_scale_model"] == "eop_utc_ut1_tt"
     assert np.linalg.norm(manual_ecef - base_ecef) > 1.0e-4
+
+
+def test_eop_rotation_and_digest_refresh_when_file_at_same_path_changes(tmp_path: Path) -> None:
+    eop_path = tmp_path / "EOP-All.txt"
+    _write_minimal_eop(eop_path)
+    first = eci_to_ecef_rotation_hpop_like(
+        0.0,
+        jd_utc_start=2460310.5,
+        eop_path=str(eop_path),
+    )
+    first_meta = frame_context_from_mapping(
+        {"model": "iau76_80_eop", "eop_path": str(eop_path)},
+        jd_utc_start=2460310.5,
+    ).metadata()
+    eop_path.write_text(
+        eop_path.read_text(encoding="utf-8").replace("0.30", "0.80"),
+        encoding="utf-8",
+    )
+    second = eci_to_ecef_rotation_hpop_like(
+        0.0,
+        jd_utc_start=2460310.5,
+        eop_path=str(eop_path),
+    )
+    second_meta = frame_context_from_mapping(
+        {"model": "iau76_80_eop", "eop_path": str(eop_path)},
+        jd_utc_start=2460310.5,
+    ).metadata()
+
+    assert not np.array_equal(first, second)
+    assert first_meta["eop_table_sha256"] != second_meta["eop_table_sha256"]
+
+
+def test_eop_cache_refreshes_after_symlink_retarget(tmp_path: Path) -> None:
+    first_file, second_file = tmp_path / "first.txt", tmp_path / "second.txt"
+    _write_minimal_eop(first_file)
+    _write_eop_with_dat_step(second_file)
+    link = tmp_path / "current.txt"
+    try:
+        link.symlink_to(first_file)
+    except OSError:
+        pytest.skip("Symlink creation is unavailable on this host")
+    first = _interp_eop(60310.0, str(link))
+    rotation = eci_to_ecef_rotation_hpop_like(0.0, jd_utc_start=2460310.5, eop_path=str(link))
+    link.unlink()
+    link.symlink_to(second_file)
+    assert first[3] == 37.0
+    assert _interp_eop(60310.0, str(link))[3] == 36.0
+    assert not np.array_equal(
+        rotation, eci_to_ecef_rotation_hpop_like(0.0, jd_utc_start=2460310.5, eop_path=str(link)),
+    )
+    with pytest.raises(ValueError, match="crosses a DAT leap-second boundary"):
+        eci_to_ecef_rotation_hpop_like(86400.0, jd_utc_start=2460310.5, eop_path=str(link))
+
+
+def test_relative_eop_cache_path_tracks_current_directory(tmp_path: Path, monkeypatch) -> None:
+    first_dir, second_dir = tmp_path / "first", tmp_path / "second"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    _write_minimal_eop(first_dir / "eop.txt")
+    _write_eop_with_dat_step(second_dir / "eop.txt")
+    monkeypatch.chdir(first_dir)
+    assert _interp_eop(60310.0, "eop.txt")[3] == 37.0
+    monkeypatch.chdir(second_dir)
+    assert _interp_eop(60310.0, "eop.txt")[3] == 36.0
+
+
+def test_eop_cache_preserves_parent_components_after_symlinks(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    child = target / "child"
+    child.mkdir(parents=True)
+    _write_minimal_eop(tmp_path / "eop.txt")
+    _write_eop_with_dat_step(target / "eop.txt")
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(child, target_is_directory=True)
+    except OSError:
+        pytest.skip("Symlink creation is unavailable on this host")
+    # The filesystem follows the link before '..', selecting target/eop.txt.
+    assert _interp_eop(60310.0, str(link / ".." / "eop.txt"))[3] == 36.0
 
 
 def test_accelerated_iau_frame_rotation_is_numerically_equivalent() -> None:
@@ -282,6 +404,13 @@ def test_frame_context_nutation_corrections_affect_rotation_and_provenance(tmp_p
 
     assert corrected.metadata()["nutation_corrections_applied"] is True
     assert np.linalg.norm(corrected_ecef - base_ecef) > 1.0e-4
+
+
+def test_iau76_80_celestial_factor_inverts_tod_nutation() -> None:
+    jd_tt = 2460310.5 + 69.184 / 86400.0
+    expected = _nutation_iau1980_vallado_matrix(jd_tt)[4].T @ _precession_iau1976_matrix(jd_tt)
+    actual = _precession_nutation_matrix_approx(jd_tt)[0]
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1.0e-15)
 
 
 def test_context_transform_matches_canonical_harmonic_helper(tmp_path: Path) -> None:

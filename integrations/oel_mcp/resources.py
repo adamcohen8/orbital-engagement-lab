@@ -463,6 +463,31 @@ def _analysis_workflow_payload() -> dict[str, Any]:
             "authoritative_replay": "identity and citation replay over retained completed evidence",
             "mcp_tools": ["oel.inspect_study.v1", "oel.replay_study.v1", "oel.compare_studies.v1"],
         },
+        {
+            "workflow_id": "source_schedule_power_study",
+            "product_boundary": "public",
+            "interfaces": [
+                "python -m sim.study build-source-schedule-power",
+                "python -m sim.study inspect-source-schedule-power",
+            ],
+            "evidence": "oel.source_schedule_power_study.v1 with retained collection/link, schedule, power, and study packets",
+            "authoritative_replay": "python -m sim.study inspect-source-schedule-power",
+            "mcp_tools": [],
+        },
+        {
+            "workflow_id": "orbit_bound_source_study",
+            "product_boundary": "public",
+            "interfaces": [
+                "python -m sim.study export-orbit-history",
+                "python -m sim.collection <problem> --orbit-history-dir <product>",
+                "python -m sim.study build-orbit-bound-link",
+                "python -m sim.study build-orbit-bound-source-study",
+                "python -m sim.study inspect-orbit-bound-source-study",
+            ],
+            "evidence": "oel.orbit_bound_source_study.v1 with one retained parent ECI history",
+            "authoritative_replay": "python -m sim.study inspect-orbit-bound-source-study",
+            "mcp_tools": [],
+        },
     ]
     cross_cutting_pro_escalations = [
         coming_soon_pro_escalation(

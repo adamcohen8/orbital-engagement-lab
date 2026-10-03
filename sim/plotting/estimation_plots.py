@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from sim.plotting.single_run_context import _nested_array_map, _payload_arrays, _save_show_close
+from sim.plotting.style import tight_layout_oel_figure
 from sim.utils.figure_size import cap_figsize
 
 ArrayMap = dict[str, np.ndarray]
@@ -58,7 +59,7 @@ def plot_estimation_error(
     if plotted:
         axes[0].legend(loc="best")
         axes[1].legend(loc="best")
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig
 
@@ -107,7 +108,7 @@ def plot_estimation_error_components(
     if plotted:
         axes[0].legend(loc="best", ncol=2)
         axes[1].legend(loc="best", ncol=2)
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig
 
@@ -326,7 +327,7 @@ def plot_sensor_access(
     if not pairs:
         for ax in axes:
             ax.text(0.5, 0.5, "No knowledge history available", ha="center", va="center", transform=ax.transAxes)
-        fig.tight_layout()
+        tight_layout_oel_figure(fig)
         _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
         return fig
 
@@ -379,6 +380,6 @@ def plot_sensor_access(
     if axes[2].lines:
         axes[2].legend(loc="best")
 
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig

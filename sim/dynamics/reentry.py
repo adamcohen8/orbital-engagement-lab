@@ -13,6 +13,7 @@ from sim.aero import (
 )
 from sim.dynamics.orbit.atmosphere import altitude_km_from_eci, atmosphere_state_from_model
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM, EARTH_ROT_RATE_RAD_S
+from sim.numeric_backend import normalize_numeric_backend
 
 REENTRY_METRIC_KEYS = (
     "active",
@@ -54,6 +55,11 @@ class ReentryConfig:
     heat_rate_coefficient: float = SUTTON_GRAVES_COEFFICIENT_SI
     termination: ReentryTerminationConfig = field(default_factory=ReentryTerminationConfig)
     termination_by_object: dict[str, ReentryTerminationConfig] = field(default_factory=dict)
+    numeric_backend: str = "rust"
+
+    def __post_init__(self) -> None:
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="numeric_backend must be python or rust")
+        object.__setattr__(self, "numeric_backend", backend)
 
 
 @dataclass(frozen=True)
@@ -84,6 +90,7 @@ def reentry_config_from_dynamics(dynamics: dict[str, Any]) -> ReentryConfig:
     else:
         object_ids = tuple(str(item) for item in list(object_ids_raw or ()))
     atmosphere_model_raw = raw.get("atmosphere_model")
+    numeric_backend = normalize_numeric_backend(raw.get("numeric_backend", "rust"), error_message="simulator.dynamics.reentry.numeric_backend must be python or rust.")
     return ReentryConfig(
         enabled=bool(raw.get("enabled", False)),
         begin_altitude_km=float(raw.get("begin_altitude_km", 300.0)),
@@ -91,6 +98,7 @@ def reentry_config_from_dynamics(dynamics: dict[str, Any]) -> ReentryConfig:
         atmosphere_model=None if atmosphere_model_raw in (None, "") else str(atmosphere_model_raw),
         default_nose_radius_m=float(raw.get("nose_radius_m", 0.5)),
         heat_rate_coefficient=float(raw.get("heat_rate_coefficient", SUTTON_GRAVES_COEFFICIENT_SI)),
+        numeric_backend=numeric_backend,
         termination=termination,
         termination_by_object=termination_by_object,
     )
@@ -272,41 +280,71 @@ def reentry_metrics_for_state(
         ddpsi_rad=float(env.get("ddpsi_rad", 0.0) or 0.0),
         ddeps_rad=float(env.get("ddeps_rad", 0.0) or 0.0),
         eop_extrapolation=str(env.get("eop_extrapolation", "error") or "error"),
+        _numeric_backend=cfg.numeric_backend,
     )
     v_rel_m_s = v_rel * 1000.0
     speed_m_s = float(np.linalg.norm(v_rel_m_s))
-    q_dyn_pa = dynamic_pressure_pa(rho, speed_m_s)
-
     mass_kg = float(max(props.mass_kg, 1e-12))
     drag_area_m2 = float(max(props.drag_area_m2, 0.0))
     cd = float(max(props.cd, 0.0))
     lift_area_m2 = drag_area_m2 if props.lift_area_m2 is None else float(max(props.lift_area_m2, 0.0))
-    loads = compute_aero_load_scalars(
-        density_kg_m3=rho,
-        speed_m_s=speed_m_s,
-        mass_kg=mass_kg,
-        drag_area_m2=drag_area_m2,
-        cd=cd,
-        lift_area_m2=lift_area_m2,
-        cl=float(props.cl),
-    )
-    drag_decel_m_s2 = loads.drag_accel_m_s2
-    lift_accel_m_s2 = loads.lift_accel_m_s2
-    lift_to_drag = loads.lift_to_drag
     nose_radius_m = float(max(props.nose_radius_m, 1e-9))
-    heat_rate_w_m2 = sutton_graves_heat_rate_w_m2(
-        density_kg_m3=rho,
-        speed_m_s=speed_m_s,
-        nose_radius_m=nose_radius_m,
-        coefficient=float(cfg.heat_rate_coefficient),
+    previous_rate = (
+        None
+        if previous_heat_rate_w_m2 is None or not np.isfinite(float(previous_heat_rate_w_m2))
+        else float(previous_heat_rate_w_m2)
     )
-    previous_rate = None if previous_heat_rate_w_m2 is None else float(previous_heat_rate_w_m2)
-    prior_rate = (
-        heat_rate_w_m2
-        if previous_rate is None or not np.isfinite(previous_rate)
-        else max(previous_rate, 0.0)
-    )
-    heat_load_j_m2 = prev_heat + max(float(dt_s), 0.0) * 0.5 * (prior_rate + max(heat_rate_w_m2, 0.0))
+    if normalize_numeric_backend(cfg.numeric_backend) == "rust":
+        from sim.rust_vehicle_backend import reentry_metrics
+
+        scalar = reentry_metrics(
+            density_kg_m3=rho,
+            speed_m_s=speed_m_s,
+            mass_kg=mass_kg,
+            drag_area_m2=drag_area_m2,
+            cd=cd,
+            lift_area_m2=lift_area_m2,
+            cl=float(props.cl),
+            nose_radius_m=nose_radius_m,
+            coefficient=float(cfg.heat_rate_coefficient),
+            dt_s=float(dt_s),
+            previous_heat_load_j_m2=prev_heat,
+            previous_heat_rate_w_m2=previous_rate,
+        )
+        q_dyn_pa = float(scalar[0])
+        drag_decel_m_s2 = float(scalar[1])
+        lift_accel_m_s2 = float(scalar[2])
+        lift_to_drag = float(scalar[3])
+        g_load = float(scalar[4])
+        heat_rate_w_m2 = float(scalar[5])
+        heat_load_j_m2 = float(scalar[6])
+    else:
+        q_dyn_pa = dynamic_pressure_pa(rho, speed_m_s)
+        loads = compute_aero_load_scalars(
+            density_kg_m3=rho,
+            speed_m_s=speed_m_s,
+            mass_kg=mass_kg,
+            drag_area_m2=drag_area_m2,
+            cd=cd,
+            lift_area_m2=lift_area_m2,
+            cl=float(props.cl),
+        )
+        drag_decel_m_s2 = loads.drag_accel_m_s2
+        lift_accel_m_s2 = loads.lift_accel_m_s2
+        lift_to_drag = loads.lift_to_drag
+        heat_rate_w_m2 = sutton_graves_heat_rate_w_m2(
+            density_kg_m3=rho,
+            speed_m_s=speed_m_s,
+            nose_radius_m=nose_radius_m,
+            coefficient=float(cfg.heat_rate_coefficient),
+        )
+        prior_rate = (
+            heat_rate_w_m2
+            if previous_rate is None or not np.isfinite(previous_rate)
+            else max(previous_rate, 0.0)
+        )
+        heat_load_j_m2 = prev_heat + max(float(dt_s), 0.0) * 0.5 * (prior_rate + max(heat_rate_w_m2, 0.0))
+        g_load = float(np.hypot(drag_decel_m_s2, lift_accel_m_s2)) / G0_M_S2
 
     out.update(
         {
@@ -316,7 +354,7 @@ def reentry_metrics_for_state(
             "drag_decel_m_s2": drag_decel_m_s2,
             "lift_accel_m_s2": lift_accel_m_s2,
             "lift_to_drag": lift_to_drag,
-            "g_load": float(np.hypot(drag_decel_m_s2, lift_accel_m_s2)) / G0_M_S2,
+            "g_load": g_load,
             "heat_rate_w_m2": heat_rate_w_m2,
             "heat_load_j_m2": heat_load_j_m2,
         }

@@ -11,7 +11,26 @@ from sim.execution.metrics import (
     relative_range_series_from_run_payload,
 )
 from sim.single_run import _run_single_config
-from sim.utils.parallel import restore_env_vars, set_parallel_worker_thread_limits, worker_progress_queue
+from sim.utils.parallel import (
+    initialize_worker_progress_queue,
+    restore_env_vars,
+    set_parallel_worker_thread_limits,
+    worker_progress_queue,
+)
+
+_WORKER_CANCEL_EVENT: Any | None = None
+
+
+def initialize_campaign_worker_transport(progress_queue: Any, cancel_event: Any) -> None:
+    """Install cancellation at launch so ordinary steps use shared memory.
+
+    A multiprocessing Event must be passed during process creation, rather
+    than as a subsequently pickled task argument. Its local check avoids a
+    Manager proxy request/response for every simulation sample.
+    """
+    global _WORKER_CANCEL_EVENT
+    initialize_worker_progress_queue(progress_queue)
+    _WORKER_CANCEL_EVENT = cancel_event
 
 
 def run_mc_iteration_from_dict(task: dict[str, Any]) -> dict[str, Any]:
@@ -19,7 +38,7 @@ def run_mc_iteration_from_dict(task: dict[str, Any]) -> dict[str, Any]:
     cdict = dict(task.get("config_dict", {}) or {})
     strict_plugins = bool(task.get("strict_plugins", True))
     progress_queue = task.get("progress_queue")
-    cancel_event = task.get("cancel_event")
+    cancel_event = task.get("cancel_event", _WORKER_CANCEL_EVENT)
     if progress_queue is None:
         progress_queue = worker_progress_queue()
     emit_every = int(task.get("progress_emit_every", 20) or 20)

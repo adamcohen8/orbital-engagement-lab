@@ -2,6 +2,8 @@ import { DUEL_PROTOTYPE_RULES } from "../src/shared/duel-engine.js";
 import {
   DuelRoomCore,
   normalizeRoomCode,
+  normalizeMatchMode,
+  normalizeRoundCount,
   RoomError,
 } from "../src/shared/duel-room.js";
 
@@ -201,6 +203,7 @@ export class RpoDuelAdmission {
   constructor(state, env) {
     this.state = state;
     this.env = env;
+    this.admissionTail = Promise.resolve();
   }
 
   async fetch(request) {
@@ -208,16 +211,47 @@ export class RpoDuelAdmission {
     const body = await readJson(request);
     const roomCode = normalizeRoomCode(body.room_code);
     if (!roomCode) return jsonResponse(400, { error: "room_code is required" });
-    if (url.pathname === "/release") {
+    if (!["/admit", "/release", "/renew"].includes(url.pathname)) {
+      return jsonResponse(404, { error: "admission route not found" });
+    }
+
+    // All room mutations share one critical section. The global admission
+    // Durable Object is a single instance, so this promise tail serializes
+    // check-and-update work across requests, including release and renewal.
+    const operation = this.admissionTail.then(
+      () => this.applyAdmissionRequest(url.pathname, body, roomCode),
+      () => this.applyAdmissionRequest(url.pathname, body, roomCode),
+    );
+    this.admissionTail = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  async applyAdmissionRequest(pathname, body, roomCode) {
+    if (pathname === "/release") {
       await this.state.storage.delete(`room:${roomCode}`);
       return jsonResponse(200, { status: "released" });
     }
     const expiresAt = Math.max(Number(body.expires_at_ms) || 0, Date.now() + 1000);
-    if (url.pathname === "/renew") {
+    if (pathname === "/renew") {
       await this.state.storage.put(`room:${roomCode}`, { expires_at_ms: expiresAt });
       return jsonResponse(200, { status: "renewed" });
     }
-    if (url.pathname !== "/admit") return jsonResponse(404, { error: "admission route not found" });
+
+    let maximum;
+    let windowMs;
+    let limit;
+    try {
+      maximum = admissionInteger(this.env, "DUEL_MAX_ACTIVE_ROOMS", 25, 1, 1000);
+      limit = admissionInteger(this.env, "DUEL_CREATE_RATE_LIMIT", 5, 1, 100);
+      windowMs = admissionInteger(this.env, "DUEL_CREATE_RATE_WINDOW_MS", 600000, 1000, 86400000);
+    } catch (error) {
+      return errorResponse(error);
+    }
+
+    const clientKey = typeof body.client_key === "string" ? body.client_key : "";
+    if (!/^[0-9a-f]{64}$/.test(clientKey)) {
+      return jsonResponse(403, { error: "A SHA-256 client admission identity is required." });
+    }
 
     const now = Date.now();
     const rooms = await this.state.storage.list({ prefix: "room:" });
@@ -227,16 +261,11 @@ export class RpoDuelAdmission {
         rooms.delete(key);
       }
     }
-    const maximum = Math.max(1, Number(this.env.DUEL_MAX_ACTIVE_ROOMS || 25));
     if (!rooms.has(`room:${roomCode}`) && rooms.size >= maximum) {
       return jsonResponse(503, { error: "Duel room capacity is currently full." });
     }
 
-    const clientKey = String(body.client_key || "");
-    if (!clientKey) return jsonResponse(403, { error: "Client admission identity is required." });
     const rateKey = `rate:${clientKey}`;
-    const windowMs = Math.max(1000, Number(this.env.DUEL_CREATE_RATE_WINDOW_MS || 600000));
-    const limit = Math.max(1, Number(this.env.DUEL_CREATE_RATE_LIMIT || 5));
     const current = await this.state.storage.get(rateKey);
     const rate = !current || now - Number(current.started_at_ms || 0) >= windowMs
       ? { started_at_ms: now, count: 0 }
@@ -249,6 +278,17 @@ export class RpoDuelAdmission {
   }
 }
 
+function admissionInteger(env, name, fallback, minimum, maximum) {
+  const raw = env?.[name];
+  if (raw === undefined || raw === null) return fallback;
+  const text = String(raw).trim();
+  const value = Number(text);
+  if (!/^\d+$/.test(text) || !Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new RoomError(503, `${name} must be an integer from ${minimum} through ${maximum}.`);
+  }
+  return value;
+}
+
 async function routeRoomRequest(request, env) {
   const url = new URL(request.url);
   if (request.method === "POST" && url.pathname === "/api/rooms") {
@@ -256,6 +296,11 @@ async function routeRoomRequest(request, env) {
       throw new RoomError(503, "Duel room creation is disabled by the operator.");
     }
     const body = await readJson(request);
+    // Validate fields consumed by the room Durable Object before reserving a
+    // global admission slot. Invalid configuration must not occupy a slot
+    // until its 30-minute expiry.
+    normalizeRoundCount(body?.regulation_rounds);
+    normalizeMatchMode(body?.opponent);
     const clientAddress = request.headers.get("CF-Connecting-IP");
     if (!clientAddress) throw new RoomError(403, "Cloudflare client identity is required for room creation.");
     const clientKey = await sha256Text(clientAddress);
@@ -272,21 +317,32 @@ async function routeRoomRequest(request, env) {
         }),
       });
       if (!admitted.ok) return withSecurityHeaders(admitted);
-      const stub = env.DUEL_ROOMS.getByName(code);
-      const headers = new Headers(request.headers);
-      headers.set("Content-Type", "application/json");
-      headers.set("x-oel-room-code", code);
-      const forwarded = new Request(request.url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ ...body, match_seed: randomUint32() }),
-      });
-      const response = await stub.fetch(forwarded);
+      let response;
+      try {
+        const stub = env.DUEL_ROOMS.getByName(code);
+        const headers = new Headers(request.headers);
+        headers.set("Content-Type", "application/json");
+        headers.set("x-oel-room-code", code);
+        const forwarded = new Request(request.url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ ...body, match_seed: randomUint32() }),
+        });
+        response = await stub.fetch(forwarded);
+      } catch (error) {
+        await admission.fetch("https://oel.internal/release", {
+          method: "POST",
+          body: JSON.stringify({ room_code: code }),
+        });
+        throw error;
+      }
+      if (response.status !== 201) {
+        await admission.fetch("https://oel.internal/release", {
+          method: "POST",
+          body: JSON.stringify({ room_code: code }),
+        });
+      }
       if (response.status !== 409) return withSecurityHeaders(response);
-      await admission.fetch("https://oel.internal/release", {
-        method: "POST",
-        body: JSON.stringify({ room_code: code }),
-      });
     }
     throw new RoomError(503, "Unable to allocate a room code.");
   }

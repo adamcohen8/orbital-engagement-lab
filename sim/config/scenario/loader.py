@@ -155,18 +155,27 @@ def load_simulation_yaml_bytes(
         pass
 
     def _construct_unique_mapping(loader: Any, node: Any, deep: bool = False) -> dict[Any, Any]:
-        loader.flatten_mapping(node)
-        mapping: dict[Any, Any] = {}
-        for key_node, value_node in node.value:
+        # Check authored keys before expanding YAML merge keys.  An explicit
+        # key may override an inherited value, while two explicit keys in the
+        # same mapping remain an error.
+        authored_keys: set[Any] = set()
+        for key_node, _value_node in node.value:
+            if getattr(key_node, "tag", None) == "tag:yaml.org,2002:merge":
+                continue
             key = loader.construct_object(key_node, deep=deep)
             try:
-                duplicate = key in mapping
+                duplicate = key in authored_keys
             except TypeError as exc:
                 raise ValueError("YAML mapping keys must be hashable.") from exc
             if duplicate:
                 mark = getattr(key_node, "start_mark", None)
                 location = "" if mark is None else f" at line {mark.line + 1}, column {mark.column + 1}"
                 raise ValueError(f"Duplicate YAML mapping key {key!r}{location}.")
+            authored_keys.add(key)
+        loader.flatten_mapping(node)
+        mapping: dict[Any, Any] = {}
+        for key_node, value_node in node.value:
+            key = loader.construct_object(key_node, deep=deep)
             mapping[key] = loader.construct_object(value_node, deep=deep)
         return mapping
 
@@ -174,7 +183,7 @@ def load_simulation_yaml_bytes(
         yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
         _construct_unique_mapping,
     )
-    raw = yaml.load(text, Loader=_UniqueKeySafeLoader) or {}
+    raw = yaml.load(text, Loader=_UniqueKeySafeLoader)
     if not isinstance(raw, dict):
         raise ValueError("Simulation YAML root must be a mapping/object.")
     policy = path_policy or ConfigPathPolicy.default(

@@ -140,3 +140,12 @@ It does not predict space weather, calibrate density or ballistic coefficient,
 model uncertainty, establish disposal compliance, estimate reentry casualty
 risk, maintain orbit custody, qualify software or hardware, or authorize an
 operation.
+
+The problem accepts optional `numeric_backend` with values `rust` (default)
+and `python`. Canonical problems retain either selection and bind replay to
+that selection. See the workflow guide for the native scope.
+
+Rust implementation identity also retains a location-independent `native_runtime`
+record: module, version, binary size, and SHA-256. Native source receipts are
+retained when the source crate is present; installed Python packages do not
+require a Rust source checkout. Authoritative replay verifies the runtime record.

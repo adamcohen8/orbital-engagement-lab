@@ -9,6 +9,7 @@ from sim.core.interfaces import Controller
 from sim.core.models import Command, StateBelief
 from sim.dynamics.orbit.environment import EARTH_J2, EARTH_RADIUS_KM
 from sim.dynamics.orbit.relative_linear import RelativeLinearDynamics, normalize_relative_linear_model
+from sim.numeric_backend import normalize_numeric_backend
 from sim.utils.frames import ric_curv_to_rect, ric_dcm_ir_from_rv
 
 
@@ -53,6 +54,9 @@ class HCWRelativeOrbitMPCController(Controller):
     min_cost_improvement: float = 1e-6
     trust_region_step_km_s2: float = 1e-5
     debug_store_iteration_history: bool = False
+    # Keep the opt-in selector keyword-only so the in-track subclass retains
+    # its pre-backend positional argument order.
+    numeric_backend: str = field(default="rust", kw_only=True)
 
     _u_guess_ctrl: np.ndarray = field(init=False, repr=False)
     _u_prev_ctrl: np.ndarray = field(init=False, repr=False)
@@ -108,6 +112,8 @@ class HCWRelativeOrbitMPCController(Controller):
             raise ValueError("min_cost_improvement must be positive.")
         if self.trust_region_step_km_s2 <= 0.0:
             raise ValueError("trust_region_step_km_s2 must be positive.")
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="numeric_backend must be python or rust")
+        self.numeric_backend = backend
 
         signs = self._vector(self.state_signs, n=6)
         signs[signs == 0.0] = 1.0
@@ -219,26 +225,29 @@ class HCWRelativeOrbitMPCController(Controller):
         self._u_prev_ctrl = u0_ctrl
         self._u_guess_ctrl = self._shift_sequence(u_opt)
         u0_eci = c_ir @ u0_ric
+        mode_flags = {
+            "mode": "relative_orbit_hcw_mpc" if self.dynamics_model == "hcw" else "relative_orbit_ss_j2_mpc",
+            "dynamics_model": self.dynamics_model,
+            "ric_curv_state_slice": [i0, i1],
+            "chief_eci_state_slice": [j0, j1],
+            "state_signs": self.state_signs.tolist(),
+            "horizon_time_s": float(self.horizon_time_s),
+            "horizon_steps": int(h_steps),
+            "step_dt_s": float(dt_model),
+            "gradient_method": self.gradient_method,
+            "mean_motion_rad_s": float(n),
+            "accel_ric_km_s2": u0_ric.tolist(),
+            "control_axes": self._control_axes(),
+            "seed_accel_ric_km_s2": a_seed_ric.tolist(),
+            "solve_time_ms": float(solve_ms),
+            **info,
+        }
+        if self.numeric_backend == "rust":
+            mode_flags["control_numeric_backend"] = self.numeric_backend
         return Command(
             thrust_eci_km_s2=u0_eci,
             torque_body_nm=np.zeros(3),
-            mode_flags={
-                "mode": "relative_orbit_hcw_mpc" if self.dynamics_model == "hcw" else "relative_orbit_ss_j2_mpc",
-                "dynamics_model": self.dynamics_model,
-                "ric_curv_state_slice": [i0, i1],
-                "chief_eci_state_slice": [j0, j1],
-                "state_signs": self.state_signs.tolist(),
-                "horizon_time_s": float(self.horizon_time_s),
-                "horizon_steps": int(h_steps),
-                "step_dt_s": float(dt_model),
-                "gradient_method": self.gradient_method,
-                "mean_motion_rad_s": float(n),
-                "accel_ric_km_s2": u0_ric.tolist(),
-                "control_axes": self._control_axes(),
-                "seed_accel_ric_km_s2": a_seed_ric.tolist(),
-                "solve_time_ms": float(solve_ms),
-                **info,
-            },
+            mode_flags=mode_flags,
         )
 
     def _resolve_model_dt(self, t_s: float) -> float:
@@ -256,7 +265,12 @@ class HCWRelativeOrbitMPCController(Controller):
 
     def _refresh_discrete_model(self, n: float, dt: float, chief_state_eci_km_s: np.ndarray) -> None:
         if self.dynamics_model == "hcw":
-            dynamics = RelativeLinearDynamics.hcw(n)
+            # Keep the relative-dynamics selector attached to the controller's
+            # opt-in numeric backend.  The Python implementation remains the
+            # reference for the augmented input discretization, while the
+            # native path supplies the state transition kernel where it is
+            # available.
+            dynamics = RelativeLinearDynamics.hcw(n, numeric_backend=self.numeric_backend)
         else:
             dynamics = RelativeLinearDynamics.ss_j2_from_chief_state(
                 chief_state_eci_km_s,
@@ -264,8 +278,19 @@ class HCWRelativeOrbitMPCController(Controller):
                 j2=self.j2,
                 earth_radius_km=self.earth_radius_km,
                 maximum_supported_eccentricity=self.maximum_ss_eccentricity,
+                numeric_backend=self.numeric_backend,
             )
-        self._ad, bd_full = dynamics.discrete_matrices(dt)
+        ad_python, bd_full = dynamics.discrete_matrices(dt)
+        # The native relative backend owns the closed-form/state-exponential
+        # transition kernels.  Keep the established augmented SciPy
+        # discretization for B so the controller's input-unit contract remains
+        # unchanged while the explicit Rust selector exercises the native A
+        # path.
+        self._ad = (
+            dynamics.state_transition_matrix(dt)
+            if self.numeric_backend == "rust"
+            else ad_python
+        )
         self._bd = self._control_input_matrix(bd_full)
 
     def _solve_mpc(
@@ -301,6 +326,11 @@ class HCWRelativeOrbitMPCController(Controller):
                 break
             iters = it + 1
 
+            # Preserve the configured optimization method.  Rust supplies
+            # cost/projection arithmetic below, but selecting the Rust backend
+            # must not silently replace finite differences or seeded SPSA with
+            # the optional analytic gradient kernel (which has different
+            # evaluation counts and convergence behavior).
             grad = np.zeros_like(u)
             if self.gradient_method == "finite_difference":
                 for k in range(h_steps):
@@ -389,6 +419,28 @@ class HCWRelativeOrbitMPCController(Controller):
         x = np.array(x_rel0, dtype=float).reshape(6)
         u_prev = np.array(self._u_prev_ctrl, dtype=float).reshape(self._control_dim())
         u_seq = self._project_sequence(u_seq, h_steps=h_steps)
+
+        if self.numeric_backend == "rust":
+            from sim.rust_control_backend import mpc_rollout_cost
+
+            # Python computes err = state_signs * (x - target), then squares
+            # the error.  Carry that contract into the native cost explicitly
+            # so future nontrivial sign vectors cannot silently change the
+            # selected backend's objective.
+            sign_squared = np.square(np.asarray(self.state_signs, dtype=float))
+            cost = mpc_rollout_cost(
+                x,
+                self.target_rel_ric_rect,
+                self._ad,
+                self._bd,
+                self.q_weights * sign_squared,
+                self.terminal_weights * sign_squared,
+                self.r_weights,
+                self.rd_weights,
+                u_prev,
+                u_seq,
+            )
+            return float(cost)
 
         j = 0.0
         err = np.zeros(6, dtype=float)

@@ -8,7 +8,10 @@ from sim.dynamics.orbit.atmosphere import atmosphere_state_from_model
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.rocket.models import GuidanceCommand, RocketGuidanceLaw, RocketSimConfig, RocketState, RocketVehicleConfig
 from sim.rocket.navigation import (
+    _clip_scalar,
+    _cross3,
     _geodetic_state_from_eci,
+    _norm3,
     atmosphere_relative_velocity_rocket_eci_m_s,
     build_rocket_nav_state,
 )
@@ -16,24 +19,24 @@ from sim.utils.quaternion import dcm_to_quaternion_bn, quaternion_to_dcm_bn
 
 
 def _unit(v: np.ndarray, eps: float = 1e-12) -> np.ndarray:
-    n = float(np.linalg.norm(v))
+    n = float(_norm3(v))
     if n <= eps:
         return np.zeros_like(v)
     return v / n
 
 
 def _quat_from_body_x_and_hint(x_axis_eci: np.ndarray, z_hint_eci: np.ndarray) -> np.ndarray:
-    x_hat = _unit(np.array(x_axis_eci, dtype=float))
-    if np.linalg.norm(x_hat) <= 0.0:
+    x_hat = _unit(np.asarray(x_axis_eci, dtype=float))
+    if _norm3(x_hat) <= 0.0:
         return np.array([1.0, 0.0, 0.0, 0.0])
-    z_hint = _unit(np.array(z_hint_eci, dtype=float))
-    y_hat = _unit(np.cross(z_hint, x_hat))
-    if np.linalg.norm(y_hat) <= 0.0:
+    z_hint = _unit(np.asarray(z_hint_eci, dtype=float))
+    y_hat = _unit(_cross3(z_hint, x_hat))
+    if _norm3(y_hat) <= 0.0:
         # fallback if collinear
-        y_hat = _unit(np.cross(np.array([0.0, 0.0, 1.0]), x_hat))
-        if np.linalg.norm(y_hat) <= 0.0:
+        y_hat = _unit(_cross3(np.array([0.0, 0.0, 1.0]), x_hat))
+        if _norm3(y_hat) <= 0.0:
             y_hat = np.array([0.0, 1.0, 0.0])
-    z_hat = _unit(np.cross(x_hat, y_hat))
+    z_hat = _unit(_cross3(x_hat, y_hat))
     c_bn = np.vstack((x_hat, y_hat, z_hat))  # body rows in inertial components
     return dcm_to_quaternion_bn(c_bn)
 
@@ -41,15 +44,15 @@ def _quat_from_body_x_and_hint(x_axis_eci: np.ndarray, z_hint_eci: np.ndarray) -
 def _orbital_elements_basic(
     r_km: np.ndarray, v_km_s: np.ndarray, mu_km3_s2: float = EARTH_MU_KM3_S2
 ) -> tuple[float, float]:
-    r = float(np.linalg.norm(r_km))
+    r = float(_norm3(r_km))
     v2 = float(np.dot(v_km_s, v_km_s))
     if r <= 0.0:
         return np.inf, np.inf
     eps = 0.5 * v2 - mu_km3_s2 / r
     a = np.inf if abs(eps) < 1e-14 else float(-mu_km3_s2 / (2.0 * eps))
-    h = np.cross(r_km, v_km_s)
-    e_vec = np.cross(v_km_s, h) / mu_km3_s2 - r_km / r
-    e = float(np.linalg.norm(e_vec))
+    h = _cross3(r_km, v_km_s)
+    e_vec = _cross3(v_km_s, h) / mu_km3_s2 - r_km / r
+    e = float(_norm3(e_vec))
     return a, e
 
 
@@ -81,26 +84,26 @@ class OpenLoopPitchProgramGuidance(RocketGuidanceLaw):
         t = state.t_s
         r_hat = _unit(state.position_eci_km)
         v_hat = _unit(state.velocity_eci_km_s)
-        east_hat = _unit(np.cross(np.array([0.0, 0.0, 1.0]), r_hat))
-        if np.linalg.norm(east_hat) <= 0.0:
+        east_hat = _unit(_cross3(np.array([0.0, 0.0, 1.0]), r_hat))
+        if _norm3(east_hat) <= 0.0:
             east_hat = np.array([0.0, 1.0, 0.0])
 
         if t <= self.vertical_hold_s:
             x_cmd = r_hat
         elif t <= self.pitch_end_s:
             alpha = float(
-                np.clip((t - self.pitch_start_s) / max(self.pitch_end_s - self.pitch_start_s, 1e-9), 0.0, 1.0)
+                _clip_scalar((t - self.pitch_start_s) / max(self.pitch_end_s - self.pitch_start_s, 1e-9), 0.0, 1.0)
             )
             pitch_rad = np.deg2rad(alpha * self.pitch_final_deg)
             x_cmd = _unit(np.cos(pitch_rad) * r_hat + np.sin(pitch_rad) * east_hat)
         else:
-            if np.linalg.norm(v_hat) > 0.0:
+            if _norm3(v_hat) > 0.0:
                 x_cmd = _unit(v_hat)
             else:
                 x_cmd = r_hat
 
         q_cmd = _quat_from_body_x_and_hint(x_cmd, z_hint_eci=r_hat)
-        thr = float(np.clip(self.max_throttle, self.min_throttle, self.max_throttle))
+        thr = float(_clip_scalar(self.max_throttle, self.min_throttle, self.max_throttle))
         return GuidanceCommand(throttle=thr, attitude_quat_bn_cmd=q_cmd, torque_body_nm_cmd=np.zeros(3))
 
 
@@ -143,33 +146,33 @@ class ClosedLoopInsertionGuidance(RocketGuidanceLaw):
 
     def _horizontal_azimuth_dir(self, r_hat: np.ndarray, azimuth_deg: float) -> np.ndarray:
         k_hat = np.array([0.0, 0.0, 1.0], dtype=float)
-        east_hat = _unit(np.cross(k_hat, r_hat))
-        if np.linalg.norm(east_hat) <= 0.0:
+        east_hat = _unit(_cross3(k_hat, r_hat))
+        if _norm3(east_hat) <= 0.0:
             east_hat = np.array([0.0, 1.0, 0.0], dtype=float)
-        north_hat = _unit(np.cross(r_hat, east_hat))
+        north_hat = _unit(_cross3(r_hat, east_hat))
         az = np.deg2rad(float(azimuth_deg))
         return _unit(np.cos(az) * north_hat + np.sin(az) * east_hat)
 
     def _cmd_from_axis(self, thrust_axis_eci: np.ndarray, throttle: float, r_hat: np.ndarray) -> GuidanceCommand:
         q_cmd = _quat_from_body_x_and_hint(_unit(thrust_axis_eci), z_hint_eci=r_hat)
-        thr = float(np.clip(throttle, self.min_throttle, self.max_throttle))
+        thr = float(_clip_scalar(throttle, self.min_throttle, self.max_throttle))
         return GuidanceCommand(throttle=thr, attitude_quat_bn_cmd=q_cmd, torque_body_nm_cmd=np.zeros(3))
 
     def _apply_speed_cap(self, throttle: float, v_mag_km_s: float, r_norm_km: float) -> float:
         if self.max_throttle <= 0.0:
             return 0.0
-        frac = float(np.clip(self.speed_cap_frac_of_escape, 0.5, 0.999))
+        frac = float(_clip_scalar(self.speed_cap_frac_of_escape, 0.5, 0.999))
         v_esc = float(np.sqrt(2.0 * EARTH_MU_KM3_S2 / max(r_norm_km, 1e-9)))
         v_cap = frac * v_esc
         if v_mag_km_s <= v_cap:
-            return float(np.clip(throttle, self.min_throttle, self.max_throttle))
+            return float(_clip_scalar(throttle, self.min_throttle, self.max_throttle))
         headroom = max((1.0 - frac) * v_esc, 1e-6)
         excess = max(v_mag_km_s - v_cap, 0.0)
         soften = float(max(self.speed_cap_soften_gain, 0.0))
-        scale = float(np.clip(1.0 - soften * (excess / headroom), 0.0, 1.0))
-        floor = float(np.clip(self.speed_cap_min_throttle_frac, 0.0, 1.0))
+        scale = float(_clip_scalar(1.0 - soften * (excess / headroom), 0.0, 1.0))
+        floor = float(_clip_scalar(self.speed_cap_min_throttle_frac, 0.0, 1.0))
         capped = self.max_throttle * max(scale, floor)
-        return float(np.clip(min(throttle, capped), self.min_throttle, self.max_throttle))
+        return float(_clip_scalar(min(throttle, capped), self.min_throttle, self.max_throttle))
 
     def _estimate_max_accel_km_s2(self, state: RocketState, vehicle_cfg: RocketVehicleConfig) -> float:
         i = int(state.active_stage_index)
@@ -188,12 +191,12 @@ class ClosedLoopInsertionGuidance(RocketGuidanceLaw):
         vehicle_cfg: RocketVehicleConfig,
         sim_cfg: RocketSimConfig,
     ) -> float:
-        thr = float(np.clip(throttle, self.min_throttle, self.max_throttle))
+        thr = float(_clip_scalar(throttle, self.min_throttle, self.max_throttle))
         if (not self.hyperbolic_guard_enabled) or thr <= 0.0:
             return thr
         r = np.array(state.position_eci_km, dtype=float).reshape(3)
         v = np.array(state.velocity_eci_km_s, dtype=float).reshape(3)
-        r_norm = float(np.linalg.norm(r))
+        r_norm = float(_norm3(r))
         if r_norm <= 0.0:
             return 0.0
         _, _, alt_geo_km = _geodetic_state_from_eci(
@@ -202,8 +205,8 @@ class ClosedLoopInsertionGuidance(RocketGuidanceLaw):
             jd_utc_start=sim_cfg.atmosphere_env.get("jd_utc_start"),
         )
         alt_km = float(alt_geo_km if sim_cfg.use_wgs84_geodesy else r_norm - EARTH_RADIUS_KM)
-        u = _unit(np.array(thrust_dir_eci, dtype=float).reshape(3))
-        if np.linalg.norm(u) <= 0.0:
+        u = _unit(np.asarray(thrust_dir_eci, dtype=float).reshape(3))
+        if _norm3(u) <= 0.0:
             return 0.0
         a_max = self._estimate_max_accel_km_s2(state, vehicle_cfg)
         if a_max <= 0.0:
@@ -223,7 +226,7 @@ class ClosedLoopInsertionGuidance(RocketGuidanceLaw):
             alpha_hi = -b + float(np.sqrt(disc))
             if alpha_hi <= 0.0:
                 return 0.0
-            return float(np.clip(alpha_hi / max(alpha_per_throttle, 1e-9), 0.0, self.max_throttle))
+            return float(_clip_scalar(alpha_hi / max(alpha_per_throttle, 1e-9), 0.0, self.max_throttle))
 
         thr_limit = _thr_limit_from_c(c_hyp)
 
@@ -234,7 +237,7 @@ class ClosedLoopInsertionGuidance(RocketGuidanceLaw):
             c_energy = 0.5 * v2 - float(EARTH_MU_KM3_S2 / r_norm) - eps_lim
             thr_limit = min(thr_limit, _thr_limit_from_c(c_energy))
 
-        return float(np.clip(min(thr, thr_limit), self.min_throttle, self.max_throttle))
+        return float(_clip_scalar(min(thr, thr_limit), self.min_throttle, self.max_throttle))
 
     def _desired_plane_normal(self) -> np.ndarray | None:
         if self.desired_inc_deg is None or self.desired_raan_deg is None:
@@ -249,7 +252,7 @@ class ClosedLoopInsertionGuidance(RocketGuidanceLaw):
             ],
             dtype=float,
         )
-        if not np.all(np.isfinite(h_hat)) or np.linalg.norm(h_hat) <= 0.0:
+        if not np.all(np.isfinite(h_hat)) or _norm3(h_hat) <= 0.0:
             return None
         return _unit(h_hat)
 
@@ -257,12 +260,12 @@ class ClosedLoopInsertionGuidance(RocketGuidanceLaw):
         h_des = self._desired_plane_normal()
         if h_des is None:
             return _unit(fallback_t_hat)
-        t_des = _unit(np.cross(h_des, r_hat))
-        if np.linalg.norm(t_des) <= 0.0:
+        t_des = _unit(_cross3(h_des, r_hat))
+        if _norm3(t_des) <= 0.0:
             return _unit(fallback_t_hat)
         if float(np.dot(t_des, v)) < 0.0:
             t_des = -t_des
-        g = float(np.clip(self.plane_alignment_gain, 0.0, 1.0))
+        g = float(_clip_scalar(self.plane_alignment_gain, 0.0, 1.0))
         return _unit((1.0 - g) * _unit(fallback_t_hat) + g * t_des)
 
     def command(
@@ -270,15 +273,15 @@ class ClosedLoopInsertionGuidance(RocketGuidanceLaw):
     ) -> GuidanceCommand:
         r = np.array(state.position_eci_km, dtype=float).reshape(3)
         v = np.array(state.velocity_eci_km_s, dtype=float).reshape(3)
-        r_norm = float(np.linalg.norm(r))
+        r_norm = float(_norm3(r))
         if r_norm <= 0.0:
             return GuidanceCommand(throttle=0.0, attitude_quat_bn_cmd=None, torque_body_nm_cmd=np.zeros(3))
         r_hat = _unit(r)
-        v_mag = float(np.linalg.norm(v))
+        v_mag = float(_norm3(v))
         v_hat = _unit(v) if v_mag > 1e-9 else r_hat
-        h_hat = _unit(np.cross(r, v))
-        t_hat = _unit(np.cross(h_hat, r_hat))
-        if np.linalg.norm(t_hat) <= 0.0:
+        h_hat = _unit(_cross3(r, v))
+        t_hat = _unit(_cross3(h_hat, r_hat))
+        if _norm3(t_hat) <= 0.0:
             t_hat = self._horizontal_azimuth_dir(r_hat, sim_cfg.launch_azimuth_deg)
         t_guided = self._guided_tangential_dir(r_hat, v, t_hat)
 
@@ -319,21 +322,21 @@ class ClosedLoopInsertionGuidance(RocketGuidanceLaw):
         if self._phase == "circularize":
             v_circ_here = float(np.sqrt(EARTH_MU_KM3_S2 / max(r_norm, 1e-9)))
             dv_need = max(v_circ_here - vt, 0.0)
-            throttle = float(np.clip(dv_need / 0.15, 0.0, self.max_throttle))
+            throttle = float(_clip_scalar(dv_need / 0.15, 0.0, self.max_throttle))
             throttle = self._apply_speed_cap(throttle, v_mag, r_norm)
             throttle = self._apply_hyperbolic_guard(throttle, t_guided, state, vehicle_cfg, sim_cfg)
             return self._cmd_from_axis(t_guided, throttle=throttle, r_hat=r_hat)
 
         # Ascent phase: blend radial -> horizontal and damp radial overspeed.
         turn_span = max(float(self.turn_end_alt_km - self.turn_start_alt_km), 1e-6)
-        turn_alpha = float(np.clip((alt_km - float(self.turn_start_alt_km)) / turn_span, 0.0, 1.0))
+        turn_alpha = float(_clip_scalar((alt_km - float(self.turn_start_alt_km)) / turn_span, 0.0, 1.0))
         horiz_dir = _unit(
-            (1.0 - float(np.clip(self.plane_alignment_gain, 0.0, 1.0)))
+            (1.0 - float(_clip_scalar(self.plane_alignment_gain, 0.0, 1.0)))
             * self._horizontal_azimuth_dir(r_hat, sim_cfg.launch_azimuth_deg)
-            + float(np.clip(self.plane_alignment_gain, 0.0, 1.0)) * t_guided
+            + float(_clip_scalar(self.plane_alignment_gain, 0.0, 1.0)) * t_guided
         )
         cmd_dir = _unit((1.0 - turn_alpha) * r_hat + turn_alpha * horiz_dir)
-        if np.linalg.norm(t_guided) > 0.0:
+        if _norm3(t_guided) > 0.0:
             cmd_dir = _unit(self.tangential_gain * cmd_dir + max(-vr, 0.0) * self.radial_damp_gain * t_guided)
         throttle_ascent = self._apply_speed_cap(self.max_throttle, v_mag, r_norm)
         throttle_ascent = self._apply_hyperbolic_guard(throttle_ascent, cmd_dir, state, vehicle_cfg, sim_cfg)
@@ -348,7 +351,7 @@ class HoldAttitudeGuidance(RocketGuidanceLaw):
         self, state: RocketState, sim_cfg: RocketSimConfig, vehicle_cfg: RocketVehicleConfig
     ) -> GuidanceCommand:
         return GuidanceCommand(
-            throttle=float(np.clip(self.throttle, 0.0, 1.0)), attitude_quat_bn_cmd=None, torque_body_nm_cmd=np.zeros(3)
+            throttle=float(_clip_scalar(self.throttle, 0.0, 1.0)), attitude_quat_bn_cmd=None, torque_body_nm_cmd=np.zeros(3)
         )
 
 
@@ -365,8 +368,8 @@ class TVCSteeringGuidance(RocketGuidanceLaw):
         cmd = self.base_guidance.command(state, sim_cfg, vehicle_cfg)
         if cmd.attitude_quat_bn_cmd is None:
             return cmd
-        thrust_axis_body = _unit(np.array(vehicle_cfg.thrust_axis_body, dtype=float))
-        c_cmd_bn = quaternion_to_dcm_bn(np.array(cmd.attitude_quat_bn_cmd, dtype=float))
+        thrust_axis_body = _unit(np.asarray(vehicle_cfg.thrust_axis_body, dtype=float))
+        c_cmd_bn = quaternion_to_dcm_bn(np.asarray(cmd.attitude_quat_bn_cmd, dtype=float))
         thrust_axis_eci_cmd = c_cmd_bn.T @ thrust_axis_body
         c_bn = quaternion_to_dcm_bn(state.attitude_quat_bn)
         thrust_vector_body_cmd = c_bn @ thrust_axis_eci_cmd
@@ -406,14 +409,14 @@ class MaxQThrottleLimiterGuidance(RocketGuidanceLaw):
             state=state,
         )
         v_rel_body_m_s = c_bn @ v_rel_eci_m_s
-        speed = float(np.linalg.norm(v_rel_body_m_s))
+        speed = float(_norm3(v_rel_body_m_s))
         return 0.5 * rho * speed * speed
 
     def command(
         self, state: RocketState, sim_cfg: RocketSimConfig, vehicle_cfg: RocketVehicleConfig
     ) -> GuidanceCommand:
         cmd = self.base_guidance.command(state, sim_cfg, vehicle_cfg)
-        thr_cmd = float(np.clip(cmd.throttle, 0.0, 1.0))
+        thr_cmd = float(_clip_scalar(cmd.throttle, 0.0, 1.0))
         if self.max_q_pa <= 0.0 or thr_cmd <= 0.0:
             return cmd
 
@@ -421,8 +424,8 @@ class MaxQThrottleLimiterGuidance(RocketGuidanceLaw):
         if q_now <= self.max_q_pa:
             return cmd
 
-        scale = float(np.clip(self.max_q_pa / max(q_now, 1e-9), 0.0, 1.0))
-        thr_limited = float(np.clip(thr_cmd * scale, self.min_throttle, thr_cmd))
+        scale = float(_clip_scalar(self.max_q_pa / max(q_now, 1e-9), 0.0, 1.0))
+        thr_limited = float(_clip_scalar(thr_cmd * scale, self.min_throttle, thr_cmd))
         return GuidanceCommand(
             throttle=thr_limited,
             attitude_quat_bn_cmd=cmd.attitude_quat_bn_cmd,
@@ -447,7 +450,7 @@ class OrbitInsertionCutoffGuidance(RocketGuidanceLaw):
     def _should_cutoff(self, state: RocketState, sim_cfg: RocketSimConfig) -> tuple[bool, str]:
         r = np.array(state.position_eci_km, dtype=float).reshape(3)
         v = np.array(state.velocity_eci_km_s, dtype=float).reshape(3)
-        r_norm = float(np.linalg.norm(r))
+        r_norm = float(_norm3(r))
         if r_norm <= 0.0:
             return False, "invalid_radius"
         _, _, alt_geo_km = _geodetic_state_from_eci(
@@ -456,7 +459,7 @@ class OrbitInsertionCutoffGuidance(RocketGuidanceLaw):
             jd_utc_start=sim_cfg.atmosphere_env.get("jd_utc_start"),
         )
         alt_km = float(alt_geo_km if sim_cfg.use_wgs84_geodesy else r_norm - EARTH_RADIUS_KM)
-        v_mag = float(np.linalg.norm(v))
+        v_mag = float(_norm3(v))
         if alt_km < float(max(self.min_cutoff_alt_km, 0.0)):
             return False, "below_cutoff_altitude"
 
@@ -476,7 +479,7 @@ class OrbitInsertionCutoffGuidance(RocketGuidanceLaw):
 
         # Pre-escape protection should only shut down once perigee is also safe.
         v_esc = float(np.sqrt(2.0 * mu / r_norm))
-        margin = float(np.clip(self.near_escape_speed_margin_frac, 0.0, 0.5))
+        margin = float(_clip_scalar(self.near_escape_speed_margin_frac, 0.0, 0.5))
         if periapsis_ok and v_mag >= (1.0 - margin) * v_esc:
             return True, "near_escape_speed"
         if not periapsis_ok:
@@ -494,7 +497,7 @@ class OrbitInsertionCutoffGuidance(RocketGuidanceLaw):
         self, state: RocketState, sim_cfg: RocketSimConfig, vehicle_cfg: RocketVehicleConfig
     ) -> GuidanceCommand:
         cmd = self.base_guidance.command(state, sim_cfg, vehicle_cfg)
-        thr_cmd = float(np.clip(cmd.throttle, 0.0, 1.0))
+        thr_cmd = float(_clip_scalar(cmd.throttle, 0.0, 1.0))
         if thr_cmd <= 0.0:
             return cmd
         cut, _ = self._should_cutoff(state=state, sim_cfg=sim_cfg)

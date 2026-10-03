@@ -324,11 +324,13 @@ class TestOrbitSphericalHarmonics(unittest.TestCase):
                     integrator=integrator,
                     plugins=[spherical_harmonics_plugin],
                     acceleration_mode="off",
+                    numeric_backend="python",
                 )
                 accelerated = OrbitPropagator(
                     integrator=integrator,
                     plugins=[spherical_harmonics_plugin],
                     acceleration_mode="auto",
+                    numeric_backend="python",
                 )
                 expected = baseline.propagate(state, 1.0, 0.0, command, env, context)
 

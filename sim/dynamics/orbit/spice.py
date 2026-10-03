@@ -9,6 +9,14 @@ from sim.dynamics.orbit.epoch import julian_date_to_datetime
 
 _LOADED_KERNELS: set[str] = set()
 
+
+def _provider_call(call, *args):
+    try:
+        return call(*args)
+    except Exception as exc:
+        raise RuntimeError(f"SPICE provider request failed: {exc}") from exc
+
+
 _DEFAULT_TARGETS = {
     "sun": "SUN",
     "moon": "MOON",
@@ -36,7 +44,7 @@ def _load_kernels_if_needed(kernels: list[str], sp) -> None:
             continue
         if not Path(p).exists():
             raise RuntimeError(f"SPICE kernel file not found: {p}")
-        sp.furnsh(p)
+        _provider_call(sp.furnsh, p)
         _LOADED_KERNELS.add(p)
 
 
@@ -83,10 +91,10 @@ def spice_sun_moon_positions_eci_km(jd_utc: float, env: dict) -> tuple[np.ndarra
     moon_target = str(env.get("spice_moon_target", "MOON"))
 
     dt_utc = julian_date_to_datetime(float(jd_utc)).astimezone(timezone.utc)
-    et = float(sp.str2et(dt_utc.strftime("%Y-%m-%dT%H:%M:%S.%f")))
+    et = float(_provider_call(sp.str2et, dt_utc.strftime("%Y-%m-%dT%H:%M:%S.%f")))
 
-    sun_state, _ = sp.spkezr(sun_target, et, frame, abcorr, observer)
-    moon_state, _ = sp.spkezr(moon_target, et, frame, abcorr, observer)
+    sun_state, _ = _provider_call(sp.spkezr, sun_target, et, frame, abcorr, observer)
+    moon_state, _ = _provider_call(sp.spkezr, moon_target, et, frame, abcorr, observer)
     return _normalize_vec3(sun_state[:3]), _normalize_vec3(moon_state[:3])
 
 
@@ -123,8 +131,8 @@ def spice_body_position_eci_km(body_name: str, jd_utc: float, env: dict) -> np.n
         raise RuntimeError(f"Unsupported SPICE body name '{body_name}'.")
 
     dt_utc = julian_date_to_datetime(float(jd_utc)).astimezone(timezone.utc)
-    et = float(sp.str2et(dt_utc.strftime("%Y-%m-%dT%H:%M:%S.%f")))
-    state, _ = sp.spkezr(target, et, frame, abcorr, observer)
+    et = float(_provider_call(sp.str2et, dt_utc.strftime("%Y-%m-%dT%H:%M:%S.%f")))
+    state, _ = _provider_call(sp.spkezr, target, et, frame, abcorr, observer)
     return _normalize_vec3(state[:3])
 
 

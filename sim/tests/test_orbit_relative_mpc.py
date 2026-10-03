@@ -5,16 +5,57 @@ import numpy as np
 from sim.control.orbit import RelativeOrbitMPCController
 from sim.core.models import StateBelief
 from sim.dynamics.orbit.two_body import propagate_two_body_rk4
-from sim.utils.frames import eci_relative_to_ric_rect, ric_rect_state_to_eci, ric_rect_to_curv
+from sim.utils.frames import (
+    eci_relative_to_ric_rect,
+    ric_angular_rate_eci_from_rv,
+    ric_dcm_ir_from_rv,
+    ric_rect_state_to_eci,
+    ric_rect_to_curv,
+)
 
 
 class TestRelativeOrbitMPCController(unittest.TestCase):
+    def test_ric_frame_rejects_zero_angular_momentum(self):
+        with self.assertRaisesRegex(ValueError, "zero angular momentum"):
+            ric_dcm_ir_from_rv(np.array([7000.0, 0.0, 0.0]), np.array([1.0, 0.0, 0.0]))
+
     def test_ric_rect_inertial_round_trip_preserves_velocity(self):
         x_target = np.array([7000.0, 0.0, 0.0, 0.0, 7.546049108166282, 0.0], dtype=float)
         x_rel_rect = np.array([1.2, -0.8, 0.2, -0.002, 0.0015, 0.0007], dtype=float)
         x_chaser = ric_rect_state_to_eci(x_rel_rect, x_target[:3], x_target[3:])
         x_rel_back = eci_relative_to_ric_rect(x_chaser, x_target)
         self.assertTrue(np.allclose(x_rel_back, x_rel_rect, atol=1e-12))
+
+    def test_acceleration_aware_ric_rate_includes_cross_track_plane_precession(self):
+        r = np.array([7000.0, 0.0, 0.0], dtype=float)
+        v = np.array([0.0, 7.5, 0.0], dtype=float)
+        acceleration = np.array([0.0, 0.0, 1.0e-6], dtype=float)
+        expected = np.array([1.0e-6 / 7.5, 0.0, 7.5 / 7000.0], dtype=float)
+
+        omega = ric_angular_rate_eci_from_rv(r, v, chief_accel_eci_km_s2=acceleration)
+
+        np.testing.assert_allclose(omega, expected, rtol=0.0, atol=1.0e-15)
+
+    def test_acceleration_aware_ric_state_transforms_round_trip(self):
+        chief = np.array([7000.0, 0.0, 0.0, 0.0, 7.5, 0.0], dtype=float)
+        acceleration = np.array([0.0, 0.0, 1.0e-6], dtype=float)
+        relative = np.array([0.0, 0.0, 1.0, 0.0, 0.0, 0.0], dtype=float)
+
+        deputy = ric_rect_state_to_eci(
+            relative,
+            chief[:3],
+            chief[3:],
+            chief_accel_eci_km_s2=acceleration,
+        )
+        recovered = eci_relative_to_ric_rect(
+            deputy,
+            chief,
+            chief_accel_eci_km_s2=acceleration,
+        )
+
+        expected_velocity_term = -(1.0e-6 / 7.5)
+        np.testing.assert_allclose(deputy[4], chief[4] + expected_velocity_term, atol=1.0e-15)
+        np.testing.assert_allclose(recovered, relative, rtol=0.0, atol=1.0e-12)
 
     def test_internal_relative_state_matches_shared_ric_transform(self):
         x_target = np.array([7000.0, 10.0, -5.0, -0.01, 7.546049108166282, 0.02], dtype=float)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import importlib
 import json
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -113,6 +115,45 @@ def _rich_config(
         chunk_size=chunk_size,
         max_cell_time_comparisons=max_comparisons,
     )
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        HardFOVPattern.axisymmetric_cone(np.deg2rad(20.0)),
+        HardFOVPattern.rectangular(np.deg2rad(20.0), np.deg2rad(10.0)),
+        HardFOVPattern.pushbroom(np.deg2rad(10.0), np.deg2rad(40.0)),
+    ],
+)
+@pytest.mark.parametrize("sun_direction", [1.0, -1.0])
+def test_rich_coverage_native_cell_gates_preserve_full_product_hash(
+    pattern: HardFOVPattern, sun_direction: float,
+) -> None:
+    try:
+        native = importlib.import_module("oel_rust_orbit")
+    except ImportError:
+        pytest.skip("optional Rust orbit wheel unavailable")
+    if not hasattr(native, "coverage_rich_cell_reasons_bytes"):
+        pytest.skip("Rust orbit wheel predates rich cell gates")
+    times = np.arange(0.0, 240.0, 30.0)
+    context, positions, attitudes = _fixed_ecef_evidence(times, boresight_ecef=np.array([-1.0, 0.0, 0.0]))
+    sun = np.tile(np.array([sun_direction * 1.5e8, 0.0, 0.0]), (times.size, 1))
+    config = _rich_config(
+        pattern=pattern,
+        constraints=SurfaceServiceConstraints(
+            maximum_target_off_nadir_rad=np.deg2rad(50.0),
+            maximum_incidence_rad=np.deg2rad(70.0),
+            minimum_sun_elevation_rad=0.0,
+        ),
+        sun_provider_id="fixture.sun",
+    )
+    inputs = dict(times_s=times, positions_eci_km=positions, attitudes_quat_bn=attitudes,
+                  frame_context=context, sun_positions_eci_km=sun)
+    reference = evaluate_rich_coverage(config, **inputs)
+    native_result = evaluate_rich_coverage(replace(config, numeric_backend="rust"), **inputs)
+    np.testing.assert_array_equal(native_result.primary_reason_count, reference.primary_reason_count)
+    np.testing.assert_array_equal(native_result.covered_cell_count, reference.covered_cell_count)
+    assert native_result.interval_semantic_sha256 == reference.interval_semantic_sha256
 
 
 def _phase1_config(*, chunk_size: int = 1024) -> GlobalCoverageConfig:

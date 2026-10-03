@@ -6,6 +6,7 @@ import numpy as np
 
 from sim.core.interfaces import Controller
 from sim.core.models import Command, StateBelief
+from sim.numeric_backend import normalize_numeric_backend
 
 
 @dataclass
@@ -48,6 +49,9 @@ class ReactionWheelPDController(Controller):
     kp: np.ndarray = field(default_factory=lambda: np.array([0.25, 0.25, 0.25]))
     kd: np.ndarray = field(default_factory=lambda: np.array([4.0, 4.0, 4.0]))
     max_body_torque_nm: float | None = None
+    # Keep the opt-in selector keyword-only so inherited PID constructors
+    # retain their pre-backend positional argument order.
+    numeric_backend: str = field(default="rust", kw_only=True)
     _allocation: np.ndarray = field(init=False, repr=False)
     _wheel_axes_3xn: np.ndarray = field(init=False, repr=False)
     _wheel_limits_nm: np.ndarray = field(init=False, repr=False)
@@ -55,6 +59,8 @@ class ReactionWheelPDController(Controller):
     _kd: np.ndarray = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="reaction-wheel controller numeric_backend must be python or rust")
+        self.numeric_backend = backend
         axes = np.array(self.wheel_axes_body, dtype=float)
         if axes.ndim != 2:
             raise ValueError("wheel_axes_body must be a 2D array with shape (3,N) or (N,3).")
@@ -102,6 +108,25 @@ class ReactionWheelPDController(Controller):
         self._kp = kp
         self._kd = kd
 
+    def _allocate_wheel_torque(self, torque_body_cmd: np.ndarray, *, clip: bool = False) -> np.ndarray:
+        """Map body torque through the configured reference allocation matrix."""
+        target = -np.array(torque_body_cmd, dtype=float).reshape(3)
+        if self.numeric_backend == "rust":
+            from sim.rust_control_backend import mat_vec_clip
+
+            if clip:
+                return mat_vec_clip(
+                    self._allocation,
+                    target,
+                    -self._wheel_limits_nm,
+                    self._wheel_limits_nm,
+                )
+            from sim.rust_control_backend import mat_vec
+
+            return mat_vec(self._allocation, target)
+        wheel_torque = self._allocation @ target
+        return np.clip(wheel_torque, -self._wheel_limits_nm, self._wheel_limits_nm) if clip else wheel_torque
+
     def set_target(
         self, desired_attitude_quat_bn: np.ndarray, desired_rate_body_rad_s: np.ndarray | None = None
     ) -> None:
@@ -129,7 +154,7 @@ class ReactionWheelPDController(Controller):
         w_err = w - w_des
         torque_body_cmd = -(self._kp * q_err[1:4]) - (self._kd * w_err)
 
-        wheel_torque_cmd = -(self._allocation @ torque_body_cmd)
+        wheel_torque_cmd = self._allocate_wheel_torque(torque_body_cmd, clip=True)
         wheel_torque_cmd = np.clip(wheel_torque_cmd, -self._wheel_limits_nm, self._wheel_limits_nm)
         torque = -(self._wheel_axes_3xn @ wheel_torque_cmd)
 
@@ -137,19 +162,22 @@ class ReactionWheelPDController(Controller):
             n = float(np.linalg.norm(torque))
             if n > self.max_body_torque_nm:
                 torque *= self.max_body_torque_nm / n
-                wheel_torque_cmd = -(self._allocation @ torque)
+                wheel_torque_cmd = self._allocate_wheel_torque(torque, clip=True)
                 wheel_torque_cmd = np.clip(wheel_torque_cmd, -self._wheel_limits_nm, self._wheel_limits_nm)
                 torque = -(self._wheel_axes_3xn @ wheel_torque_cmd)
 
         angle_deg = float(np.degrees(2.0 * np.arccos(np.clip(float(q_err[0]), -1.0, 1.0))))
+        mode_flags = {
+            "mode": "rw_pd",
+            "attitude_error_deg": angle_deg,
+            "wheel_torque_cmd_nm": wheel_torque_cmd.tolist(),
+        }
+        if self.numeric_backend == "rust":
+            mode_flags["control_numeric_backend"] = self.numeric_backend
         return Command(
             thrust_eci_km_s2=np.zeros(3),
             torque_body_nm=torque,
-            mode_flags={
-                "mode": "rw_pd",
-                "attitude_error_deg": angle_deg,
-                "wheel_torque_cmd_nm": wheel_torque_cmd.tolist(),
-            },
+            mode_flags=mode_flags,
         )
 
 
@@ -219,14 +247,14 @@ class ReactionWheelPIDController(ReactionWheelPDController):
                 candidate_i = np.clip(candidate_i, -self._integral_limit, self._integral_limit)
 
         torque_body_cmd = -(self._kp * q_err[1:4]) - (self._kd * w_err) - (self._ki * candidate_i)
-        wheel_torque_unsat = -(self._allocation @ torque_body_cmd)
+        wheel_torque_unsat = self._allocate_wheel_torque(torque_body_cmd)
         saturated = bool(np.any(np.abs(wheel_torque_unsat) > self._wheel_limits_nm + 1e-12))
 
         if saturated and dt > 0.0:
             # Conditional integration anti-windup: skip I-term update while saturated.
             candidate_i = self._integral_error.copy()
             torque_body_cmd = -(self._kp * q_err[1:4]) - (self._kd * w_err) - (self._ki * candidate_i)
-            wheel_torque_unsat = -(self._allocation @ torque_body_cmd)
+            wheel_torque_unsat = self._allocate_wheel_torque(torque_body_cmd)
 
         self._integral_error = candidate_i
         self._last_t_s = float(t_s)
@@ -238,20 +266,23 @@ class ReactionWheelPIDController(ReactionWheelPDController):
             n = float(np.linalg.norm(torque))
             if n > self.max_body_torque_nm:
                 torque *= self.max_body_torque_nm / n
-                wheel_torque_cmd = -(self._allocation @ torque)
+                wheel_torque_cmd = self._allocate_wheel_torque(torque, clip=True)
                 wheel_torque_cmd = np.clip(wheel_torque_cmd, -self._wheel_limits_nm, self._wheel_limits_nm)
                 torque = -(self._wheel_axes_3xn @ wheel_torque_cmd)
 
         angle_deg = float(np.degrees(2.0 * np.arccos(np.clip(float(q_err[0]), -1.0, 1.0))))
+        mode_flags = {
+            "mode": "rw_pid",
+            "attitude_error_deg": angle_deg,
+            "wheel_torque_cmd_nm": wheel_torque_cmd.tolist(),
+            "integral_error_body": self._integral_error.tolist(),
+        }
+        if self.numeric_backend == "rust":
+            mode_flags["control_numeric_backend"] = self.numeric_backend
         return Command(
             thrust_eci_km_s2=np.zeros(3),
             torque_body_nm=torque,
-            mode_flags={
-                "mode": "rw_pid",
-                "attitude_error_deg": angle_deg,
-                "wheel_torque_cmd_nm": wheel_torque_cmd.tolist(),
-                "integral_error_body": self._integral_error.tolist(),
-            },
+            mode_flags=mode_flags,
         )
 
 
@@ -272,12 +303,15 @@ class SmallAngleLQRController(Controller):
     capture_angle_deg: float = 25.0
     capture_kp: float = 0.35
     capture_kd: float = 3.5
+    numeric_backend: str = "rust"
     _k_gain: np.ndarray = field(init=False, repr=False)
     _allocation: np.ndarray = field(init=False, repr=False)
     _wheel_axes_3xn: np.ndarray = field(init=False, repr=False)
     _wheel_limits_nm: np.ndarray = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="small-angle LQR numeric_backend must be python or rust")
+        self.numeric_backend = backend
         inertia = np.array(self.inertia_kg_m2, dtype=float)
         if inertia.shape != (3, 3):
             raise ValueError("inertia_kg_m2 must be 3x3.")
@@ -362,6 +396,25 @@ class SmallAngleLQRController(Controller):
         self._wheel_axes_3xn = G
         self._wheel_limits_nm = lim
 
+    def _allocate_wheel_torque(self, torque_body_cmd: np.ndarray, *, clip: bool = False) -> np.ndarray:
+        """Map body torque through the configured reference allocation matrix."""
+        target = -np.array(torque_body_cmd, dtype=float).reshape(3)
+        if self.numeric_backend == "rust":
+            from sim.rust_control_backend import mat_vec_clip
+
+            if clip:
+                return mat_vec_clip(
+                    self._allocation,
+                    target,
+                    -self._wheel_limits_nm,
+                    self._wheel_limits_nm,
+                )
+            from sim.rust_control_backend import mat_vec
+
+            return mat_vec(self._allocation, target)
+        wheel_torque = self._allocation @ target
+        return np.clip(wheel_torque, -self._wheel_limits_nm, self._wheel_limits_nm) if clip else wheel_torque
+
     def act(self, belief: StateBelief, t_s: float, budget_ms: float) -> Command:
         if belief.state.size < 13:
             return Command.zero()
@@ -380,7 +433,7 @@ class SmallAngleLQRController(Controller):
         if self.capture_enabled and angle_deg > self.capture_angle_deg:
             # Large-angle capture mode: nonlinear quaternion PD in body torque space.
             torque_body_cmd = -self.capture_kp * q_err[1:4] - self.capture_kd * w_err
-            wheel_torque_cmd = -(self._allocation @ torque_body_cmd)
+            wheel_torque_cmd = self._allocate_wheel_torque(torque_body_cmd, clip=True)
             mode = "lqr_capture"
         else:
             wheel_torque_cmd = self._k_gain @ x
@@ -393,18 +446,21 @@ class SmallAngleLQRController(Controller):
             n = float(np.linalg.norm(torque))
             if n > self.max_body_torque_nm:
                 torque *= self.max_body_torque_nm / n
-                wheel_torque_cmd = -(self._allocation @ torque)
+                wheel_torque_cmd = self._allocate_wheel_torque(torque, clip=True)
                 wheel_torque_cmd = np.clip(wheel_torque_cmd, -self._wheel_limits_nm, self._wheel_limits_nm)
                 torque = -(self._wheel_axes_3xn @ wheel_torque_cmd)
 
+        mode_flags = {
+            "mode": mode,
+            "attitude_error_deg": float(angle_deg),
+            "wheel_torque_cmd_nm": wheel_torque_cmd.tolist(),
+        }
+        if self.numeric_backend == "rust":
+            mode_flags["control_numeric_backend"] = self.numeric_backend
         return Command(
             thrust_eci_km_s2=np.zeros(3),
             torque_body_nm=torque,
-            mode_flags={
-                "mode": mode,
-                "attitude_error_deg": float(angle_deg),
-                "wheel_torque_cmd_nm": wheel_torque_cmd.tolist(),
-            },
+            mode_flags=mode_flags,
         )
 
     def set_target(

@@ -511,6 +511,24 @@ def test_plan_rejects_cycles_unknown_fields_and_uncovered_criteria() -> None:
         StudyPlan.from_mapping(uncovered, _request())
 
 
+def test_schedule_to_power_dependency_requires_matching_source_digest(tmp_path: Path) -> None:
+    capabilities = ("mission_scheduling", "spacecraft_power")
+    request = _request(capabilities)
+    plan = _plan(capabilities)
+    power_step = next(step for step in plan["steps"] if step["capability"] == "spacecraft_power")
+    power_step["depends_on"] = ["mission-scheduling"]
+    sources = _write_sources(tmp_path / "sources", capabilities)
+
+    with pytest.raises(StudyLifecycleError, match="does not bind the retained schedule"):
+        build_study_bundle(request, plan, _claims(capabilities), sources, tmp_path / "unbound")
+
+    power = json.loads(sources["spacecraft-power"].read_text())
+    power["source_product_sha256s"] = ["a" * 64]
+    sources["spacecraft-power"].write_text(json.dumps(power) + "\n")
+    bundle = build_study_bundle(request, plan, _claims(capabilities), sources, tmp_path / "bound")
+    assert inspect_study_bundle(bundle.output_dir)["status"] == "verified"
+
+
 def test_comparison_reports_equivalent_and_changed_evidence(tmp_path: Path) -> None:
     first = _build(tmp_path / "first")
     second = _build(tmp_path / "second")

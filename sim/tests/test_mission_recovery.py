@@ -379,6 +379,9 @@ def test_orbit_transfer_planner_rejects_unsupported_candidate_states_and_continu
                         "max_recovery_delta_v_m_s": 15.0,
                         "candidate_count": 12,
                         "simulate_candidates": True,
+                        # Exercise unsupported long-way transfers without
+                        # depending on incorrect short-way Lambert roots.
+                        "orbit_transfer": {"long_way": True},
                     },
                     "propulsion": {
                         "spacecraft_mass_kg": 100.0,

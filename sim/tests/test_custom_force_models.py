@@ -37,6 +37,20 @@ def constant_force(state_eci_km_km_s: np.ndarray, epoch_jd_utc: float) -> np.nda
     return np.array([0.001, 0.0, 0.0])
 
 
+CONTEXT_SAMPLES: list[tuple[str, float, float]] = []
+
+
+def context_force(state_eci_km_km_s: np.ndarray, epoch_jd_utc: float, context) -> np.ndarray:
+    assert context.object_id == "sat"
+    assert context.snapshot_basis == "start_of_step"
+    partner = context.other_objects["other"]
+    assert partner.state_eci_km_km_s.shape == (6,)
+    assert not partner.state_eci_km_km_s.flags.writeable
+    assert partner.mass_kg == 100.0
+    CONTEXT_SAMPLES.append((context.object_id, epoch_jd_utc, partner.time_s))
+    return np.zeros(3)
+
+
 def _scenario(*, force_models: list | None = None, integrator: str = "rk4") -> dict:
     satellite = {
         "kind": "satellite",
@@ -106,6 +120,35 @@ def test_function_pointer_changes_only_configured_object_trajectory(tmp_path) ->
 
     assert actual.truth["sat"][-1, 3] - expected.truth["sat"][-1, 3] == pytest.approx(0.002, abs=1e-8)
     np.testing.assert_array_equal(actual.truth["other"], expected.truth["other"])
+
+
+@pytest.mark.parametrize("integrator", ["rk4", "rkf78", "dopri5"])
+def test_rust_integrator_preserves_custom_force_scenario(tmp_path, integrator: str) -> None:
+    pytest.importorskip("oel_rust_orbit")
+    results = []
+    for backend in ("python", "rust"):
+        raw = _scenario(force_models=[_class_pointer()], integrator=integrator)
+        raw["simulator"]["dynamics"]["orbit"]["numeric_backend"] = backend
+        raw["outputs"] = {"mode": "save", "output_dir": str(tmp_path / backend)}
+        results.append(SimulationSession.from_config(SimulationConfig.from_dict(raw)).run())
+    np.testing.assert_allclose(results[1].truth["sat"], results[0].truth["sat"], rtol=0, atol=1e-9)
+
+
+def test_optional_context_exposes_time_labelled_other_object_truth(tmp_path) -> None:
+    CONTEXT_SAMPLES.clear()
+    raw = _scenario(force_models=[{
+        "module": "sim.tests.test_custom_force_models", "function": "context_force"
+    }])
+    raw["objects"]["other"] = {
+        "kind": "satellite", "runtime_profile": "trajectory_only",
+        "specs": {"mass_kg": 100.0},
+        "initial_state": {"default_circular_earth": True},
+    }
+    raw["outputs"] = {"mode": "save", "output_dir": str(tmp_path / "context")}
+    SimulationSession.from_config(SimulationConfig.from_dict(raw)).run()
+    assert CONTEXT_SAMPLES
+    assert any(sample[2] == 0.0 for sample in CONTEXT_SAMPLES)
+    assert any(sample[2] == 1.0 for sample in CONTEXT_SAMPLES)
 
 
 def test_safe_validation_checks_shape_without_import_and_sealed_mode_blocks_module() -> None:

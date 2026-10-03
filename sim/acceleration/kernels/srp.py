@@ -10,6 +10,45 @@ from sim.acceleration.optional import njit_or_identity
 
 
 @njit_or_identity(cache=True, fastmath=False)
+def _finite_disc_illumination(alpha: float, beta: float, gamma: float) -> float:
+    """Return solar-disc illumination from the apparent-disc overlap area."""
+
+    if beta <= 0.0:
+        return 1.0
+    if gamma >= alpha + beta:
+        return 1.0
+    if alpha > beta and gamma <= alpha - beta:
+        return 0.0
+    if beta > alpha and gamma <= beta - alpha:
+        return max(0.0, 1.0 - (alpha * alpha) / (beta * beta))
+    if gamma <= 0.0:
+        return 0.0 if alpha >= beta else max(0.0, 1.0 - (alpha * alpha) / (beta * beta))
+
+    denominator_earth = 2.0 * gamma * alpha
+    denominator_sun = 2.0 * gamma * beta
+    earth_argument = (gamma * gamma + alpha * alpha - beta * beta) / denominator_earth
+    sun_argument = (gamma * gamma + beta * beta - alpha * alpha) / denominator_sun
+    earth_argument = max(-1.0, min(1.0, earth_argument))
+    sun_argument = max(-1.0, min(1.0, sun_argument))
+    earth_angle = math.acos(earth_argument)
+    sun_angle = math.acos(sun_argument)
+    radicand = (
+        (-gamma + alpha + beta)
+        * (gamma + alpha - beta)
+        * (gamma - alpha + beta)
+        * (gamma + alpha + beta)
+    )
+    radicand = max(0.0, radicand)
+    overlap = (
+        alpha * alpha * earth_angle
+        + beta * beta * sun_angle
+        - 0.5 * math.sqrt(radicand)
+    )
+    illumination = 1.0 - overlap / (math.pi * beta * beta)
+    return max(0.0, min(1.0, illumination))
+
+
+@njit_or_identity(cache=True, fastmath=False)
 def srp_acceleration_kernel(
     r_sc_eci_km: np.ndarray,
     sun_pos_eci_km: np.ndarray,
@@ -89,28 +128,7 @@ def srp_acceleration_kernel(
                     elif beta > alpha and gamma <= beta - alpha:
                         shadow = max(0.0, 1.0 - (alpha * alpha) / (beta * beta))
                     else:
-                        lo = abs(alpha - beta)
-                        hi = alpha + beta
-                        if hi <= lo:
-                            shadow = 1.0
-                        else:
-                            fraction = (gamma - lo) / (hi - lo)
-                            fraction = max(0.0, min(1.0, fraction))
-                            if beta > alpha:
-                                min_illumination = max(
-                                    0.0,
-                                    1.0 - (alpha * alpha) / (beta * beta),
-                                )
-                                shadow = max(
-                                    0.0,
-                                    min(
-                                        1.0,
-                                        min_illumination
-                                        + (1.0 - min_illumination) * fraction,
-                                    ),
-                                )
-                            else:
-                                shadow = fraction
+                        shadow = _finite_disc_illumination(alpha, beta, gamma)
 
     if mass_kg <= 0.0 or area_m2 <= 0.0 or shadow <= 0.0:
         return np.zeros(3, dtype=np.float64)

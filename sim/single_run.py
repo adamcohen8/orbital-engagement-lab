@@ -35,6 +35,7 @@ from sim.dynamics.reentry import (
     reentry_config_from_dynamics,
     reentry_metrics_for_state,
 )
+from sim.execution.collisions import SphericalCollisionStepper
 from sim.execution.object_step_coordinator import ObjectStepCoordinator
 from sim.execution.object_workers import (
     ObjectKnowledgeSyncResult,
@@ -46,6 +47,8 @@ from sim.execution.object_workers import (
 )
 from sim.execution.runtime_profile import _RuntimeProfiler
 from sim.execution.single_run_history import SingleRunHistoryStore
+from sim.execution.system_forces import SystemForceStepper
+from sim.numeric_backend import normalize_numeric_backend
 from sim.reporting.run_payload_assembly import SingleRunPayloadAssembler, _SingleRunPayloadParts
 from sim.resource_limits import (
     HistoryMemoryEstimate,
@@ -306,6 +309,10 @@ class _SingleRunEngine:
                     else float(general.get("max_tle_age_days_warning"))
                 ),
                 acceleration_mode=acceleration_settings_from_config(cfg).requested_mode,
+                numeric_backend=normalize_numeric_backend(
+                    general.get("numeric_backend", "rust"),
+                    field_name=f"objects.{aid}.general.numeric_backend",
+                ),
             )
             if isinstance(initial_state.get("ogp_mean_elements"), dict):
                 provider = SGP4EphemerisProvider.from_mean_elements(
@@ -516,6 +523,7 @@ class _SingleRunEngine:
         self.rocket_insertion_hold_s = 0.0
         self.total_dv_m_s_by_object = {aid: 0.0 for aid in self.agents.keys()}
         self.impulsive_maneuvers: list[dict[str, Any]] = []
+        self.collision_events: list[dict[str, Any]] = []
         self.burn_samples_by_object = {aid: 0 for aid in self.agents.keys()}
         self.max_accel_km_s2_by_object = {aid: 0.0 for aid in self.agents.keys()}
         self.current_index = 0
@@ -592,6 +600,29 @@ class _SingleRunEngine:
             self._advance_ground_segment(0)
         self._emit_step_callback(0)
         self.object_step_executor = self._build_object_step_executor()
+        self.system_force_stepper = (
+            SystemForceStepper(
+                pointers=list(cfg.simulator.system_force_models),
+                initial_jd_utc=float(cfg.simulator.initial_jd_utc),
+                substep_s=self.sim_substep_s,
+                numeric_backend=normalize_numeric_backend(
+                    dict(cfg.simulator.dynamics.get("orbit", {}) or {}).get("numeric_backend", "rust"),
+                    field_name="simulator.dynamics.orbit.numeric_backend",
+                ),
+            )
+            if cfg.simulator.system_force_models else None
+        )
+        self.collision_stepper = (
+            SphericalCollisionStepper(
+                self,
+                dict(cfg.simulator.collisions["radii_m"]),
+                numeric_backend=normalize_numeric_backend(
+                    cfg.simulator.collisions.get("numeric_backend", "rust"),
+                    field_name="simulator.collisions.numeric_backend",
+                ),
+            )
+            if cfg.simulator.collisions.get("enabled", False) else None
+        )
 
     def _build_object_step_executor(self) -> ObjectStepExecutor:
         return ObjectStepCoordinator(self, cpu_count=os.cpu_count).build_executor()
@@ -955,7 +986,10 @@ class _SingleRunEngine:
         else:
             provider = self.general_propagation.get(aid)
             if provider is not None:
-                agent.truth = provider.canonical_state_at(item.t_next)
+                native_truth = self.satellite_stepper.passive_history.step(
+                    aid=aid, agent=agent, initial=item.initial_truth, t_s=item.t_s, t_next=item.t_next,
+                )
+                agent.truth = native_truth if native_truth is not None else provider.canonical_state_at(item.t_next)
                 if agent.belief is not None and agent.belief.state.size >= 6:
                     agent.belief.state[:6] = np.hstack((agent.truth.position_eci_km, agent.truth.velocity_eci_km_s))
                     agent.belief.last_update_t_s = item.t_next
@@ -1245,16 +1279,21 @@ class _SingleRunEngine:
         return dict(row)
 
     def step(self, dt_s: float | None = None) -> dict[str, Any]:
+        return self._advance_step(dt_s=dt_s, return_snapshot=True)
+
+    def _advance_step(
+        self, *, dt_s: float | None = None, return_snapshot: bool = True,
+    ) -> dict[str, Any]:
         activate_attitude_guardrail_stats(self.attitude_guardrail_stats)
         if not bool(getattr(self, "_acceleration_context_active", False)):
             with acceleration_context_from_config(self.cfg):
                 self._acceleration_context_active = True
                 try:
-                    return self.step(dt_s=dt_s)
+                    return self._advance_step(dt_s=dt_s, return_snapshot=return_snapshot)
                 finally:
                     self._acceleration_context_active = False
         if self.done:
-            return self.snapshot(include_flight_software=False)
+            return self.snapshot(include_flight_software=False) if return_snapshot else {}
 
         step_wall_t0 = perf_counter()
         compact_t0 = perf_counter()
@@ -1271,10 +1310,28 @@ class _SingleRunEngine:
         step_dt = min(step_dt, remaining_s)
         if step_dt <= 0.0:
             return self.snapshot(include_flight_software=False)
+        t_next = float(t + step_dt)
+        boundary_eps = max(1.0e-9, 1.0e-9 * max(abs(t), abs(t_next), 1.0))
+        if self.rocket is not None:
+            deployment_times = [
+                float(agent.deploy_time_s)
+                for agent in self.agents.values()
+                if (
+                    agent.kind == "satellite"
+                    and not agent.active
+                    and agent.deploy_source == "rocket_deployment"
+                    and agent.deploy_time_s is not None
+                    and t + boundary_eps < float(agent.deploy_time_s) < t_next - boundary_eps
+                )
+            ]
+            if deployment_times:
+                # Make a time-gated deployment an actual sample boundary. The
+                # payload is copied from the rocket at deployment and is only
+                # propagated during the interval that follows it.
+                return self.step(dt_s=min(deployment_times) - t)
         capacity_t0 = perf_counter()
         self._ensure_sample_capacity(k + 1)
         self.runtime_profiler.record_stage("history_capacity", perf_counter() - capacity_t0)
-        t_next = float(t + step_dt)
         self.t_s[k + 1] = t_next
         self._time_dependent_env_cache = {}
         self._forecast_truth_cache = {}
@@ -1282,8 +1339,13 @@ class _SingleRunEngine:
         if self.rocket is not None:
             for agent in self.agents.values():
                 if agent.kind == "satellite" and not agent.active and agent.deploy_source == "rocket_deployment":
-                    if agent.deploy_time_s is not None and t_next >= float(agent.deploy_time_s):
-                        _deploy_from_rocket(agent, self.rocket, t_next)
+                    if agent.deploy_time_s is not None and float(agent.deploy_time_s) <= t + boundary_eps:
+                        _deploy_from_rocket(agent, self.rocket, t)
+                        if agent.active and agent.truth is not None:
+                            _write_state_truth(self.truth_hist[agent.object_id][k, :], agent.truth)
+                            if agent.belief is not None:
+                                self._ensure_belief_hist_width(agent.object_id, agent.belief.state.size)
+                                self.belief_hist[agent.object_id][k, : agent.belief.state.size] = agent.belief.state
 
         snapshot_t0 = perf_counter()
         world_truth_start = {
@@ -1327,7 +1389,13 @@ class _SingleRunEngine:
             sample_index=k,
         )
         try:
-            object_results = self.object_step_executor.step_objects(object_inputs)
+            object_results = (
+                self.collision_stepper.step_objects(object_inputs)
+                if self.collision_stepper is not None
+                else self.system_force_stepper.step_objects(object_inputs)
+                if self.system_force_stepper is not None
+                else self.object_step_executor.step_objects(object_inputs)
+            )
         except ObjectStepBackendUnavailable as exc:
             policy = str(dict(self.object_execution_plan or {}).get("policy", "configured"))
             if policy != "auto":
@@ -1352,6 +1420,34 @@ class _SingleRunEngine:
             world_truth_live[result.object_id] = (
                 agent.truth if agent.kind == "satellite" else _rocket_state_to_truth(agent.rocket_state)
             )
+        if self.collision_stepper is not None:
+            self.collision_events.extend(self.collision_stepper.last_events)
+
+        if self.rocket is not None:
+            for aid, agent in self.agents.items():
+                if (
+                    agent.kind == "satellite"
+                    and not agent.active
+                    and agent.deploy_source == "rocket_deployment"
+                    and agent.deploy_time_s is not None
+                    and float(agent.deploy_time_s) <= t_next + boundary_eps
+                ):
+                    _deploy_from_rocket(agent, self.rocket, t_next)
+                    if agent.active and agent.truth is not None:
+                        world_truth_live[aid] = agent.truth
+
+        if self.rocket is not None:
+            for aid, agent in self.agents.items():
+                if (
+                    agent.kind == "satellite"
+                    and not agent.active
+                    and agent.deploy_source == "rocket_deployment"
+                    and agent.deploy_time_s is not None
+                    and float(agent.deploy_time_s) <= t_next + boundary_eps
+                ):
+                    _deploy_from_rocket(agent, self.rocket, t_next)
+                    if agent.active and agent.truth is not None:
+                        world_truth_live[aid] = agent.truth
 
         termination_update_t0 = perf_counter()
         self.termination_monitor.update_rocket_insertion(t_s=t_next, dt_s=step_dt)
@@ -1416,14 +1512,14 @@ class _SingleRunEngine:
         if self.termination_monitor.check_reentry(t_s=t_next):
             self.runtime_profiler.record_stage("termination_check", perf_counter() - termination_check_t0)
             self.runtime_profiler.record_stage("step_wall", perf_counter() - step_wall_t0)
-            return self.snapshot(include_flight_software=False)
+            return self.snapshot(include_flight_software=False) if return_snapshot else {}
         if self.termination_monitor.check_earth_impact(t_s=t_next):
             self.runtime_profiler.record_stage("termination_check", perf_counter() - termination_check_t0)
             self.runtime_profiler.record_stage("step_wall", perf_counter() - step_wall_t0)
-            return self.snapshot(include_flight_software=False)
+            return self.snapshot(include_flight_software=False) if return_snapshot else {}
         self.runtime_profiler.record_stage("termination_check", perf_counter() - termination_check_t0)
         self.runtime_profiler.record_stage("step_wall", perf_counter() - step_wall_t0)
-        return self.snapshot(include_flight_software=False)
+        return self.snapshot(include_flight_software=False) if return_snapshot else {}
 
     def run(self) -> dict[str, Any]:
         self._ensure_full_history_payload_allowed()
@@ -1436,7 +1532,13 @@ class _SingleRunEngine:
                     self._acceleration_context_active = False
         try:
             while not self.done:
-                self.step()
+                if getattr(self.step, "__func__", None) is _SingleRunEngine.step:
+                    # Full runs retain the same sample/lifecycle boundaries,
+                    # but no caller consumes their per-step copied snapshot.
+                    self._advance_step(return_snapshot=False)
+                else:
+                    # Preserve downstream step overrides and patch seams.
+                    self.step()
             self._shutdown_flight_software()
             return self.build_payload()
         finally:

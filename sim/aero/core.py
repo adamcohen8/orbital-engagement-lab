@@ -10,6 +10,7 @@ from sim.dynamics.orbit.frames import (
     FRAME_MODEL_IAU76_80_EOP,
     FRAME_MODEL_SIMPLE_GMST,
     FrameContext,
+    _eop_file_signature,
     eci_to_ecef_rotation,
     eci_to_ecef_rotation_derivative_context,
     eci_to_ecef_rotation_hpop_like,
@@ -176,7 +177,17 @@ def atmosphere_relative_velocity_eci_km_s(
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
     eop_extrapolation: str = "error",
+    _frame_cache: dict | None = None,
+    _numeric_backend: str = "rust",
+    _prepared_frame: Any = None,
 ) -> np.ndarray:
+    """Return atmosphere-relative velocity using the authoritative frame model.
+
+    A caller-owned cache may reuse exact time-dependent rotations and their
+    derivatives. EOP metadata and every frame input participate in the key;
+    positions and velocities are always transformed anew. The cache is bounded
+    to 64 entries and is optional, so ordinary callers retain the existing path.
+    """
     r = (
         r_eci_km
         if isinstance(r_eci_km, np.ndarray) and r_eci_km.dtype == np.float64 and r_eci_km.shape == (3,)
@@ -188,8 +199,68 @@ def atmosphere_relative_velocity_eci_km_s(
         else np.asarray(v_eci_km_s, dtype=float).reshape(3)
     )
     model = normalize_frame_model(frame_model)
-    if model in {FRAME_MODEL_SIMPLE_GMST, FRAME_MODEL_IAU76_80_EOP}:
+    if str(_numeric_backend).strip().lower() == "rust" and model == FRAME_MODEL_SIMPLE_GMST and eop_path in (None, ""):
+        from sim.rust_environment_backend import try_simple_relative_velocity
+
+        native = try_simple_relative_velocity(
+            r, v, float(t_s), jd_utc_start=jd_utc_start,
+            atmosphere_rotation_rad_s=float(earth_rotation_rad_s),
+        )
+        if native is not None:
+            return native
+    if _prepared_frame is not None:
+        rot = _prepared_frame.rotation(float(t_s))
         if model == FRAME_MODEL_IAU76_80_EOP:
+            return rot.T @ (rot @ v + _prepared_frame.derivative(float(t_s)) @ r)
+        r_frame = rot @ r
+        v_frame = rot @ v
+        v_atm_frame = np.array(
+            [-float(earth_rotation_rad_s) * float(r_frame[1]),
+             float(earth_rotation_rad_s) * float(r_frame[0]), 0.0], dtype=float,
+        )
+        return rot.T @ (v_frame - v_atm_frame)
+    if str(_numeric_backend).strip().lower() == "rust" and model == FRAME_MODEL_SIMPLE_GMST and eop_path in (None, ""):
+        from sim.rust_environment_backend import try_state_batch
+
+        native = try_state_batch(
+            [float(t_s)],
+            r.reshape(1, 3),
+            v.reshape(1, 3),
+            jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
+            earth_rotation_rad_s=float(earth_rotation_rad_s),
+            subtract_atmosphere_rotation=True,
+        )
+        if native is not None:
+            # The environment state API returns ECEF components.  Drag's
+            # contract is ECI, so transform the relative velocity back before
+            # passing it to the force kernel.
+            rotation = eci_to_ecef_rotation(float(t_s), jd_utc_start=jd_utc_start)
+            return rotation.T @ np.asarray(native[1][0], dtype=float)
+    if model in {FRAME_MODEL_SIMPLE_GMST, FRAME_MODEL_IAU76_80_EOP}:
+        frame_key = None
+        rot = rot_dot = None
+        if _frame_cache is not None:
+            frame_key = (
+                model,
+                float(t_s),
+                jd_utc_start,
+                None if eop_path is None else str(eop_path),
+                dut1_s,
+                xp_arcsec,
+                yp_arcsec,
+                dat_s,
+                tt_minus_utc_s,
+                ddpsi_rad,
+                ddeps_rad,
+                eop_extrapolation,
+                _eop_file_signature(str(eop_path))
+                if model == FRAME_MODEL_IAU76_80_EOP and eop_path is not None
+                else None,
+            )
+            cached = _frame_cache.get(frame_key)
+            if cached is not None:
+                rot, rot_dot = cached
+        if rot is None and model == FRAME_MODEL_IAU76_80_EOP:
             rot = eci_to_ecef_rotation_hpop_like(
                 float(t_s),
                 jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
@@ -203,34 +274,41 @@ def atmosphere_relative_velocity_eci_km_s(
                 ddeps_rad=ddeps_rad,
                 eop_extrapolation=eop_extrapolation,
             )
-        else:
+        elif rot is None:
             rot = eci_to_ecef_rotation(
                 float(t_s),
                 jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
             )
-        r_frame = rot @ r
         if model == FRAME_MODEL_IAU76_80_EOP:
-            context = FrameContext(
-                model=model,
-                jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
-                eop_path=None if eop_path is None else str(eop_path),
-                eop_extrapolation=eop_extrapolation,
-                tt_minus_utc_s=(
-                    69.184 if tt_minus_utc_s is None else float(tt_minus_utc_s)
-                ),
-                dut1_s=dut1_s,
-                xp_arcsec=xp_arcsec,
-                yp_arcsec=yp_arcsec,
-                dat_s=dat_s,
-                ddpsi_rad=ddpsi_rad,
-                ddeps_rad=ddeps_rad,
-                source="atmosphere_relative_velocity",
-            )
-            rot_dot = eci_to_ecef_rotation_derivative_context(float(t_s), context)
+            if rot_dot is None:
+                context = FrameContext(
+                    model=model,
+                    jd_utc_start=None if jd_utc_start is None else float(jd_utc_start),
+                    eop_path=None if eop_path is None else str(eop_path),
+                    eop_extrapolation=eop_extrapolation,
+                    tt_minus_utc_s=(69.184 if tt_minus_utc_s is None else float(tt_minus_utc_s)),
+                    dut1_s=dut1_s,
+                    xp_arcsec=xp_arcsec,
+                    yp_arcsec=yp_arcsec,
+                    dat_s=dat_s,
+                    ddpsi_rad=ddpsi_rad,
+                    ddeps_rad=ddeps_rad,
+                    source="atmosphere_relative_velocity",
+                )
+                rot_dot = eci_to_ecef_rotation_derivative_context(float(t_s), context)
+            if frame_key is not None:
+                _frame_cache[frame_key] = (rot, rot_dot)
+                while len(_frame_cache) > 64:
+                    _frame_cache.pop(next(iter(_frame_cache)))
             # A stationary atmosphere has zero ECEF velocity.  The canonical
             # ECI->ECEF state transform therefore gives the complete relative
             # velocity, including precession/nutation/polar-motion derivatives.
             return rot.T @ (rot @ v + rot_dot @ r)
+        if frame_key is not None:
+            _frame_cache[frame_key] = (rot, None)
+            while len(_frame_cache) > 64:
+                _frame_cache.pop(next(iter(_frame_cache)))
+        r_frame = rot @ r
         v_frame = rot @ v
         v_atm_frame_km_s = np.array(
             [

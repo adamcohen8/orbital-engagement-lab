@@ -9,7 +9,7 @@ import math
 import re
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 
 import numpy as np
 
@@ -66,10 +66,23 @@ def _source_id(value: Any, field: str) -> str:
 
 
 def _finite(value: Any, field: str) -> float:
-    result = float(value)
+    if isinstance(value, (bool, np.bool_)):
+        raise MissionSchedulingError(f"{field} must be finite.")
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise MissionSchedulingError(f"{field} must be finite.") from exc
     if not math.isfinite(result):
         raise MissionSchedulingError(f"{field} must be finite.")
     return result
+
+
+def _reject_unknown_fields(value: Mapping[str, Any], allowed: set[str], field: str) -> None:
+    if not isinstance(value, Mapping):
+        raise MissionSchedulingError(f"{field} must be a JSON object.")
+    unknown = sorted(str(key) for key in set(value) - allowed)
+    if unknown:
+        raise MissionSchedulingError(f"{field} contains unknown fields: {', '.join(unknown)}.")
 
 
 def _digest_bytes(content: bytes) -> str:
@@ -103,7 +116,15 @@ def _read_json_object(path: Path, label: str) -> tuple[dict[str, Any], bytes]:
 def _normalized_pointing(value: Any, field: str) -> tuple[float, float, float] | None:
     if value is None:
         return None
-    vector = np.asarray(value, dtype=float).reshape(-1)
+    try:
+        raw = np.asarray(value, dtype=object).reshape(-1)
+        if any(isinstance(item, (bool, np.bool_)) for item in raw):
+            raise MissionSchedulingError(f"{field} must contain numeric values, not booleans.")
+        vector = np.asarray(value, dtype=float).reshape(-1)
+    except (TypeError, ValueError, OverflowError) as exc:
+        if isinstance(exc, MissionSchedulingError):
+            raise
+        raise MissionSchedulingError(f"{field} must contain three finite values.") from exc
     if vector.size != 3 or not np.all(np.isfinite(vector)):
         raise MissionSchedulingError(f"{field} must contain three finite values.")
     if abs(float(np.linalg.norm(vector)) - 1.0) > 1.0e-10:
@@ -121,6 +142,11 @@ class CollectionEvidenceSource:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> CollectionEvidenceSource:
+        _reject_unknown_fields(
+            value,
+            {"source_id", "path", "asset_id", "objective_scale", "energy_cost_wh"},
+            "collection source",
+        )
         return cls(
             source_id=value.get("source_id", ""),
             path=value.get("path", ""),
@@ -153,6 +179,19 @@ class LinkEvidenceSource:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> LinkEvidenceSource:
+        _reject_unknown_fields(
+            value,
+            {
+                "source_id",
+                "path",
+                "asset_id",
+                "station_asset_id",
+                "station_id",
+                "energy_cost_wh",
+                "pointing_unit_eci",
+            },
+            "link source",
+        )
         return cls(
             source_id=value.get("source_id", ""),
             path=value.get("path", ""),
@@ -189,6 +228,7 @@ class MissionSchedulingSourcePlan:
     assets: tuple[AssetScheduleConstraints, ...]
     collection_sources: tuple[CollectionEvidenceSource, ...]
     link_sources: tuple[LinkEvidenceSource, ...]
+    orbit_history_semantic_sha256: str | None = None
     require_observation_delivery_by_horizon: bool = True
     minimum_selected_observations: int = 1
     maximum_candidates: int = MAX_PUBLIC_MISSION_OPPORTUNITIES
@@ -196,6 +236,24 @@ class MissionSchedulingSourcePlan:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> MissionSchedulingSourcePlan:
+        _reject_unknown_fields(
+            value,
+            {
+                "schema_version",
+                "analysis_id",
+                "epoch_jd_utc",
+                "horizon_start_s",
+                "horizon_end_s",
+                "assets",
+                "collection_sources",
+                "link_sources",
+                "orbit_history_semantic_sha256",
+                "require_observation_delivery_by_horizon",
+                "minimum_selected_observations",
+                "maximum_candidates",
+            },
+            "source plan",
+        )
         return cls(
             schema_version=str(
                 value.get("schema_version", MISSION_SCHEDULING_SOURCE_PLAN_SCHEMA)
@@ -212,6 +270,7 @@ class MissionSchedulingSourcePlan:
             link_sources=tuple(
                 LinkEvidenceSource.from_mapping(item) for item in value.get("link_sources", ())
             ),
+            orbit_history_semantic_sha256=value.get("orbit_history_semantic_sha256"),
             require_observation_delivery_by_horizon=value.get(
                 "require_observation_delivery_by_horizon", True
             ),
@@ -222,6 +281,11 @@ class MissionSchedulingSourcePlan:
     def __post_init__(self) -> None:
         if self.schema_version != MISSION_SCHEDULING_SOURCE_PLAN_SCHEMA:
             raise MissionSchedulingError(f"Unsupported source-plan schema {self.schema_version!r}.")
+        if self.orbit_history_semantic_sha256 is not None:
+            object.__setattr__(
+                self, "orbit_history_semantic_sha256",
+                _valid_digest(self.orbit_history_semantic_sha256, "orbit_history_semantic_sha256"),
+            )
         object.__setattr__(self, "analysis_id", _required(self.analysis_id, "analysis_id"))
         for field in ("epoch_jd_utc", "horizon_start_s", "horizon_end_s"):
             object.__setattr__(self, field, _finite(getattr(self, field), field))
@@ -270,6 +334,8 @@ class MissionSchedulingSourcePlan:
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
+        if self.orbit_history_semantic_sha256 is None:
+            del value["orbit_history_semantic_sha256"]
         value["assets"] = sorted(value["assets"], key=lambda item: item["asset_id"])
         value["collection_sources"] = sorted(
             value["collection_sources"], key=lambda item: item["source_id"]
@@ -318,6 +384,21 @@ def _require_epoch(actual: Any, expected: float, source_id: str) -> None:
         )
 
 
+def _unique_collection_candidates(
+    candidates_raw: list[Any],
+) -> Iterator[tuple[str, Mapping[str, Any]]]:
+    seen: set[str] = set()
+    for candidate in candidates_raw:
+        if not isinstance(candidate, dict):
+            raise MissionSchedulingError("Collection opportunity candidates must be JSON objects.")
+        raw_identifier = candidate.get("opportunity_id")
+        identifier = _required(raw_identifier, "collection opportunity_id")
+        if raw_identifier != identifier or identifier in seen:
+            raise MissionSchedulingError("Collection candidate opportunity IDs must be unique.")
+        seen.add(identifier)
+        yield identifier, candidate
+
+
 def _verify_collection_source(
     plan: MissionSchedulingSourcePlan,
     source: CollectionEvidenceSource,
@@ -329,6 +410,9 @@ def _verify_collection_source(
         raise MissionSchedulingError(f"Collection source {source.source_id!r} has an unsupported schema.")
     if evidence.get("status") != "completed":
         raise MissionSchedulingError(f"Collection source {source.source_id!r} is not completed.")
+    if (plan.orbit_history_semantic_sha256 is not None and
+            evidence.get("orbit_history_semantic_sha256") != plan.orbit_history_semantic_sha256):
+        raise MissionSchedulingError(f"Collection source {source.source_id!r} lacks the required orbit binding.")
     problem_hash = _valid_digest(evidence.get("problem_sha256"), "collection problem_sha256")
     frame = evidence.get("frame_time_provenance")
     if not isinstance(frame, dict):
@@ -349,14 +433,7 @@ def _verify_collection_source(
     if not isinstance(candidates_raw, list) or not isinstance(tasks_raw, list):
         raise MissionSchedulingError(f"Collection source {source.source_id!r} lacks opportunity ledgers.")
     accepted: dict[str, Mapping[str, Any]] = {}
-    for candidate in candidates_raw:
-        if not isinstance(candidate, dict):
-            raise MissionSchedulingError("Collection opportunity candidates must be JSON objects.")
-        identifier = _required(candidate.get("opportunity_id"), "collection opportunity_id")
-        if identifier in accepted or sum(
-            1 for item in candidates_raw if isinstance(item, dict) and item.get("opportunity_id") == identifier
-        ) != 1:
-            raise MissionSchedulingError("Collection candidate opportunity IDs must be unique.")
+    for identifier, candidate in _unique_collection_candidates(candidates_raw):
         if candidate.get("accepted") is True:
             screen = candidate.get("resource_screen")
             if not isinstance(screen, dict) or screen.get("enabled") is not False:
@@ -476,6 +553,11 @@ def _verify_link_source(
     if manifest.get("contract_version") != DIRECTED_LINK_CONTRACT_VERSION or manifest.get("status") != "complete":
         raise MissionSchedulingError(f"Link source {source.source_id!r} is not a completed supported product.")
     semantic_hash = _valid_digest(manifest.get("semantic_sha256"), "link semantic_sha256")
+    if plan.orbit_history_semantic_sha256 is not None:
+        binding = manifest.get("orbit_binding")
+        if (not isinstance(binding, dict) or
+                binding.get("parent_history_sha256") != plan.orbit_history_semantic_sha256):
+            raise MissionSchedulingError(f"Link source {source.source_id!r} lacks the required orbit binding.")
     _valid_digest(manifest.get("input_evidence_sha256"), "link input_evidence_sha256")
     frame = manifest.get("frame")
     if not isinstance(frame, dict):
@@ -519,6 +601,8 @@ def _verify_link_source(
         or packet.get("summary") != summary
     ):
         raise MissionSchedulingError("Directed-link evidence packet does not match its manifest.")
+    if plan.orbit_history_semantic_sha256 is not None and packet.get("orbit_binding") != manifest["orbit_binding"]:
+        raise MissionSchedulingError("Directed-link orbit binding differs between packet and manifest.")
     if (
         not isinstance(summary, dict)
         or summary.get("status") != "complete"

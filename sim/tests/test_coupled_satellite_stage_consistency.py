@@ -37,7 +37,9 @@ def test_each_rk_stage_receives_matching_time_state_and_attitude() -> None:
     )
     assert [stage.t_s for stage in stages] == [0.0, 0.5, 0.5, 1.0]
     assert stages[1].mass_kg == 9.75 and stages[1].actuator_state[0] == 0.5
-    assert np.isclose(stages[1].attitude_quat_bn[0], np.cos(0.25), rtol=0.0, atol=1.0e-15)
+    # Quaternion stages are normalized RK4 state stages rather than exact
+    # constant-rate exponentials; the final step retains fourth-order accuracy.
+    assert np.isclose(stages[1].attitude_quat_bn[0], 1.0 / np.sqrt(1.0 + 0.25**2), rtol=0.0, atol=1.0e-15)
     np.testing.assert_allclose(result.final_state.position_eci_km, [1.5, 0.0, 0.0])
     assert result.final_state.mass_kg == 9.5
     assert result.final_state.actuator_state[0] == 1.0

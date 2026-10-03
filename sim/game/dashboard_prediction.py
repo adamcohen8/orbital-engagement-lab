@@ -5,6 +5,9 @@ from .prediction import *
 from .camera import *
 
 class DashboardPredictionMixin:
+    def _prediction_numeric_options(self) -> dict[str, str]:
+        return _prediction_backend_options(getattr(self, "numeric_backend", "rust"))
+
     def _prepare_cr3bp_target_orbit_prediction(self) -> None:
         if _relative_frame_key(getattr(self, "relative_frame", "ric")) != "moon_ric":
             return
@@ -50,7 +53,11 @@ class DashboardPredictionMixin:
         cached = prediction_cache.get(cache_key)
         if cached is not None:
             if (
-                _cr3bp_reference_cache_valid(cached.get("reference"), reference)
+                _cr3bp_reference_cache_valid(
+                    cached.get("reference"),
+                    reference,
+                    **self._prediction_numeric_options(),
+                )
                 and float(cached.get("horizon_s", np.nan)) == horizon
                 and float(cached.get("dt_s", np.nan)) == dt
             ):
@@ -70,7 +77,7 @@ class DashboardPredictionMixin:
                 remaining_s = step_s
                 while remaining_s > 1.0e-9:
                     substep_s = min(float(CR3BP_TARGET_ORBIT_INTERNAL_STEP_S), remaining_s)
-                    state = propagate_cr3bp_state(state, substep_s, current_t)
+                    state = propagate_cr3bp_state(state, substep_s, current_t, **self._prediction_numeric_options())
                     current_t += substep_s
                     remaining_s -= substep_s
             rows.append(state.copy())
@@ -330,12 +337,12 @@ class DashboardPredictionMixin:
                 reference = np.array(reference_state, dtype=float).reshape(6)
                 times = np.array([elapsed], dtype=float)
                 try:
-                    projected = _elliptic_ya_coast_states(state, times, reference)
+                    projected = _elliptic_ya_coast_states(state, times, reference, numeric_backend=self._prediction_numeric_options()["numeric_backend"])
                     if projected.shape == (1, 6) and np.all(np.isfinite(projected)):
                         return projected[0]
                 except (ValueError, FloatingPointError, np.linalg.LinAlgError):
                     pass
-                projected = _elliptic_linear_coast_states(state, times, reference)
+                projected = _elliptic_linear_coast_states(state, times, reference, numeric_backend=self._prediction_numeric_options()["numeric_backend"])
                 if projected.shape == (1, 6) and np.all(np.isfinite(projected)):
                     return projected[0]
         if n is not None and np.isfinite(float(n)) and float(n) > 0.0:
@@ -392,6 +399,7 @@ class DashboardPredictionMixin:
                         target_state=target,
                         times=times,
                         current_t_s=current_time_s,
+                        numeric_backend=self._prediction_numeric_options()["numeric_backend"],
                     )
             else:
                 origin = cr3bp_l1_state_km_s()
@@ -402,7 +410,7 @@ class DashboardPredictionMixin:
                 for target_t in times:
                     step_s = float(target_t - previous_t)
                     if step_s > 0.0:
-                        absolute = propagate_cr3bp_state(absolute, step_s, propagation_time)
+                        absolute = propagate_cr3bp_state(absolute, step_s, propagation_time, **self._prediction_numeric_options())
                         propagation_time += step_s
                     rows.append(absolute - origin)
                     previous_t = float(target_t)
@@ -656,7 +664,12 @@ class DashboardPredictionMixin:
                     age_s >= 0.0
                     and age_s < float(interval_s)
                     and _cr3bp_relative_cache_valid(cached.get("rel0"), rel0)
-                    and _cr3bp_reference_cache_valid(cached.get("reference"), reference, elapsed_s=age_s)
+                    and _cr3bp_reference_cache_valid(
+                        cached.get("reference"),
+                        reference,
+                        elapsed_s=age_s,
+                        **self._prediction_numeric_options(),
+                    )
                 ):
                     prediction = cached.get("prediction")
                     if prediction is not None:
@@ -710,6 +723,7 @@ class DashboardPredictionMixin:
                     cached.get("reference"),
                     reference,
                     elapsed_s=age_s,
+                    **self._prediction_numeric_options(),
                 ):
                     return np.array(prediction, dtype=float)
 
@@ -786,7 +800,11 @@ class DashboardPredictionMixin:
             if (
                 cached_times.shape == time_grid.shape
                 and np.allclose(cached_times, time_grid, rtol=0.0, atol=1.0e-9)
-                and _cr3bp_reference_cache_valid(cached.get("target_state"), target)
+                and _cr3bp_reference_cache_valid(
+                    cached.get("target_state"),
+                    target,
+                    **self._prediction_numeric_options(),
+                )
             ):
                 references = np.array(cached.get("references", np.empty((0, 6))), dtype=float)
                 stms = np.array(cached.get("stms", np.empty((0, 6, 6))), dtype=float)
@@ -797,6 +815,7 @@ class DashboardPredictionMixin:
                 target_state=target,
                 times=time_grid,
                 current_t_s=float(current_t_s),
+                **self._prediction_numeric_options(),
             )
             basis_axes, basis_omega = _moon_ric_basis_rows(references)
             prediction_cache[cache_key] = {
@@ -929,6 +948,7 @@ class DashboardPredictionMixin:
                     target_state=target_state,
                     times=times,
                     current_t_s=self._current_time_s(),
+                    **self._prediction_numeric_options(),
                 )
             origin = cr3bp_l1_state_km_s()
             state = origin + rel0
@@ -938,7 +958,7 @@ class DashboardPredictionMixin:
             for target_t in times:
                 step_s = float(target_t - previous_t)
                 if step_s > 0.0:
-                    state = propagate_cr3bp_state(state, step_s, current_t)
+                    state = propagate_cr3bp_state(state, step_s, current_t, **self._prediction_numeric_options())
                     current_t += step_s
                 rows.append(state - origin)
                 previous_t = float(target_t)
@@ -954,12 +974,12 @@ class DashboardPredictionMixin:
             if reference_state is not None:
                 reference = np.array(reference_state, dtype=float).reshape(6)
                 try:
-                    prediction = _elliptic_ya_coast_states(rel0, times, reference)
+                    prediction = _elliptic_ya_coast_states(rel0, times, reference, **self._prediction_numeric_options())
                     if prediction.shape == (times.size, 6) and np.all(np.isfinite(prediction)):
                         return prediction
                 except (ValueError, FloatingPointError, np.linalg.LinAlgError):
                     pass
-                return _elliptic_linear_coast_states(rel0, times, reference)
+                return _elliptic_linear_coast_states(rel0, times, reference, **self._prediction_numeric_options())
         return _cw_coast_states(rel0, times, float(n))
 
     def _coast_prediction_horizon_s(self, mean_motion_rad_s: float) -> float:

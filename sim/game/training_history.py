@@ -56,11 +56,46 @@ def _aerodynamic_control_telemetry(
     return values
 
 
+def _native_training_frames(config, snapshot, target, chaser):
+    from sim.flight_software.rust_game_frames import training_frame_sample
+    from sim.utils.frames import _frame_acceleration_enabled
+
+    frame_key = _relative_frame_key(config.relative_frame)
+    if frame_key not in {"ric", "moon_ric"} or _frame_acceleration_enabled():
+        return None
+    try:
+        target = np.asarray(target, dtype=float).reshape(-1)
+        chaser = np.asarray(chaser, dtype=float).reshape(-1)
+        reference = snapshot.truth.get(config.target_reference_object_id)
+        reference = None if reference is None else np.asarray(reference, dtype=float).reshape(-1)
+        if target.size < 6 or chaser.size < 6 or (reference is not None and reference.size < 6):
+            return None
+        if frame_key == "moon_ric":
+            moon = cr3bp_moon_state_km_s()
+            target, chaser = target[:6] - moon, chaser[:6] - moon
+            reference = None if reference is None else reference[:6] - moon
+        thrust = np.asarray(snapshot.applied_thrust.get(config.chaser_object_id, np.zeros(3)), dtype=float).reshape(3)
+        return training_frame_sample(target, chaser, reference, thrust)
+    except (TypeError, ValueError):
+        # Preserve the existing exception and partial-history ordering for an
+        # invalid sample by letting the authoritative scalar path report it.
+        return None
+
+
 class RPOTrainingTracker:
-    def __init__(self, config: RPOTrainingConfig):
+    def __init__(self, config: RPOTrainingConfig, *, numeric_backend: str = "rust"):
+        if numeric_backend not in {"python", "rust"}:
+            raise ValueError("scoring numeric_backend must be python or rust")
+        if numeric_backend == "rust":
+            from sim.flight_software.rust_game_backend import extension
+
+            extension()
+        self.numeric_backend = numeric_backend
+        self._native_score_values = None
         self.config = config
         self.t_s: list[float] = []
         self.rel_ric_hist: list[np.ndarray] = []
+        self.target_state_eci_hist: list[np.ndarray] = []
         self.thrust_hist: list[np.ndarray] = []
         self.thrust_ric_hist: list[np.ndarray] = []
         self.target_thrust_hist: list[np.ndarray] = []
@@ -114,6 +149,7 @@ class RPOTrainingTracker:
     def clear(self, *, reset_guided_tutorial_progress: bool = True) -> None:
         self.t_s.clear()
         self.rel_ric_hist.clear()
+        self.target_state_eci_hist.clear()
         self.thrust_hist.clear()
         self.thrust_ric_hist.clear()
         self.target_thrust_hist.clear()
@@ -166,16 +202,20 @@ class RPOTrainingTracker:
         chaser = snapshot.truth.get(self.config.chaser_object_id)
         if target is None or chaser is None:
             return
-        rel = relative_state_from_arrays(target, chaser, frame=self.config.relative_frame)
+        native_frames = _native_training_frames(self.config, snapshot, target, chaser) if self.numeric_backend == "rust" else None
+        rel = native_frames[0] if native_frames is not None else relative_state_from_arrays(target, chaser, frame=self.config.relative_frame)
         self.t_s.append(float(snapshot.time_s))
         self.rel_ric_hist.append(rel)
         reference = snapshot.truth.get(self.config.target_reference_object_id)
-        if reference is not None:
+        if native_frames is not None:
+            target_reference_rel = native_frames[1]
+        elif reference is not None:
             target_reference_rel = relative_state_from_arrays(reference, target, frame=self.config.relative_frame)
         else:
             target_reference_rel = np.full(6, np.nan, dtype=float)
         self.target_reference_rel_hist.append(target_reference_rel)
         target_arr = np.array(target, dtype=float).reshape(-1)
+        self.target_state_eci_hist.append(target_arr.copy())
         n = float("nan")
         frame_key = _relative_frame_key(self.config.relative_frame)
         if frame_key == "cislunar":
@@ -194,7 +234,9 @@ class RPOTrainingTracker:
         thrust = snapshot.applied_thrust.get(self.config.chaser_object_id, np.zeros(3, dtype=float))
         thrust_eci = np.array(thrust, dtype=float).reshape(3)
         self.thrust_hist.append(thrust_eci)
-        if frame_key == "cislunar":
+        if native_frames is not None:
+            self.thrust_ric_hist.append(native_frames[2])
+        elif frame_key == "cislunar":
             self.thrust_ric_hist.append(thrust_eci)
         elif frame_key == "moon_ric" and target_arr.size >= 6:
             target_moon = target_arr[:6] - cr3bp_moon_state_km_s()
@@ -349,10 +391,20 @@ class RPOTrainingTracker:
         self._aerodynamic_lift_area_array[idx] = float(aerodynamic["lift_area_m2"])
         self._aerodynamic_lift_bank_angle_array[idx] = float(aerodynamic["lift_bank_angle_deg"])
         self._aerodynamic_control_active_array[idx] = bool(aerodynamic["control_active"])
-        self._delta_v_interval_km_s_array[idx] = self._delta_v_interval_km_s(idx, thrust)
-        self._target_delta_v_interval_km_s_array[idx] = self._delta_v_interval_km_s(idx, target_thrust)
-        self._range_array[idx] = float(np.sqrt(np.sum(rel_arr[:3] * rel_arr[:3])))
-        self._speed_array[idx] = float(np.sqrt(np.sum(rel_arr[3:6] * rel_arr[3:6])))
+        native = None
+        if self.numeric_backend == "rust":
+            from .rust_scoring import score_sample
+
+            native = score_sample(self.config, rel_arr, thrust, target_thrust)
+        self._native_score_values = native
+        self._delta_v_interval_km_s_array[idx] = self._delta_v_interval_km_s(
+            idx, thrust, accel_km_s2=None if native is None else native[2]
+        )
+        self._target_delta_v_interval_km_s_array[idx] = self._delta_v_interval_km_s(
+            idx, target_thrust, accel_km_s2=None if native is None else native[3]
+        )
+        self._range_array[idx] = float(np.sqrt(np.sum(rel_arr[:3] * rel_arr[:3]))) if native is None else native[0]
+        self._speed_array[idx] = float(np.sqrt(np.sum(rel_arr[3:6] * rel_arr[3:6]))) if native is None else native[1]
         self._append_nmt_element_arrays(
             idx=idx,
             rel=rel,
@@ -363,12 +415,13 @@ class RPOTrainingTracker:
         self._goal_error_array[idx] = self._goal_error_value(idx, rel_arr)
         self._history_count = idx + 1
 
-    def _delta_v_interval_km_s(self, idx: int, thrust_km_s2: np.ndarray) -> float:
+    def _delta_v_interval_km_s(self, idx: int, thrust_km_s2: np.ndarray, *, accel_km_s2: float | None = None) -> float:
         if idx <= 0:
             return 0.0
         dt_s = float(self._t_array[idx] - self._t_array[idx - 1])
         thrust = np.asarray(thrust_km_s2, dtype=float).reshape(3)
-        accel_km_s2 = float(np.sqrt(np.sum(thrust * thrust)))
+        if accel_km_s2 is None:
+            accel_km_s2 = float(np.sqrt(np.sum(thrust * thrust)))
         if not np.isfinite(accel_km_s2) or not np.isfinite(dt_s) or dt_s <= 0.0:
             return float("nan")
         return accel_km_s2 * dt_s
@@ -377,6 +430,8 @@ class RPOTrainingTracker:
         position = np.asarray(rel, dtype=float).reshape(6)[:3]
         if self.config.goal_nmt_radial_amplitude_km is not None:
             if self.config.goal_nmt_tolerance_km is not None:
+                if self._native_score_values is not None:
+                    return self._native_score_values[4]
                 return float(
                     nmt_position_error_km(
                         position,
@@ -393,8 +448,12 @@ class RPOTrainingTracker:
                 return max(current_range - float(self.config.goal_range_km), 0.0)
             return abs(current_range - float(self.config.goal_range_km))
         if self.config.inspection_gates:
+            if self._native_score_values is not None:
+                return self._native_score_values[4]
             gate_centers = np.vstack([gate.center_ric_km for gate in self.config.inspection_gates])
             return float(np.min(np.linalg.norm(position.reshape(1, 3) - gate_centers, axis=1)))
+        if self._native_score_values is not None:
+            return self._native_score_values[4]
         delta = position - self.config.goal_relative_ric_km.reshape(3)
         return float(np.sqrt(np.sum(delta * delta)))
 
@@ -652,22 +711,130 @@ class RPOTrainingTracker:
         gates = self.config.inspection_gates
         if not gates or len(self._inspection_gate_names) >= len(gates):
             return
-        if not self._sun_constraints_satisfied_at(rel[:3], target_state_eci=target_state_eci, time_s=time_s):
-            return
         sample_idx = len(self.rel_ric_hist) - 1
         previous = self.rel_ric_hist[sample_idx - 1] if sample_idx > 0 else None
+        current_time = (
+            float(time_s)
+            if time_s is not None
+            else float(self.t_s[sample_idx])
+            if 0 <= sample_idx < len(self.t_s)
+            else None
+        )
+        previous_time = (
+            float(self.t_s[sample_idx - 1])
+            if sample_idx > 0 and sample_idx - 1 < len(self.t_s)
+            else None
+        )
+        previous_target = (
+            self.target_state_eci_hist[sample_idx - 1]
+            if sample_idx > 0 and sample_idx - 1 < len(self.target_state_eci_hist)
+            else None
+        )
+        current_sun_ok = self._sun_constraints_satisfied_at(
+            rel[:3], target_state_eci=target_state_eci, time_s=current_time
+        )
         satisfied = set(self._inspection_gate_names)
         for gate in gates:
             if gate.name in satisfied:
                 continue
-            current_hits_gate = bool(gate.samples_satisfying_gate(rel.reshape(1, -1))[0])
-            segment_hits_gate = bool(previous is not None and gate.segment_satisfies_gate(previous, rel))
+            current_hits_gate = bool(current_sun_ok and gate.samples_satisfying_gate(rel.reshape(1, -1))[0])
+            segment_hits_gate = False
+            if previous is not None and gate.segment_satisfies_gate(previous, rel):
+                interval = gate.segment_gate_interval(previous, rel)
+                if interval is not None:
+                    segment_hits_gate = self._segment_sun_overlap(
+                        previous,
+                        rel,
+                        interval,
+                        previous_target=previous_target,
+                        current_target=target_state_eci,
+                        previous_time=previous_time,
+                        current_time=current_time,
+                    )
             if current_hits_gate or segment_hits_gate:
                 self._inspection_gate_names.append(gate.name)
                 satisfied.add(gate.name)
                 if len(self._inspection_gate_names) >= len(gates):
                     self._inspection_gate_completed_idx = sample_idx
                     break
+
+    def _segment_sun_overlap(
+        self,
+        start: np.ndarray,
+        end: np.ndarray,
+        interval: tuple[float, float],
+        *,
+        previous_target: np.ndarray | None,
+        current_target: np.ndarray | None,
+        previous_time: float | None,
+        current_time: float | None,
+    ) -> bool:
+        """Check the gate interval, including beam and range boundary crossings."""
+        if not self.config.sun_angle_constraints:
+            return True
+        lo, hi = interval
+        start = np.asarray(start, dtype=float).reshape(-1)
+        end = np.asarray(end, dtype=float).reshape(-1)
+        origin = start[:3]
+        delta = end[:3] - origin
+        candidates = {float(lo), float(hi)}
+
+        def add_quadratic_roots(a: float, b: float, c: float) -> None:
+            if abs(a) <= 1.0e-15:
+                roots = [] if abs(b) <= 1.0e-15 else [-c / b]
+            else:
+                discriminant = b * b - 4.0 * a * c
+                roots = [] if discriminant < 0.0 else [
+                    (-b - np.sqrt(discriminant)) / (2.0 * a),
+                    (-b + np.sqrt(discriminant)) / (2.0 * a),
+                ]
+            candidates.update(float(t) for t in roots if lo <= t <= hi)
+
+        distance_a = float(np.dot(delta, delta))
+        distance_b = 2.0 * float(np.dot(origin, delta))
+        distance_c = float(np.dot(origin, origin))
+        midpoint = 0.5 * (lo + hi)
+        for constraint in self.config.sun_angle_constraints:
+            for radius in (constraint.min_range_km, constraint.max_range_km):
+                if radius is not None:
+                    add_quadratic_roots(distance_a, distance_b, distance_c - float(radius) ** 2)
+            midpoint_target = current_target
+            if previous_target is not None and current_target is not None:
+                midpoint_target = previous_target + midpoint * (current_target - previous_target)
+            midpoint_time = (
+                previous_time + midpoint * (current_time - previous_time)
+                if previous_time is not None and current_time is not None else current_time
+            )
+            axis = constraint.allowed_center_at_ric(target_state_eci=midpoint_target, time_s=midpoint_time)
+            cosine_sq = float(np.cos(np.deg2rad(constraint.allowed_half_angle_deg)) ** 2)
+            along_origin = float(np.dot(origin, axis))
+            along_delta = float(np.dot(delta, axis))
+            add_quadratic_roots(
+                along_delta ** 2 - cosine_sq * distance_a,
+                2.0 * along_origin * along_delta - cosine_sq * distance_b,
+                along_origin ** 2 - cosine_sq * distance_c,
+            )
+            if constraint.dynamic_sun:
+                candidates.update(float(t) for t in np.linspace(lo, hi, 17))
+
+        breakpoints = sorted(candidates)
+        samples = sorted(set(breakpoints) | {
+            0.5 * (left + right) for left, right in zip(breakpoints, breakpoints[1:])
+        })
+        for fraction in samples:
+            position = origin + fraction * delta
+            crossing_time = (
+                previous_time + fraction * (current_time - previous_time)
+                if previous_time is not None and current_time is not None else current_time
+            )
+            crossing_target = current_target
+            if previous_target is not None and current_target is not None:
+                crossing_target = previous_target + fraction * (current_target - previous_target)
+            if self._sun_constraints_satisfied_at(
+                position, target_state_eci=crossing_target, time_s=crossing_time
+            ):
+                return True
+        return False
 
     def _sun_constraints_satisfied_at(
         self,

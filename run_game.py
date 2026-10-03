@@ -22,6 +22,8 @@ def main() -> None:
         help="Object id controlled by keyboard input. Defaults to the game config setting.",
     )
     parser.add_argument("--attitude-rate-deg-s", type=float, default=45.0, help="Commanded attitude target slew rate.")
+    parser.add_argument("--backend", choices=("python", "rust"), default=None,
+                        help="Physics and flight software backend. Defaults to metadata.game.backend or rust.")
     parser.add_argument(
         "--fast", action="store_true", help="Step as fast as the dashboard can render instead of realtime."
     )
@@ -87,6 +89,7 @@ def main() -> None:
             presentation_vsync=args.presentation_vsync,
             presentation_diagnostics=args.presentation_diagnostics,
             presentation_diagnostics_output=args.presentation_diagnostics_output,
+            backend=args.backend,
         )
         if result.level_passed or result.arcade_score > 0:
             record_game_progress(
@@ -125,6 +128,7 @@ def main() -> None:
             presentation_vsync=args.presentation_vsync,
             presentation_diagnostics=args.presentation_diagnostics,
             presentation_diagnostics_output=args.presentation_diagnostics_output,
+            backend=args.backend,
         )
         if result.level_passed or result.arcade_score > 0:
             record_game_progress(

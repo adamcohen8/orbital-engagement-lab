@@ -15,6 +15,7 @@ from sim.knowledge.object_tracking import (
     ObjectKnowledgeBase,
     TrackedObjectConfig,
 )
+from sim.numeric_backend import normalize_numeric_backend
 
 
 def _knowledge_ekf_diag(value: Any, default: list[float]) -> np.ndarray:
@@ -48,6 +49,13 @@ def _build_knowledge_base(
     noise = dict(knowledge.get("sensor_error", {}) or {})
     estimation = dict(knowledge.get("estimation", {}) or {})
     ekf_cfg = dict(estimation.get("ekf", knowledge.get("ekf", {})) or {})
+    numeric_backend = normalize_numeric_backend(
+        estimation.get(
+            "numeric_backend",
+            ekf_cfg.get("numeric_backend", knowledge.get("numeric_backend", "rust")),
+        ),
+        field_name=f"objects.{observer_id}.knowledge.numeric_backend",
+    )
     maneuver_detection_cfg = dict(
         estimation.get("maneuver_detection", ekf_cfg.get("maneuver_detection", knowledge.get("maneuver_detection", {})))
         or {}
@@ -108,6 +116,7 @@ def _build_knowledge_base(
                     integration_substep_s=float(ekf_cfg.get("integration_substep_s", 10.0)),
                 ),
                 maneuver_detection=_knowledge_maneuver_detection_config(maneuver_detection_cfg),
+                numeric_backend=numeric_backend,
             )
         )
     return ObjectKnowledgeBase(

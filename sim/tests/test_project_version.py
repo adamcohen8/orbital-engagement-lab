@@ -24,8 +24,8 @@ def test_installed_version_prefers_dist_info_over_stale_checkout_egg_info(monkey
         project_version.metadata,
         "distributions",
         lambda **_kwargs: [
-            _DistributionFixture("0.25.0", "orbital_engagement_lab.egg-info"),
-            _DistributionFixture("0.26.0", "/venv/site-packages/orbital_engagement_lab-0.26.0.dist-info"),
+            _DistributionFixture("0.25.0", "orbital_engineering_lab.egg-info"),
+            _DistributionFixture("0.26.0", "/venv/site-packages/orbital_engineering_lab-0.26.0.dist-info"),
         ],
     )
 

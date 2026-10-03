@@ -446,10 +446,12 @@ def _single_run_metrics(summary: dict[str, Any]) -> list[str]:
 def _monte_carlo_metrics(payload: dict[str, Any]) -> list[str]:
     aggregate = dict(payload.get("aggregate_stats", {}) or {})
     commander = dict(payload.get("commander_brief", {}) or {})
+    comparison = dict(payload.get("comparison_summary", {}) or commander.get("comparison_summary", {}) or {})
     runs = list(payload.get("runs", []) or [])
+    pass_label = "Pass rate (pooled across comparison options)" if comparison else "Pass rate"
     lines = [
         f"- Iterations: `{len(runs) if runs else _scalar(dict(payload.get('monte_carlo', {}) or {}).get('iterations'))}`",
-        f"- Pass rate: `{_scalar(aggregate.get('pass_rate', commander.get('p_success')))}`",
+        f"- {pass_label}: `{_scalar(aggregate.get('pass_rate', commander.get('p_success')))}`",
         f"- Closest approach mean: `{_scalar(aggregate.get('closest_approach_km_mean'))} km`",
         f"- Keepout violation probability: `{_scalar(aggregate.get('p_keepout_violation', commander.get('p_keepout_violation')))}`",
         f"- Total delta-v mean: `{_scalar(aggregate.get('total_dv_m_s_mean'))} m/s`",

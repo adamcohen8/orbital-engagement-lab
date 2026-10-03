@@ -45,6 +45,18 @@ def test_magnetorquer_bdot_outputs_b_field_aware_torque() -> None:
     assert np.linalg.norm(cmd.torque_body_nm) > 0.0
 
 
+def test_magnetorquer_bdot_zero_torque_limit_is_fail_closed() -> None:
+    ctrl = MagnetorquerBdotController(
+        magnetic_field_body_t=np.array([0.0, 0.0, 3.0e-5]),
+        gain=2.0e3,
+        max_torque_nm=0.0,
+    )
+
+    cmd = ctrl.act(_joint_belief(omega=(0.1, 0.0, 0.0)), t_s=0.0, budget_ms=1.0)
+
+    assert np.array_equal(cmd.torque_body_nm, np.zeros(3))
+
+
 def test_wheel_desaturation_reads_extended_state_momentum() -> None:
     ctrl = WheelDesaturationController(momentum_state_slice=(13, 16), momentum_threshold_nms=0.1, max_unload_torque_nm=0.02)
 
@@ -103,6 +115,27 @@ def test_rcs_allocation_controller_allocates_eci_force_in_body_frame() -> None:
 
     assert np.allclose(cmd.mode_flags["rcs_thruster_forces_n"], [1.0])
     assert np.allclose(cmd.thrust_eci_km_s2, np.array([1.0e-6, 0.0, 0.0]), atol=1e-12)
+
+
+def test_rcs_allocator_re_solves_coupled_bounds_after_one_active_clamp() -> None:
+    direction = np.sqrt(0.5)
+    ctrl = RCSAllocationAwareController(
+        base_controller=_ConstantController(thrust=[8.0e-6, 10.1e-6, 0.0]),
+        mass_kg=1.0,
+        thrusters=[
+            {"force_direction_body": [1.0, 0.0, 0.0], "max_thrust_n": 0.02},
+            {"force_direction_body": [direction, direction, 0.0], "max_thrust_n": 0.001},
+        ],
+    )
+
+    cmd = ctrl.act(_joint_belief(), t_s=0.0, budget_ms=1.0)
+    forces = np.asarray(cmd.mode_flags["rcs_thruster_forces_n"], dtype=float)
+    achieved = np.array([forces[0] + direction * forces[1], direction * forces[1], 0.0])
+    requested = np.array([0.008, 0.0101, 0.0])
+
+    assert forces[0] > 0.0
+    assert forces[1] == pytest.approx(0.001)
+    assert np.linalg.norm(requested - achieved) < np.linalg.norm(requested - np.array([0.0, 0.001, 0.0]))
 
 
 def test_rcs_allocation_does_not_treat_relative_chief_state_as_attitude() -> None:

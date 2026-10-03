@@ -28,6 +28,7 @@ from sim.estimation.weighting import (
     whiten_residual_block,
     whiten_residual_with_factor,
 )
+from sim.numeric_backend import normalize_numeric_backend
 from sim.review import write_workflow_review
 from sim.scenarios import ScenarioArtifact
 from sim.utils.geodesy import ecef_to_enu_rotation, enu_to_ecef_rotation, geodetic_to_ecef_km
@@ -151,7 +152,11 @@ def solve_ground_station_measurement_od(
     exclude_station_ids: Sequence[str] = (),
     holdout_station_ids: Sequence[str] = (),
     scenario_name: str = "ground_station_sensor_od",
+    numeric_backend: str = "rust",
 ) -> dict[str, Any]:
+    numeric_backend = normalize_numeric_backend(numeric_backend, error_message="numeric_backend must be 'python' or 'rust'.")
+    if numeric_backend not in {"python", "rust"}:
+        raise ValueError("numeric_backend must be 'python' or 'rust'.")
     all_rows = _normalize_measurements(measurements)
     known_station_ids = sorted({str(row["station_id"]) for row in all_rows})
     station_catalog = [
@@ -392,6 +397,7 @@ def solve_ground_station_measurement_od(
             clock_fd_step_s=clock_fd_step_s,
             covariance_factors=fit_covariance_factors,
             geometry_cache=geometry_cache,
+            numeric_backend=numeric_backend,
         )
 
     prefit_rows = [row for idx, row in enumerate(rows) if bool(fit_mask[idx])]
@@ -517,6 +523,15 @@ def solve_ground_station_measurement_od(
         }
         for row in excluded_rows
     ]
+    estimation_policy = {
+        "robust_loss": robust_loss,
+        "robust_f_scale": float(robust_f_scale),
+        "sigma_clip_threshold": sigma_clip_threshold,
+        "prior_enabled": combined_prior_mean is not None,
+        "prior_parameter_names": list(prior_names or []),
+    }
+    if numeric_backend == "rust":
+        estimation_policy["numeric_backend"] = numeric_backend
     report = {
         "method": "ground_station_sensor_dynamics_least_squares",
         "object_id": object_id,
@@ -565,13 +580,7 @@ def solve_ground_station_measurement_od(
             "diagnostics": solve.diagnostics,
             "decision_records": decision_records,
         },
-        "estimation_policy": {
-            "robust_loss": robust_loss,
-            "robust_f_scale": float(robust_f_scale),
-            "sigma_clip_threshold": sigma_clip_threshold,
-            "prior_enabled": combined_prior_mean is not None,
-            "prior_parameter_names": list(prior_names or []),
-        },
+        "estimation_policy": estimation_policy,
         "prefit_metrics": _sensor_residual_metrics(prefit_residuals),
         "fit_metrics": _sensor_residual_metrics(fit_residuals),
         "holdout_metrics": _sensor_residual_metrics(holdout_residuals),
@@ -1211,8 +1220,29 @@ def _measurement_residual_vector(
     clock_fd_step_s: float = 0.25,
     covariance_factors: Sequence[np.ndarray] | None = None,
     geometry_cache: dict[tuple[str, float, float, float, float], tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] | None = None,
+    numeric_backend: str = "rust",
 ) -> np.ndarray:
-    values: list[np.ndarray] = []
+    residual_blocks: list[np.ndarray] = []
+    factor_blocks: list[np.ndarray] = []
+    native_predictions = None
+    native_plus_predictions = None
+    if normalize_numeric_backend(numeric_backend) == "rust":
+        native_predictions = _native_ground_station_predictions(
+            rows,
+            states,
+            epoch_jd_utc=epoch_jd_utc,
+            frame_context=frame_context,
+            geometry_cache=geometry_cache,
+        )
+        if states_plus is not None:
+            native_plus_predictions = _native_ground_station_predictions(
+                rows,
+                states_plus,
+                epoch_jd_utc=epoch_jd_utc,
+                frame_context=frame_context,
+                geometry_cache=geometry_cache,
+                time_offset_s=float(clock_fd_step_s),
+            )
     for index, (row, state) in enumerate(zip(rows, states, strict=True)):
         pred, _corrections = _predicted_measurement_with_systematics(
             row,
@@ -1224,6 +1254,10 @@ def _measurement_residual_vector(
             parameter_values=parameter_values,
             clock_fd_step_s=clock_fd_step_s,
             geometry_cache=geometry_cache,
+            geometric_override=None if native_predictions is None else native_predictions[index],
+            geometric_plus_override=(
+                None if native_plus_predictions is None else native_plus_predictions[index]
+            ),
         )
         residual = np.array(
             [
@@ -1238,19 +1272,89 @@ def _measurement_residual_vector(
                 row=row,
                 model=dict(systematic_model or {}),
             )
-            whitened = whiten_residual_block(
-                residual,
+            factor = prepare_covariance_whitener(
                 covariance,
+                dimension=residual.size,
                 field_name=f"measurement {row['measurement_id']!r} covariance",
             )
         else:
-            whitened = whiten_residual_with_factor(
+            factor = np.asarray(covariance_factors[index], dtype=float)
+        residual_blocks.append(residual)
+        factor_blocks.append(factor)
+    if not residual_blocks:
+        return np.zeros(0, dtype=float)
+    if normalize_numeric_backend(numeric_backend) == "rust":
+        from sim.rust_estimation_backend import measurement_whiten_variable_rows
+
+        return measurement_whiten_variable_rows(residual_blocks, factor_blocks)
+    return np.concatenate(
+        [
+            whiten_residual_with_factor(
                 residual,
-                covariance_factors[index],
-                field_name=f"measurement {row['measurement_id']!r} covariance",
+                factor,
+                field_name=f"measurement {rows[index]['measurement_id']!r} covariance",
             )
-        values.append(whitened)
-    return np.concatenate(values) if values else np.zeros(0, dtype=float)
+            for index, (residual, factor) in enumerate(zip(residual_blocks, factor_blocks, strict=True))
+        ]
+    )
+
+
+def _native_ground_station_predictions(
+    rows: Sequence[Mapping[str, Any]],
+    states: np.ndarray,
+    *,
+    epoch_jd_utc: float,
+    frame_context: FrameContext,
+    geometry_cache: dict[tuple[str, float, float, float, float], tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] | None,
+    time_offset_s: float = 0.0,
+) -> list[dict[str, float]] | None:
+    """Prepare frame-owned geometry and evaluate the native station kernel."""
+
+    from sim.rust_estimation_backend import ground_station_predictions
+
+    states_array = np.asarray(states, dtype=float)
+    if states_array.shape != (len(rows), 6):
+        raise ValueError("ground-station states must have shape (row_count, 6)")
+    target_ecef: list[np.ndarray] = []
+    station_ecef: list[np.ndarray] = []
+    station_eci: list[np.ndarray] = []
+    station_velocity_eci: list[np.ndarray] = []
+    enu_rotations: list[np.ndarray] = []
+    for row, state in zip(rows, states_array, strict=True):
+        time_s = float(row["time_s"]) + float(time_offset_s)
+        geometry = _cached_ground_station_geometry(
+            geometry_cache,
+            station_id=str(row["station_id"]),
+            station=dict(row["station"]),
+            t_s=time_s,
+            frame_context=frame_context,
+        )
+        if geometry is None:
+            return None
+        station_ecef_row, station_eci_row, station_velocity_row, enu_rotation = geometry
+        target_ecef.append(
+            transform_position(
+                state[:3],
+                "eci",
+                "ecef",
+                t_s=time_s,
+                context=frame_context,
+            )
+        )
+        station_ecef.append(station_ecef_row)
+        station_eci.append(station_eci_row)
+        station_velocity_eci.append(station_velocity_row)
+        enu_rotations.append(enu_rotation)
+    predicted = ground_station_predictions(
+        states_array,
+        np.asarray(target_ecef, dtype=float),
+        np.asarray(station_ecef, dtype=float),
+        np.asarray(station_eci, dtype=float),
+        np.asarray(station_velocity_eci, dtype=float),
+        np.asarray(enu_rotations, dtype=float),
+    )
+    names = ("azimuth_deg", "elevation_deg", "range_km", "range_rate_km_s")
+    return [{name: float(predicted[index, column]) for column, name in enumerate(names)} for index in range(len(rows))]
 
 
 def _measurement_covariance_factors(
@@ -1371,39 +1475,49 @@ def _predicted_measurement_with_systematics(
     parameter_values: Mapping[str, float] | None,
     clock_fd_step_s: float,
     geometry_cache: dict[tuple[str, float, float, float, float], tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] | None = None,
+    geometric_override: Mapping[str, float] | None = None,
+    geometric_plus_override: Mapping[str, float] | None = None,
 ) -> tuple[dict[str, float], dict[str, Any]]:
     station = dict(row["station"])
     nominal_time_s = float(row["time_s"])
-    geometric = _predict_ground_station_measurement(
-        target_state_eci=state,
-        station=station,
-        t_s=nominal_time_s,
-        jd_utc_start=epoch_jd_utc,
-        frame_context=frame_context,
-        geometry=_cached_ground_station_geometry(
-            geometry_cache,
-            station_id=str(row["station_id"]),
+    geometric = (
+        dict(geometric_override)
+        if geometric_override is not None
+        else _predict_ground_station_measurement(
+            target_state_eci=state,
             station=station,
             t_s=nominal_time_s,
-            frame_context=frame_context,
-        ),
-    )
-    derivative: dict[str, float] | None = None
-    if state_plus is not None:
-        plus_time_s = nominal_time_s + float(clock_fd_step_s)
-        plus = _predict_ground_station_measurement(
-            target_state_eci=state_plus,
-            station=station,
-            t_s=plus_time_s,
             jd_utc_start=epoch_jd_utc,
             frame_context=frame_context,
             geometry=_cached_ground_station_geometry(
                 geometry_cache,
                 station_id=str(row["station_id"]),
                 station=station,
-                t_s=plus_time_s,
+                t_s=nominal_time_s,
                 frame_context=frame_context,
             ),
+        )
+    )
+    derivative: dict[str, float] | None = None
+    if state_plus is not None:
+        plus_time_s = nominal_time_s + float(clock_fd_step_s)
+        plus = (
+            dict(geometric_plus_override)
+            if geometric_plus_override is not None
+            else _predict_ground_station_measurement(
+                target_state_eci=state_plus,
+                station=station,
+                t_s=plus_time_s,
+                jd_utc_start=epoch_jd_utc,
+                frame_context=frame_context,
+                geometry=_cached_ground_station_geometry(
+                    geometry_cache,
+                    station_id=str(row["station_id"]),
+                    station=station,
+                    t_s=plus_time_s,
+                    frame_context=frame_context,
+                ),
+            )
         )
         derivative = {
             component: _component_residual(component, float(plus[component]), float(geometric[component]))
