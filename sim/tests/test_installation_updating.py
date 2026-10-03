@@ -34,6 +34,7 @@ from sim.installation.manager import (
     configure_channel,
     configured_channel_url,
     download_release,
+    download_release_wheelhouse,
     install_bundle,
     install_latest_release,
     install_release,
@@ -563,6 +564,82 @@ def test_wrong_platform_and_source_version_are_rejected(
     manifest.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ContractError, match="does not match signed manifest"):
         install_release(manifest, paths=_paths(tmp_path / "mismatch"), public_keys=keys, create_runtime=False)
+
+
+@pytest.mark.parametrize("defect", [None, "wheel", "manifest", "extra"])
+def test_online_release_fetches_only_signed_bundle_wheels(
+    tmp_path: Path, signing_keys: tuple[object, dict[str, RSAPublicKey]], defect: str | None,
+) -> None:
+    import hashlib
+
+    private, keys = signing_keys
+    manifest_path, _ = _release(tmp_path, "0.32.0", private)
+    manifest = json.loads(manifest_path.read_text())
+    contents = b"qualified native wheel bytes"
+    wheel = {
+        "name": "native-0.1-py3-none-any.whl", "kind": "wheel",
+        "path": "wheelhouse/native-0.1-py3-none-any.whl", "bytes": len(contents),
+        "sha256": hashlib.sha256(contents).hexdigest(), "media_type": "application/zip",
+    }
+    manifest["artifacts"].append(wheel)
+    manifest["architecture"] = platform.machine()
+    manifest["supply_chain"] = {"offline_runtime_qualification": {"python": platform.python_version()}}
+    manifest = sign_payload(manifest, private)  # type: ignore[arg-type]
+    manifest_path.write_text(json.dumps(manifest))
+    tag = f"py{sys.version_info.major}{sys.version_info.minor}"
+    bundle = manifest_path.parent / f"oel-public-0.32.0-{platform.machine().lower()}-{tag}.bundle.zip"
+    bundled = dict(manifest)
+    if defect == "manifest":
+        bundled["version"] = "0.31.0"
+    with zipfile.ZipFile(bundle, "w") as archive:
+        archive.writestr("release-manifest.json", json.dumps(bundled))
+        archive.writestr(wheel["path"], b"tampered" if defect == "wheel" else contents)
+        if defect == "extra":
+            archive.writestr("wheelhouse/unlisted.whl", b"untrusted")
+    if defect:
+        with pytest.raises((ContractError, ValueError)):
+            download_release(manifest_path.as_uri(), paths=_paths(tmp_path), public_keys=keys, allow_local_file=True)
+        assert not (_paths(tmp_path).cache / "public/stable/0.32.0/wheelhouse").exists()
+    else:
+        receipt = download_release(manifest_path.as_uri(), paths=_paths(tmp_path), public_keys=keys, allow_local_file=True)
+        assert (Path(receipt["wheelhouse"]) / wheel["name"]).read_bytes() == contents
+        assert verify_payload(json.loads(Path(receipt["manifest"]).read_text()), keys)
+
+
+def test_bundled_online_download_rejects_wrong_minor_before_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def network(*args: object, **kwargs: object) -> None:
+        pytest.fail("A mismatched runtime must fail before downloading or pip")
+    monkeypatch.setattr("sim.installation.manager._download_url", network)
+    manifest = {
+        "version": "0.32.0", "artifacts": [{"kind": "wheel"}],
+        "supply_chain": {"offline_runtime_qualification": {"python": f"3.{sys.version_info.minor + 1}.0"}},
+    }
+    with pytest.raises(ContractError, match="qualified for CPython"):
+        download_release_wheelhouse(manifest, "https://example.test/release-manifest.json", tmp_path)
+
+
+def test_bootstrap_selects_signed_qualified_python_before_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tools.installers import bootstrap_install
+
+    monkeypatch.setattr(bootstrap_install.sys, "version_info", (3, 14, 0))
+    monkeypatch.setattr(bootstrap_install.shutil, "which", lambda name: "/trusted/python3.11" if name == "python3.11" else None)
+    monkeypatch.setattr(bootstrap_install.subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0))
+    calls = []
+    def execute(path: str, arguments: list[str]) -> None:
+        calls.append((path, arguments))
+        raise RuntimeError("verified interpreter selected")
+    monkeypatch.setattr(bootstrap_install.os, "execv", execute)
+    manifest = {"artifacts": [{"kind": "wheel"}], "supply_chain": {"offline_runtime_qualification": {"python": "3.11.14"}}}
+    with pytest.raises(RuntimeError, match="verified interpreter selected"):
+        bootstrap_install._use_qualified_python(manifest)
+    assert calls[0][0] == "/trusted/python3.11"
+    monkeypatch.setattr(bootstrap_install.shutil, "which", lambda name: None)
+    with pytest.raises(SystemExit, match="requires CPython 3.11"):
+        bootstrap_install._use_qualified_python(manifest)
 
 
 def test_download_preserves_signed_manifest_and_rejects_feed_rollback(

@@ -6,6 +6,22 @@ macOS, and Linux compatibility targets. Python 3.14 is recommended.
 
 ## Managed Installation
 
+The v0.32.0 managed bundle is qualified for macOS arm64 with CPython 3.11.
+The signed bootstrap selects that installed Python minor, downloads the
+versioned GitHub bundle, verifies its manifest and every dependency wheel,
+and installs without consulting a package index. Install CPython 3.11 first
+if it is unavailable. The engine's broader Python compatibility and the
+Windows/Linux native diagnostic results do not qualify this managed bundle
+for those other targets.
+
+For an existing v0.31.0 managed installation using Python 3.11, download
+`oel-public-0.32.0-arm64-py311.bundle.zip` from the official v0.32.0 release,
+then run `oel update install-bundle <downloaded-bundle> --profile game`
+and `oel update activate 0.32.0`. This preserves the older version for
+rollback. The v0.31 updater's online `install latest` path predates bundled
+native dependencies; use this bundle route or rerun the v0.32 installer.
+From v0.32 onward, online updates fetch and verify the declared bundle wheels.
+
 An official public release publishes a small `install.sh`, `install.ps1`,
 signed `release-manifest.json`, source artifact, and offline bundle as immutable
 assets on the public OEL GitHub release. The stable convenience URL below
