@@ -22,7 +22,7 @@ from sim.utils.frames import ric_curv_to_rect, ric_rect_state_to_eci
 MAX_CR3BP_HALO_PHASE_SUBSTEPS = 100_000
 
 
-def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = None) -> tuple[np.ndarray, np.ndarray]:
+def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = None, numeric_backend: str = "rust") -> tuple[np.ndarray, np.ndarray]:
     if not s0 or bool(s0.get("default_circular_earth", False)):
         pos = np.array([7000.0, 0.0, 0.0], dtype=float)
         spd = float(np.sqrt(EARTH_MU_KM3_S2 / np.linalg.norm(pos)))
@@ -79,7 +79,7 @@ def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = 
                 )
             while remaining_s > 1.0e-9:
                 dt_s = min(substep_s, remaining_s)
-                state = propagate_cr3bp_state(state, dt_s, current_t_s, system=system)
+                state = propagate_cr3bp_state(state, dt_s, current_t_s, system=system, numeric_backend=numeric_backend)
                 current_t_s += dt_s
                 remaining_s -= dt_s
         return state[:3], state[3:]
@@ -95,13 +95,14 @@ def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = 
 
     tle = s0.get("tle")
     if isinstance(tle, dict):
-        return tle_block_to_rv_eci(tle, target_jd_utc=target_jd_utc)
+        return tle_block_to_rv_eci(tle, target_jd_utc=target_jd_utc, numeric_backend=numeric_backend)
 
     mean_elements = s0.get("ogp_mean_elements")
     if isinstance(mean_elements, dict):
         return tle_to_rv_eci_ogp(
             ogp_mean_elements_from_mapping(mean_elements),
             target_jd_utc=target_jd_utc,
+            numeric_backend=numeric_backend,
         )
 
     coes = s0.get("coes")
@@ -123,7 +124,7 @@ def _rv_from_initial_state(s0: dict[str, Any], *, target_jd_utc: float | None = 
     )
 
 
-def _default_truth_from_agent(agent_cfg: Any, t_s: float = 0.0, target_jd_utc: float | None = None) -> StateTruth:
+def _default_truth_from_agent(agent_cfg: Any, t_s: float = 0.0, target_jd_utc: float | None = None, *, numeric_backend: str | None = None) -> StateTruth:
     s0 = dict(agent_cfg.initial_state or {})
     specs = dict(agent_cfg.specs or {})
     if ("dry_mass_kg" in specs) or ("fuel_mass_kg" in specs):
@@ -136,7 +137,9 @@ def _default_truth_from_agent(agent_cfg: Any, t_s: float = 0.0, target_jd_utc: f
         mass_kg = float(specs.get("mass_kg", 300.0))
     if not np.isfinite(mass_kg) or mass_kg <= 0.0:
         raise ValueError("Object mass must be a positive finite value.")
-    pos, vel = _rv_from_initial_state(s0, target_jd_utc=target_jd_utc)
+    if numeric_backend is None:
+        numeric_backend = dict(getattr(agent_cfg, "general", {}) or {}).get("numeric_backend", "rust")
+    pos, vel = _rv_from_initial_state(s0, target_jd_utc=target_jd_utc, numeric_backend=numeric_backend)
     return StateTruth(
         position_eci_km=pos,
         velocity_eci_km_s=vel,

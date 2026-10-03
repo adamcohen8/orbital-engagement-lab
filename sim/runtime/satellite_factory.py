@@ -28,6 +28,7 @@ from sim.dynamics.orbit.propagator import (
     third_body_sun_plugin,
 )
 from sim.dynamics.spacecraft_geometry import GeometryAreaProfile
+from sim.numeric_backend import normalize_numeric_backend
 from sim.presets.thrusters import resolve_thruster_max_thrust_n_from_specs, resolve_thruster_mount_from_specs
 from sim.runtime.actuator_factory import (
     _initial_state_nonnegative_float,
@@ -198,6 +199,10 @@ def _build_orbit_propagator(
             initial_jd_utc=float(cfg.simulator.initial_jd_utc),
             name=f"{plugin_spec_field(pointer, 'module')}.{plugin_spec_field(pointer, 'class_name') or plugin_spec_field(pointer, 'function')}",
         ))
+    numeric_backend = normalize_numeric_backend(
+        orbit.get("numeric_backend", "rust"),
+        field_name="simulator.dynamics.orbit.numeric_backend",
+    )
     return OrbitPropagator(
         model=str(orbit.get("model", "two_body") or "two_body"),
         cr3bp_system_name=str(orbit.get("cr3bp_system", "earth_moon") or "earth_moon"),
@@ -206,6 +211,7 @@ def _build_orbit_propagator(
         adaptive_atol=float(orbit.get("adaptive_atol", 1e-9)),
         adaptive_rtol=float(orbit.get("adaptive_rtol", 1e-7)),
         acceleration_mode=str(acceleration.get("mode", "off") or "off"),
+        numeric_backend=numeric_backend,
     )
 
 
@@ -218,7 +224,20 @@ def _create_satellite_runtime(
     scenario_uses_aerodynamic_lift: bool | None = None,
 ) -> AgentRuntime:
     initial_state = dict(agent_cfg.initial_state or {})
-    truth = _default_truth_from_agent(agent_cfg, t_s=0.0, target_jd_utc=cfg.simulator.initial_jd_utc)
+    general_cfg = dict(getattr(agent_cfg, "general", {}) or {})
+    if "numeric_backend" in general_cfg:
+        initial_numeric_backend_value = general_cfg["numeric_backend"]
+        initial_numeric_backend_path = f"objects.{object_id}.general.numeric_backend"
+    else:
+        orbit_cfg = dict(cfg.simulator.dynamics.get("orbit", {}) or {})
+        initial_numeric_backend_value = orbit_cfg.get("numeric_backend", "rust")
+        initial_numeric_backend_path = "simulator.dynamics.orbit.numeric_backend"
+    initial_numeric_backend = normalize_numeric_backend(
+        initial_numeric_backend_value, field_name=initial_numeric_backend_path
+    )
+    truth = _default_truth_from_agent(
+        agent_cfg, t_s=0.0, target_jd_utc=cfg.simulator.initial_jd_utc, numeric_backend=initial_numeric_backend
+    )
     specs = dict(agent_cfg.specs or {})
     inertia_kg_m2 = _resolve_satellite_inertia_kg_m2(specs)
     center_of_mass_body_m = resolve_center_of_mass_body_m(specs)
@@ -251,7 +270,12 @@ def _create_satellite_runtime(
     att_cfg = dict(cfg.simulator.dynamics.get("attitude", {}) or {})
     attitude_enabled = bool(att_cfg.get("enabled", True))
     dist_cfg = dict(att_cfg.get("disturbance_torques", {}) or {})
+    attitude_numeric_backend = normalize_numeric_backend(
+        att_cfg.get("numeric_backend", "rust"),
+        field_name="simulator.dynamics.attitude.numeric_backend",
+    )
     disturbance_config_kwargs: dict[str, Any] = {
+        "numeric_backend": attitude_numeric_backend,
         "use_gravity_gradient": bool(dist_cfg.get("gravity_gradient", False)),
         "use_magnetic": bool(dist_cfg.get("magnetic", False)),
         "use_drag": bool(dist_cfg.get("drag", False)),
@@ -299,6 +323,7 @@ def _create_satellite_runtime(
         if att_cfg.get("attitude_substep_s") is not None
         else None,
         propagate_attitude=attitude_enabled,
+        attitude_numeric_backend=attitude_numeric_backend,
         orbit_propagator=_build_orbit_propagator(
             cfg,
             radiation_area_m2=srp_area_m2,

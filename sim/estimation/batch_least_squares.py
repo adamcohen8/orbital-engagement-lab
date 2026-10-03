@@ -57,6 +57,7 @@ def solve_batch_least_squares(
     prior_mean_native: np.ndarray | None = None,
     prior_covariance_native: np.ndarray | None = None,
     prior_parameter_names: Sequence[str] | None = None,
+    jacobian_step_native: Sequence[float] | np.ndarray | None = None,
 ) -> BatchLeastSquaresResult:
     """Solve a scaled nonlinear least-squares problem with auditable weighting."""
 
@@ -64,6 +65,13 @@ def solve_batch_least_squares(
     x0_scaled = parameters.to_scaled(x0_native)
     lower_scaled = parameters.lower_scaled()
     upper_scaled = parameters.upper_scaled()
+    if jacobian_step_native is None:
+        jacobian_step_scaled = None
+    else:
+        step_native = np.asarray(jacobian_step_native, dtype=float).reshape(-1)
+        if step_native.size != x0_native.size or not np.all(np.isfinite(step_native)) or np.any(step_native <= 0.0):
+            raise ValueError("jacobian_step_native must contain one finite positive step per parameter")
+        jacobian_step_scaled = step_native / parameters.scales()
 
     loss_key = str(robust_loss or "linear").strip().lower()
     robust_weights(np.zeros(1), loss=loss_key, f_scale=robust_f_scale)
@@ -146,6 +154,7 @@ def solve_batch_least_squares(
         gtol=gtol,
         robust_loss=loss_key,
         robust_f_scale=float(robust_f_scale),
+        jacobian_step_scaled=jacobian_step_scaled,
     )
     raw_first = residual_scaled(np.asarray(result.x, dtype=float))
     data_count = int(raw_first.size - prior_count)
@@ -173,6 +182,7 @@ def solve_batch_least_squares(
             gtol=gtol,
             robust_loss=loss_key,
             robust_f_scale=float(robust_f_scale),
+            jacobian_step_scaled=jacobian_step_scaled,
         )
     x_scaled = np.asarray(result.x, dtype=float)
     raw_residual = residual_scaled(x_scaled)
@@ -247,6 +257,7 @@ def _run_least_squares(
     gtol: float,
     robust_loss: str,
     robust_f_scale: float,
+    jacobian_step_scaled: np.ndarray | None = None,
 ) -> Any:
     try:
         from scipy.optimize import least_squares  # type: ignore
@@ -264,10 +275,33 @@ def _run_least_squares(
             upper_scaled=upper_scaled,
             max_nfev=max_nfev,
             xtol=xtol,
+            jacobian_step_scaled=jacobian_step_scaled,
         )
+    jacobian = "2-point"
+    if jacobian_step_scaled is not None:
+        steps = np.asarray(jacobian_step_scaled, dtype=float).reshape(-1)
+
+        def absolute_step_jacobian(x_scaled: np.ndarray) -> np.ndarray:
+            x = np.asarray(x_scaled, dtype=float).reshape(-1)
+            baseline = np.asarray(residual_fn(x), dtype=float).reshape(-1)
+            columns = []
+            for index, step in enumerate(steps):
+                direction = 1.0 if x[index] + step <= upper_scaled[index] else -1.0
+                if direction < 0.0 and x[index] - step < lower_scaled[index]:
+                    raise ValueError("finite-difference step does not fit within parameter bounds")
+                trial = x.copy()
+                trial[index] += direction * step
+                shifted = np.asarray(residual_fn(trial), dtype=float).reshape(-1)
+                if shifted.shape != baseline.shape:
+                    raise ValueError("finite-difference residual dimension changed")
+                columns.append((shifted - baseline) / (direction * step))
+            return np.column_stack(columns)
+
+        jacobian = absolute_step_jacobian
     return least_squares(
         residual_fn,
         x0_scaled,
+        jac=jacobian,
         bounds=(lower_scaled, upper_scaled),
         max_nfev=max_nfev,
         xtol=xtol,
@@ -464,6 +498,7 @@ def _solve_gauss_newton_fallback(
     upper_scaled: np.ndarray,
     max_nfev: int,
     xtol: float,
+    jacobian_step_scaled: np.ndarray | None = None,
 ) -> _FallbackResult:
     x = np.clip(np.asarray(x0_scaled, dtype=float), lower_scaled, upper_scaled)
     r = residual_fn(x)
@@ -476,9 +511,12 @@ def _solve_gauss_newton_fallback(
     # actual residual-evaluation ceiling for the finite-difference path.
     max_residual_evals = max(int(max_nfev), int(max_nfev) * (2 * int(x.size) + 1))
     for _ in range(max(max_nfev - 1, 0)):
-        j = _finite_difference_jacobian(residual_fn, x, r)
+        j = _finite_difference_jacobian(
+            residual_fn, x, r, steps=jacobian_step_scaled,
+            lower=lower_scaled, upper=upper_scaled,
+        )
         last_j = j
-        nfev += 2 * x.size
+        nfev += x.size if jacobian_step_scaled is not None else 2 * x.size
         base_cost = float(np.dot(r, r))
         gradient = j.T @ r
         if float(np.linalg.norm(gradient, ord=np.inf)) <= xtol:
@@ -535,9 +573,23 @@ def _finite_difference_jacobian(
     residual_fn: Callable[[np.ndarray], np.ndarray],
     x: np.ndarray,
     r0: np.ndarray,
+    *,
+    steps: np.ndarray | None = None,
+    lower: np.ndarray | None = None,
+    upper: np.ndarray | None = None,
 ) -> np.ndarray:
     j = np.zeros((r0.size, x.size), dtype=float)
     for idx in range(x.size):
+        if steps is not None:
+            step = float(steps[idx])
+            if upper is not None and x[idx] + step > upper[idx]:
+                step = -step
+            if lower is not None and x[idx] + step < lower[idx]:
+                raise ValueError("finite-difference step does not fit within parameter bounds")
+            xp = x.copy()
+            xp[idx] += step
+            j[:, idx] = (residual_fn(xp) - r0) / step
+            continue
         step = max(1.0e-6, abs(float(x[idx])) * 1.0e-6)
         xp = x.copy()
         xm = x.copy()

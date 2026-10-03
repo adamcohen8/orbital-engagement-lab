@@ -97,6 +97,12 @@ def interpolate_history(history: StateHistory, time_s: float, *, side: str = "ri
     """
 
     times, states = history.arrays()
+    return _interpolate_prepared(history, times, states, time_s, side=side)
+
+
+def _interpolate_prepared(history: StateHistory, times: np.ndarray, states: np.ndarray,
+                          time_s: float, *, side: str = "right") -> np.ndarray:
+    """Use operation-local snapshots without changing public arrays() copy semantics."""
     query = float(time_s)
     if query < times[0] or query > times[-1]:
         raise ConjunctionGeometryError("Interpolation time lies outside the supplied history.")
@@ -145,11 +151,19 @@ def _stationary_fractions(left_relative: np.ndarray, right_relative: np.ndarray,
     return sorted({round(value, 15) for value in fractions})
 
 
-def refine_time_of_closest_approach(primary: StateHistory, secondary: StateHistory) -> dict[str, Any]:
+def refine_time_of_closest_approach(primary: StateHistory, secondary: StateHistory, *,
+                                    numeric_backend: str = "rust") -> dict[str, Any]:
     """Return the global minimum separation over the histories' common span."""
 
-    primary_times, _ = primary.arrays()
-    secondary_times, _ = secondary.arrays()
+    backend = str(numeric_backend).strip().lower()
+    if backend not in {"python", "rust"}:
+        raise ConjunctionGeometryError("numeric_backend must be 'python' or 'rust'.")
+    if backend == "rust":
+        from sim.rust_conjunction_backend import _kernels
+
+        _kernels()
+    primary_times, primary_states = primary.arrays()
+    secondary_times, secondary_states = secondary.arrays()
     start = max(float(primary_times[0]), float(secondary_times[0]))
     stop = min(float(primary_times[-1]), float(secondary_times[-1]))
     if not stop > start:
@@ -163,29 +177,51 @@ def refine_time_of_closest_approach(primary: StateHistory, secondary: StateHisto
             )
         )
     )
+    if backend == "rust":
+        from sim.rust_conjunction_backend import hermite_batch, history_context, interpolate
+
+        primary_context = history_context(primary_times, primary_states, primary.incoming_velocities_eci_km_s)
+        secondary_context = history_context(secondary_times, secondary_states, secondary.incoming_velocities_eci_km_s)
+        relative_lefts = (interpolate(primary_context, breakpoints[:-1], side="right")
+                          - interpolate(secondary_context, breakpoints[:-1], side="right"))
+        relative_rights = (interpolate(primary_context, breakpoints[1:], side="left")
+                           - interpolate(secondary_context, breakpoints[1:], side="left"))
+    pending = []
+    cases = []
     candidates: list[tuple[float, float, bool, int, int]] = []
     evaluations = 0
     for index, (left, right) in enumerate(zip(breakpoints[:-1], breakpoints[1:], strict=True)):
         duration = float(right - left)
-        primary_left = interpolate_history(primary, float(left), side="right")
-        primary_right = interpolate_history(primary, float(right), side="left")
-        secondary_left = interpolate_history(secondary, float(left), side="right")
-        secondary_right = interpolate_history(secondary, float(right), side="left")
-        relative_left = primary_left - secondary_left
-        relative_right = primary_right - secondary_right
+        if backend == "rust":
+            relative_left, relative_right = relative_lefts[index], relative_rights[index]
+        else:
+            primary_left = _interpolate_prepared(primary, primary_times, primary_states, float(left), side="right")
+            primary_right = _interpolate_prepared(primary, primary_times, primary_states, float(right), side="left")
+            secondary_left = _interpolate_prepared(secondary, secondary_times, secondary_states, float(left), side="right")
+            secondary_right = _interpolate_prepared(secondary, secondary_times, secondary_states, float(right), side="left")
+            relative_left = primary_left - secondary_left
+            relative_right = primary_right - secondary_right
         fractions = _stationary_fractions(relative_left, relative_right, duration)
         for fraction in fractions:
-            relative = _hermite_state(relative_left, relative_right, duration, fraction)
-            distance_squared = float(relative[:3] @ relative[:3])
             time_s = float(left) + fraction * duration
             evaluations += 1
-            candidates.append((distance_squared, time_s, fraction in {0.0, 1.0}, index, len(fractions) - 2))
+            descriptor = (time_s, fraction in {0.0, 1.0}, index, len(fractions) - 2)
+            if backend == "rust":
+                pending.append(descriptor)
+                cases.append(np.concatenate((relative_left, relative_right, [duration, fraction])))
+            else:
+                relative = _hermite_state(relative_left, relative_right, duration, fraction)
+                distance_squared = float(relative[:3] @ relative[:3])
+                candidates.append((distance_squared, *descriptor))
+    if backend == "rust":
+        for relative, descriptor in zip(hermite_batch(cases), pending, strict=True):
+            candidates.append((float(relative[:3] @ relative[:3]), *descriptor))
     distance2, time_s, boundary, interval_index, stationary_roots = min(candidates, key=lambda item: item[0])
-    primary_state = interpolate_history(primary, time_s)
-    secondary_state = interpolate_history(secondary, time_s)
+    primary_state = _interpolate_prepared(primary, primary_times, primary_states, time_s)
+    secondary_state = _interpolate_prepared(secondary, secondary_times, secondary_states, time_s)
     relative = primary_state - secondary_state
     r_dot_v = float(relative[:3] @ relative[3:])
-    return {
+    result = {
         "time_s": time_s,
         "miss_distance_km": math.sqrt(max(distance2, 0.0)),
         "relative_speed_km_s": float(np.linalg.norm(relative[3:])),
@@ -207,6 +243,9 @@ def refine_time_of_closest_approach(primary: StateHistory, secondary: StateHisto
             "winning_interval_stationary_roots": stationary_roots,
         },
     }
+    if backend == "rust":
+        result["numeric_backend"] = "rust"
+    return result
 
 
 def encounter_frame(

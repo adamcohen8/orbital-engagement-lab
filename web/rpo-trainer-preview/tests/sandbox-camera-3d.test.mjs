@@ -15,6 +15,17 @@ test('orthographic RIC camera uses R up and an orthonormal equal-scale basis',()
  assert.equal(b[0][0],0);assert.ok(b[1][0]>0);
  for(let i=0;i<2;i++)for(let j=0;j<2;j++)assert.ok(Math.abs(b[i].reduce((s,v,k)=>s+v*b[j][k],0)-(i===j?1:0))<1e-12);
 });
+test('Space Force in-track convention mirrors the 3D +I projection',()=>{
+ const camera=new RicCamera3D();
+ camera.focus=[0,0,0];camera.span=4;
+ const positiveI={r:0,i:1,c:0};
+ const oel=camera.project(positiveI,400,400);
+ camera.inTrackSign=-1;
+ const spaceForce=camera.project(positiveI,400,400);
+ assert.ok(oel.x>200);
+ assert.ok(spaceForce.x<200);
+ assert.equal(oel.x-200,200-spaceForce.x);
+});
 test('camera keeps both satellites within view after zoom, pan and rotation',()=>{
  const points=[{r:0,i:0,c:0},{r:2,i:-3,c:1}];
  for(const [w,h] of [[1200,400],[600,700]]) {

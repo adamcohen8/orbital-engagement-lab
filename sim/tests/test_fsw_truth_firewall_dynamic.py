@@ -154,6 +154,38 @@ def test_runtime_keeps_recursive_output_firewall_for_external_stack_subclasses()
         runtime.prepare_interval(truth, start_time_ns=0)
 
 
+def test_runtime_rejects_an_unsupported_output_contract_before_publication() -> None:
+    truth = StateTruth(np.zeros(3), np.zeros(3), np.array([1.0, 0.0, 0.0, 0.0]), np.zeros(3), 100.0, 0.0)
+
+    class UnsupportedContractStack(PassiveFlightSoftwareStack):
+        def _step(self, incoming):  # type: ignore[no-untyped-def]
+            return FlightSoftwareOutput(
+                incoming.satellite_id,
+                incoming.invocation_id,
+                schema="unsupported.output.v0",  # type: ignore[arg-type]
+            )
+
+    inertial = FrameId("OEL/ECI/J2000", "frames-v1")
+    body = FrameId("OEL/BODY/satellite", "frames-v1")
+    runtime = SatelliteFlightSoftwareRuntime(
+        satellite_id="satellite",
+        stack=UnsupportedContractStack(
+            PassiveStackConfig(
+                satellite_id="satellite",
+                inertial_frame=inertial,
+                body_frame=body,
+            )
+        ),
+        devices=(),
+        hardware={},
+        inertial_frame=inertial,
+        body_frame=body,
+        task_period_ns=1_000_000_000,
+    )
+    with pytest.raises(ValueError, match="output schema"):
+        runtime.prepare_interval(truth, start_time_ns=0)
+
+
 def test_runtime_checks_publicly_enqueued_open_kind_at_point_of_use() -> None:
     truth = StateTruth(np.zeros(3), np.zeros(3), np.array([1.0, 0.0, 0.0, 0.0]), np.zeros(3), 100.0, 0.0)
     inertial = FrameId("OEL/ECI/J2000", "frames-v1")

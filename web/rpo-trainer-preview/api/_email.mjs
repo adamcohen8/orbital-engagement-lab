@@ -23,14 +23,20 @@ export function verificationExpiryIso(now = new Date()) {
   return new Date(now.getTime() + EMAIL_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
 }
 
-export function publicOrigin(req) {
-  const configured = String(process.env.OEL_ARCADE_PUBLIC_ORIGIN || "").replace(/\/+$/, "");
-  if (configured) return configured;
-  const allowed = String(process.env.OEL_ARCADE_ALLOWED_ORIGIN || "").replace(/\/+$/, "");
-  if (allowed && allowed !== "*") return allowed;
-  const host = req?.headers?.host;
-  const proto = req?.headers?.["x-forwarded-proto"] || "https";
-  return host ? `${proto}://${host}` : "https://orbital-engineering-lab.vercel.app";
+export function publicOrigin() {
+  const configured = String(process.env.OEL_ARCADE_PUBLIC_ORIGIN || "").trim();
+  let parsed;
+  try {
+    parsed = new URL(configured);
+  } catch {
+    throw new Error("OEL_ARCADE_PUBLIC_ORIGIN must be a fixed HTTPS origin before sending verification email.");
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password
+      || parsed.pathname !== "/" || parsed.search || parsed.hash
+      || configured.replace(/\/+$/, "") !== parsed.origin) {
+    throw new Error("OEL_ARCADE_PUBLIC_ORIGIN must be a fixed HTTPS origin before sending verification email.");
+  }
+  return parsed.origin;
 }
 
 export function verificationUrl(req, token) {
@@ -68,24 +74,33 @@ export async function sendScoreVerificationEmail({ email, username, score, round
     </div>
   `;
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from,
-      to: [email],
-      subject,
-      html,
-      text,
-      tags: [
-        { name: "app", value: "oel_arcade" },
-        { name: "event", value: "score_verification" },
-      ],
-    }),
-  });
+  let response;
+  try {
+    response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: [email],
+        subject,
+        html,
+        text,
+        tags: [
+          { name: "app", value: "oel_arcade" },
+          { name: "event", value: "score_verification" },
+        ],
+      }),
+    });
+  } catch (error) {
+    // A timeout may occur after the provider accepts the message. Preserve
+    // the token and recipient lock so a retry cannot send duplicate mail.
+    const ambiguous = new Error(error instanceof Error ? error.message : String(error));
+    ambiguous.delivery_ambiguous = true;
+    throw ambiguous;
+  }
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {

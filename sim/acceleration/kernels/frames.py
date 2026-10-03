@@ -184,6 +184,9 @@ def eci_to_ecef_iau76_80_kernel(
         @ _earth_frame_rz(-delta_psi)
         @ _earth_frame_rx(mean_epsilon)
     )
+    # This explicit Vallado rotation is MOD -> TOD (the transpose of the
+    # matrix returned by the public TOD -> MOD nutation helper).  Compose it
+    # with J2000 -> MOD precession for the J2000 -> TOD celestial factor.
     rbpn = nutation @ precession
 
     jd_ut1 = jd_utc + dut1_s / 86400.0
@@ -207,19 +210,25 @@ def eci_to_ecef_iau76_80_kernel(
 
 @njit_or_identity(cache=True)
 def ric_dcm_ir_from_rv_kernel(r_eci_km: np.ndarray, v_eci_km_s: np.ndarray) -> np.ndarray:
-    r_norm = max(np.sqrt(np.dot(r_eci_km, r_eci_km)), 1e-12)
+    r_norm = np.sqrt(np.dot(r_eci_km, r_eci_km))
+    if not np.isfinite(r_norm) or r_norm <= 1e-12:
+        raise ValueError("RIC frame is undefined for a zero or non-finite position vector.")
     r_hat = r_eci_km / r_norm
     h = np.empty(3, dtype=np.float64)
     h[0] = r_eci_km[1] * v_eci_km_s[2] - r_eci_km[2] * v_eci_km_s[1]
     h[1] = r_eci_km[2] * v_eci_km_s[0] - r_eci_km[0] * v_eci_km_s[2]
     h[2] = r_eci_km[0] * v_eci_km_s[1] - r_eci_km[1] * v_eci_km_s[0]
-    h_norm = max(np.sqrt(np.dot(h, h)), 1e-12)
+    h_norm = np.sqrt(np.dot(h, h))
+    if not np.isfinite(h_norm) or h_norm <= 1e-12:
+        raise ValueError("RIC frame is undefined for zero angular momentum.")
     c_hat = h / h_norm
     i_hat = np.empty(3, dtype=np.float64)
     i_hat[0] = c_hat[1] * r_hat[2] - c_hat[2] * r_hat[1]
     i_hat[1] = c_hat[2] * r_hat[0] - c_hat[0] * r_hat[2]
     i_hat[2] = c_hat[0] * r_hat[1] - c_hat[1] * r_hat[0]
-    i_norm = max(np.sqrt(np.dot(i_hat, i_hat)), 1e-12)
+    i_norm = np.sqrt(np.dot(i_hat, i_hat))
+    if not np.isfinite(i_norm) or i_norm <= 1e-12:
+        raise ValueError("RIC frame is undefined for a degenerate basis.")
     i_hat = i_hat / i_norm
     out = np.empty((3, 3), dtype=np.float64)
     out[:, 0] = r_hat
@@ -238,6 +247,37 @@ def ric_angular_rate_eci_from_rv_kernel(r_eci_km: np.ndarray, v_eci_km_s: np.nda
     out[1] = r_eci_km[2] * v_eci_km_s[0] - r_eci_km[0] * v_eci_km_s[2]
     out[2] = r_eci_km[0] * v_eci_km_s[1] - r_eci_km[1] * v_eci_km_s[0]
     return out / r2
+
+
+@njit_or_identity(cache=True)
+def ric_angular_rate_eci_from_rva_kernel(
+    r_eci_km: np.ndarray,
+    v_eci_km_s: np.ndarray,
+    a_eci_km_s2: np.ndarray,
+) -> np.ndarray:
+    """Return the full instantaneous RIC angular rate when acceleration is known."""
+
+    r_norm = np.sqrt(np.dot(r_eci_km, r_eci_km))
+    if not np.isfinite(r_norm) or r_norm <= 1e-12:
+        raise ValueError("RIC frame is undefined for a zero or non-finite position vector.")
+    h = np.empty(3, dtype=np.float64)
+    h[0] = r_eci_km[1] * v_eci_km_s[2] - r_eci_km[2] * v_eci_km_s[1]
+    h[1] = r_eci_km[2] * v_eci_km_s[0] - r_eci_km[0] * v_eci_km_s[2]
+    h[2] = r_eci_km[0] * v_eci_km_s[1] - r_eci_km[1] * v_eci_km_s[0]
+    h_norm = np.sqrt(np.dot(h, h))
+    if not np.isfinite(h_norm) or h_norm <= 1e-12:
+        raise ValueError("RIC frame is undefined for zero angular momentum.")
+    acceleration = np.asarray(a_eci_km_s2, dtype=np.float64).reshape(3)
+    if not np.all(np.isfinite(acceleration)):
+        raise ValueError("RIC angular rate requires a finite acceleration vector.")
+    transverse_speed = h_norm / r_norm
+    if not np.isfinite(transverse_speed) or transverse_speed <= 1e-12:
+        raise ValueError("RIC angular rate is undefined for negligible transverse speed.")
+    r_hat = r_eci_km / r_norm
+    c_hat = h / h_norm
+    out = h / (r_norm * r_norm)
+    out += (np.dot(acceleration, c_hat) / transverse_speed) * r_hat
+    return out
 
 
 @njit_or_identity(cache=True)
@@ -261,11 +301,60 @@ def ric_rect_state_to_eci_kernel(
 
 
 @njit_or_identity(cache=True)
+def ric_rect_state_to_eci_rva_kernel(
+    x_rel_ric_rect: np.ndarray,
+    r_chief_eci_km: np.ndarray,
+    v_chief_eci_km_s: np.ndarray,
+    a_chief_eci_km_s2: np.ndarray,
+) -> np.ndarray:
+    c_ir = ric_dcm_ir_from_rv_kernel(r_chief_eci_km, v_chief_eci_km_s)
+    omega = ric_angular_rate_eci_from_rva_kernel(
+        r_chief_eci_km,
+        v_chief_eci_km_s,
+        a_chief_eci_km_s2,
+    )
+    dr_eci = c_ir @ x_rel_ric_rect[:3]
+    omega_cross_dr = np.empty(3, dtype=np.float64)
+    omega_cross_dr[0] = omega[1] * dr_eci[2] - omega[2] * dr_eci[1]
+    omega_cross_dr[1] = omega[2] * dr_eci[0] - omega[0] * dr_eci[2]
+    omega_cross_dr[2] = omega[0] * dr_eci[1] - omega[1] * dr_eci[0]
+    dv_eci = c_ir @ x_rel_ric_rect[3:] + omega_cross_dr
+    out = np.empty(6, dtype=np.float64)
+    out[:3] = r_chief_eci_km + dr_eci
+    out[3:] = v_chief_eci_km_s + dv_eci
+    return out
+
+
+@njit_or_identity(cache=True)
 def eci_relative_to_ric_rect_kernel(x_dep_eci: np.ndarray, x_chief_eci: np.ndarray) -> np.ndarray:
     r_chief = x_chief_eci[:3]
     v_chief = x_chief_eci[3:]
     c_ir = ric_dcm_ir_from_rv_kernel(r_chief, v_chief)
     omega = ric_angular_rate_eci_from_rv_kernel(r_chief, v_chief)
+    dr_eci = x_dep_eci[:3] - r_chief
+    dv_eci = x_dep_eci[3:] - v_chief
+    dr_ric = c_ir.T @ dr_eci
+    omega_cross_dr = np.empty(3, dtype=np.float64)
+    omega_cross_dr[0] = omega[1] * dr_eci[2] - omega[2] * dr_eci[1]
+    omega_cross_dr[1] = omega[2] * dr_eci[0] - omega[0] * dr_eci[2]
+    omega_cross_dr[2] = omega[0] * dr_eci[1] - omega[1] * dr_eci[0]
+    dv_ric = c_ir.T @ (dv_eci - omega_cross_dr)
+    out = np.empty(6, dtype=np.float64)
+    out[:3] = dr_ric
+    out[3:] = dv_ric
+    return out
+
+
+@njit_or_identity(cache=True)
+def eci_relative_to_ric_rect_rva_kernel(
+    x_dep_eci: np.ndarray,
+    x_chief_eci: np.ndarray,
+    a_chief_eci_km_s2: np.ndarray,
+) -> np.ndarray:
+    r_chief = x_chief_eci[:3]
+    v_chief = x_chief_eci[3:]
+    c_ir = ric_dcm_ir_from_rv_kernel(r_chief, v_chief)
+    omega = ric_angular_rate_eci_from_rva_kernel(r_chief, v_chief, a_chief_eci_km_s2)
     dr_eci = x_dep_eci[:3] - r_chief
     dv_eci = x_dep_eci[3:] - v_chief
     dr_ric = c_ir.T @ dr_eci

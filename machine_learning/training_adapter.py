@@ -61,6 +61,11 @@ def collect_vector_rollout(
         truncated_hist.append(np.array(truncated, dtype=bool))
         info_hist.append(dict(infos))
         next_obs = np.array(step_obs, dtype=np.float32)
+        # Without auto-reset the next vector step would advance a completed
+        # episode.  Stop at the first done slot because step() advances all
+        # slots together.
+        if not bool(getattr(vec_env, "auto_reset", False)) and np.any(np.asarray(terminated) | np.asarray(truncated)):
+            break
     return RolloutBatch(
         obs=np.stack(obs_hist, axis=0),
         actions=np.stack(action_hist, axis=0),
@@ -139,6 +144,8 @@ def collect_multi_agent_rollout(
             truncated_hist[agent_id].append(bool(truncated[agent_id]))
             info_hist[agent_id].append(dict(infos[agent_id]))
             next_obs_by_agent[agent_id] = np.array(step_obs[agent_id], dtype=np.float32)
+        if any(bool(terminated[agent_id]) or bool(truncated[agent_id]) for agent_id in agent_ids):
+            break
 
     return MultiAgentRolloutBatch(
         obs_by_agent={agent_id: np.stack(hist, axis=0) for agent_id, hist in obs_hist.items()},

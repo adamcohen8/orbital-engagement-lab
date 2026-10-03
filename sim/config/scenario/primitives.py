@@ -168,6 +168,8 @@ def _enforce_strict_booleans(value: Any, path: str = "root") -> None:
 
 
 def _parse_float(value: Any, field_name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a finite number, not {value!r}.")
     try:
         out = float(value)
     except (TypeError, ValueError) as exc:
@@ -202,7 +204,10 @@ def _validate_integer_multiple(
 ) -> None:
     ratio = numerator / denominator
     nearest = round(ratio)
-    tol = 1e-9 * max(1.0, abs(ratio))
+    # Scale the acceptance window with representational error, rather than
+    # with the magnitude of the quotient.  A relative tolerance can accept a
+    # genuine half-step once sample counts become large.
+    tol = min(0.25, max(1.0e-12, 8.0 * math.ulp(max(1.0, abs(ratio)))))
     if abs(ratio - nearest) > tol:
         raise ValueError(
             f"{numerator_name} must be an integer multiple of {denominator_name}; "

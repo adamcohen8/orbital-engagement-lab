@@ -408,14 +408,28 @@ def write_commander_brief_markdown(
 ) -> None:
     top_fail = list(brief.get("top_failure_modes", []) or [])
     neutral_study = "study" in str(title).lower()
+    comparison = dict(brief.get("comparison_summary", {}) or {})
+    success_label = "P(success, pooled across comparison options)" if comparison else "P(success)"
     lines = [
         f"# {title}",
         "",
         f"- Scenario: {brief.get('scenario_name', 'unknown')}",
         f"- Runs: {int(brief.get('runs', 0))}",
-        f"- P(success): {100.0 * safe_float(brief.get('p_success'), default=0.0):.1f}%",
+        f"- {success_label}: {100.0 * safe_float(brief.get('p_success'), default=0.0):.1f}%",
         f"- P(fail): {100.0 * safe_float(brief.get('p_fail'), default=0.0):.1f}%",
     ]
+    comparison = dict(brief.get("comparison_summary", {}) or {})
+    if comparison:
+        lines.append("- Probability scope: pooled across comparison options")
+        options = dict(comparison.get("options", {}) or {})
+        if options:
+            lines.append(
+                "- P(success) by option: "
+                + ", ".join(
+                    f"{label}={100.0 * safe_float(dict(option or {}).get('pass_rate'), default=0.0):.1f}%"
+                    for label, option in options.items()
+                )
+            )
     if not neutral_study:
         lines.extend(
             [

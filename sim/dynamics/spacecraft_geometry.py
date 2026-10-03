@@ -142,6 +142,7 @@ class GeometryAreaProfile:
         sample_count: int = 642,
         include_body_axes: bool = True,
         metadata: dict[str, Any] | None = None,
+        numeric_backend: str = "rust",
     ) -> GeometryAreaProfile:
         vertices, normals = load_stl_triangles(path)
         directions = fibonacci_sphere_directions(sample_count, include_body_axes=include_body_axes)
@@ -159,7 +160,13 @@ class GeometryAreaProfile:
             ],
         }
         profile_metadata.update(dict(metadata or {}))
-        return cls.from_triangles(vertices, normals, directions_body=directions, metadata=profile_metadata)
+        return cls.from_triangles(
+            vertices,
+            normals,
+            directions_body=directions,
+            metadata=profile_metadata,
+            numeric_backend=numeric_backend,
+        )
 
     @classmethod
     def from_triangles(
@@ -169,6 +176,7 @@ class GeometryAreaProfile:
         *,
         directions_body: np.ndarray,
         metadata: dict[str, Any] | None = None,
+        numeric_backend: str = "rust",
     ) -> GeometryAreaProfile:
         triangles = np.asarray(vertices_body_m, dtype=float)
         if triangles.ndim != 3 or triangles.shape[1:] != (3, 3) or triangles.shape[0] == 0:
@@ -207,6 +215,23 @@ class GeometryAreaProfile:
         if directions.ndim != 2 or directions.shape[1] != 3 or np.any(direction_norms <= 0.0):
             raise ValueError("Profile directions must be an Nx3 array of nonzero body-frame vectors.")
         directions = directions / direction_norms[:, None]
+
+        if numeric_backend not in {"python", "rust"}:
+            raise ValueError("spacecraft geometry numeric_backend must be python or rust")
+        if numeric_backend == "rust":
+            from sim.rust_spacecraft_backend import facet_projected_geometry
+
+            profile_areas, profile_cps = facet_projected_geometry(
+                triangles,
+                directions,
+                normals_body=normals,
+            )
+            return cls(
+                directions_body=directions,
+                projected_area_m2=profile_areas,
+                center_of_pressure_body_m=profile_cps,
+                metadata=metadata,
+            )
 
         centroids = np.mean(triangles, axis=1)
         profile_areas: list[float] = []

@@ -339,6 +339,18 @@ def test_live_transition_lock_is_not_reclaimed(tmp_path: Path) -> None:
     assert json.loads(lock_path.read_text(encoding="utf-8"))["token"] == "live-transition"
 
 
+def test_torn_transition_lock_is_reclaimed_after_stable_grace(tmp_path: Path) -> None:
+    lock_path = tmp_path / ".run.lock"
+    lock_path.write_bytes(b'{"token":"torn"')
+    stale = time.time() - 2.0
+    os.utime(lock_path, (stale, stale))
+
+    with _RunLock(lock_path, timeout_s=0.5):
+        assert json.loads(lock_path.read_text(encoding="utf-8"))["token"] != "torn"
+
+    assert not lock_path.exists()
+
+
 def test_tampered_manifest_is_reported_as_malformed(tmp_path: Path) -> None:
     store = _store(tmp_path)
     run_id, output = _create(store)

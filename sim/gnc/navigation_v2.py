@@ -100,6 +100,8 @@ class OrbitNavigationSolution:
 
 
 class OrbitNavigator:
+    numeric_backend = "python"
+
     def __init__(
         self,
         *,
@@ -183,6 +185,7 @@ class OrbitNavigator:
         self._position = None if loaded_own_state is None else loaded_own_state.position_eci_m
         self._velocity = None if loaded_own_state is None else loaded_own_state.velocity_eci_m_s
         self._mass: float | None = None
+        self._mass_epoch: ClockTag | None = None
         self._own_epoch = None if loaded_own_state is None else loaded_own_state.epoch
         self._own_packets: list[PacketId] = []
         self._tracks: dict[str, RelativeStateEstimateSI] = {}
@@ -356,6 +359,7 @@ class OrbitNavigator:
             "position": self._position,
             "velocity": self._velocity,
             "mass": self._mass,
+            "mass_epoch": _clock_to_dict(self._mass_epoch),
             "own_epoch": _clock_to_dict(self._own_epoch),
             "own_packets": [_packet_to_dict(packet) for packet in self._own_packets],
             "tracks": [
@@ -398,6 +402,9 @@ class OrbitNavigator:
         self._velocity = velocity
         self._mass = mass
         self._own_epoch = _clock_from_dict(state.get("own_epoch"))
+        self._mass_epoch = _clock_from_dict(state.get("mass_epoch"))
+        if self._mass_epoch is None and mass is not None:
+            self._mass_epoch = self._own_epoch
         self._own_packets = [_packet_from_dict(item) for item in list(state.get("own_packets", []))]
         self._tracks = tracks
         self._faults = {str(key): str(value) for key, value in dict(state.get("faults", {})).items()}
@@ -422,6 +429,21 @@ class OrbitNavigator:
         epoch: ClockTag,
         packet: PacketId,
     ) -> None:
+        if mass is not None:
+            mass_epoch = self._mass_epoch or self._own_epoch
+            if mass_epoch is not None:
+                mass_delta = _elapsed_seconds(mass_epoch, epoch)
+                if mass_delta is None or mass_delta < 0.0:
+                    self._degraded = True
+                    return
+        orbit_update = position is not None or velocity is not None
+        if orbit_update and self._own_epoch is not None:
+            delta = _elapsed_seconds(self._own_epoch, epoch)
+            if delta is None or delta < 0.0 or (
+                (position is None or velocity is None) and delta != 0.0
+            ):
+                self._degraded = True
+                return
         if self.filter_kind is OrbitFilterKind.EKF and position is not None and velocity is not None:
             measured_state = np.concatenate((np.asarray(position), np.asarray(velocity))) / 1000.0
             epoch_s = _clock_seconds(epoch)
@@ -476,7 +498,9 @@ class OrbitNavigator:
             self._velocity = tuple(velocity)
         if mass is not None:
             self._mass = float(mass)
-        self._own_epoch = epoch
+            self._mass_epoch = epoch
+        if orbit_update:
+            self._own_epoch = epoch
         if self._retain_full_provenance:
             self._own_packets.append(packet)
         else:
@@ -506,6 +530,15 @@ class OrbitNavigator:
                 self._degraded = True
                 return
         previous = self._tracks.get(payload.target_track_id)
+        if previous is not None:
+            delta = _elapsed_seconds(previous.epoch, measurement.sample_time)
+            if delta is None or delta < 0.0:
+                self._degraded = True
+                return
+        existing_belief = self._relative_filter_beliefs.get(payload.target_track_id)
+        if existing_belief is not None and _clock_seconds(measurement.sample_time) < existing_belief.last_update_t_s:
+            self._degraded = True
+            return
         range_m = payload.range_m if payload.range_m is not None else (None if previous is None else previous.range_m)
         range_rate = (
             payload.range_rate_m_s
@@ -519,13 +552,9 @@ class OrbitNavigator:
             return
         calibration = self._calibrations.get(measurement.sensor_id)
         los_array = _calibrated_vector(los, calibration)
-        los_array = transform @ los_array
-        los_array /= np.linalg.norm(los_array)
-        position = los_array * range_m
-        velocity = los_array * range_rate
-        if payload.angular_rate_rad_s is not None:
-            angular_rate = transform @ _calibrated_vector(payload.angular_rate_rad_s, calibration)
-            velocity += range_m * np.cross(angular_rate, los_array)
+        angular_rate = (None if payload.angular_rate_rad_s is None else
+                        _calibrated_vector(payload.angular_rate_rad_s, calibration))
+        position, velocity = self._relative_observation_state(los_array, transform, range_m, range_rate, angular_rate)
         if self.filter_kind is OrbitFilterKind.EKF:
             target_id = payload.target_track_id
             state_km = np.concatenate((position, velocity)) / 1000.0
@@ -580,6 +609,15 @@ class OrbitNavigator:
             EstimateValidity.DEGRADED if self._degraded else EstimateValidity.VALID,
         )
 
+    def _relative_observation_state(self, los, transform, range_m, range_rate, angular_rate):
+        direction = transform @ los
+        direction /= np.linalg.norm(direction)
+        position = direction * range_m
+        velocity = direction * range_rate
+        if angular_rate is not None:
+            velocity += range_m * np.cross(transform @ angular_rate, direction)
+        return position, velocity
+
     def _ingest_ideal_tracked(
         self,
         measurement: MeasurementEvent,
@@ -598,10 +636,16 @@ class OrbitNavigator:
         relative = eci_relative_to_ric_rect(
             np.concatenate((own_position, own_velocity)),
             np.concatenate((target_position, target_velocity)),
+            numeric_backend=self.numeric_backend,
         )
         position = relative[:3]
         velocity = relative[3:]
         previous = self._tracks.get(payload.target_id)
+        if previous is not None:
+            delta = _elapsed_seconds(previous.epoch, measurement.sample_time)
+            if delta is None or delta < 0.0:
+                self._degraded = True
+                return
         packets = (
             (packet,)
             if previous is None or not self._retain_full_provenance

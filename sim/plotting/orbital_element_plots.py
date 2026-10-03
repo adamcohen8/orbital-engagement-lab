@@ -11,6 +11,7 @@ from sim.plotting.single_run_math import (
     ORBITAL_ELEMENT_SPECS,
     _classical_orbital_elements_series,
 )
+from sim.plotting.style import tight_layout_oel_figure
 from sim.utils.figure_size import cap_figsize
 
 ArrayMap = dict[str, np.ndarray]
@@ -114,7 +115,7 @@ def plot_orbital_element(
     ax.grid(True, alpha=0.3)
     if plotted:
         ax.legend(loc="best")
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig
 
@@ -158,7 +159,7 @@ def plot_orbital_elements_summary(
     axes[-1, 0].set_xlabel("time (s)")
     axes[-1, 1].set_xlabel("time (s)")
     fig.suptitle("Classical Orbital Elements")
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig
 
@@ -205,6 +206,6 @@ def plot_orbital_elements_angles(
     ax.grid(True, alpha=0.3)
     if plotted:
         ax.legend(loc="best", ncol=2)
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig

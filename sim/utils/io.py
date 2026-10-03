@@ -7,10 +7,16 @@ import os
 import sqlite3
 import stat
 import sys
+from functools import lru_cache
+from importlib import import_module
+from json import dumps
 from json.encoder import encode_basestring_ascii
 from numbers import Integral, Real
 from pathlib import Path
 from typing import Any
+
+_JSON_SCALAR_TYPES = frozenset((str, int, float, bool, type(None)))
+_JSON_LEAF_BATCH_LIMIT = 2048
 
 
 class SafeReadError(OSError):
@@ -407,12 +413,31 @@ def write_json(path: str, payload: dict[str, Any]) -> None:
             # Preserve the historical json_safe + json.dump byte contract while
             # sanitizing values as the encoder visits them. Large run logs no
             # longer require a second full-size Python list/dict tree.
-            for chunk in _iter_json_safe(payload, indent=2):
+            encoder = _native_json_encoder()
+            chunks = _iter_json_safe(payload, indent=2) if encoder is None else encoder(payload, _native_json_fallback)
+            for chunk in chunks:
                 handle.write(chunk)
         tmp.replace(out)
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
+
+
+@lru_cache(maxsize=1)
+def _native_json_encoder():
+    """Use the optional text encoder without requiring a numerical backend."""
+    try:
+        return getattr(import_module("oel_rust_orbit"), "json_safe_chunks", None)
+    except ImportError:
+        return None
+
+
+def _native_json_fallback(value: Any, level: int):
+    # The fallback owns uncommon Python types and established coercion/errors.
+    # Rebase only actual formatting newlines; JSON string newlines are escaped.
+    prefix = "  " * level
+    for chunk in _iter_json_safe(value, indent=2):
+        yield chunk.replace("\n", "\n" + prefix) if level else chunk
 
 
 def sha256_file(path: str | Path, *, chunk_size: int = 1024 * 1024) -> str:
@@ -469,6 +494,21 @@ def _iter_json_safe(value: Any, *, indent: int | str | None = None):
         elif isinstance(item, float):
             yield float_text(item)
         elif isinstance(item, (list, tuple)):
+            if 0 < len(item) <= _JSON_LEAF_BATCH_LIMIT and all(type(child) in _JSON_SCALAR_TYPES for child in item):
+                # Numeric histories and typed packet vectors have many short
+                # primitive rows. Encode each bounded row in the C JSON
+                # encoder instead of recursively yielding/writing each cell.
+                clean = [
+                    None if type(child) is float and not math.isfinite(child) else child
+                    for child in item
+                ]
+                if indent_text is None:
+                    yield dumps(clean, separators=(",", ":"), allow_nan=False)
+                else:
+                    prefix = "\n" + indent_text * (level + 1)
+                    encoded = dumps(clean, separators=("," + prefix, ": "), allow_nan=False)
+                    yield "[" + prefix + encoded[1:-1] + "\n" + indent_text * level + "]"
+                return
             marker = id(item)
             if marker in markers:
                 raise ValueError("Circular reference detected")
@@ -505,6 +545,20 @@ def _iter_json_safe(value: Any, *, indent: int | str | None = None):
                     normalized_items[str(key)] = child
                 if not normalized_items:
                     yield "{}"
+                    return
+                if len(normalized_items) <= _JSON_LEAF_BATCH_LIMIT and all(
+                    type(child) in _JSON_SCALAR_TYPES for child in normalized_items.values()
+                ):
+                    clean = {
+                        key: None if type(child) is float and not math.isfinite(child) else child
+                        for key, child in normalized_items.items()
+                    }
+                    if indent_text is None:
+                        yield dumps(clean, separators=(",", ":"), allow_nan=False)
+                    else:
+                        prefix = "\n" + indent_text * (level + 1)
+                        encoded = dumps(clean, separators=("," + prefix, ": "), allow_nan=False)
+                        yield "{" + prefix + encoded[1:-1] + "\n" + indent_text * level + "}"
                     return
                 yield "{"
                 child_level = level + 1

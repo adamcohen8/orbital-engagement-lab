@@ -16,11 +16,11 @@ from sim.dynamics.orbit.integrators import rk4_step_state
 from sim.dynamics.orbit.propagator import OrbitPropagator
 
 
-def test_rk4_default_preserves_state_and_stm():
+def test_rk4_python_reference_preserves_state_and_stm():
     state = cr3bp_halo_seed_state_km_s(family="nrho")
     expected = rk4_step_state(lambda t, x: cr3bp_derivative_physical(x), 0.0, state, 60.0)
-    np.testing.assert_array_equal(propagate_cr3bp_state(state, 60.0, 0.0), expected)
-    out, phi = propagate_cr3bp_reference_stm(state, np.eye(6), 60.0, 0.0)
+    np.testing.assert_array_equal(propagate_cr3bp_state(state, 60.0, 0.0, numeric_backend="python"), expected)
+    out, phi = propagate_cr3bp_reference_stm(state, np.eye(6), 60.0, 0.0, numeric_backend="python")
     np.testing.assert_array_equal(out, expected)
     assert phi.shape == (6, 6)
     assert propagate_cr3bp_state(state, 60.0, 0.0, return_info=True)[1] is None

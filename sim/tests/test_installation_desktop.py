@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import plistlib
+import shutil
+import struct
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from sim.installation import cli
-from sim.installation.desktop import publish_trainer
+from sim.installation import cli, windows_icon
+from sim.installation.desktop import ICON_ASSETS, publish_trainer
 from sim.installation.paths import InstallationPaths
 
 
@@ -33,6 +37,8 @@ def test_macos_application_launches_stable_cli_after_update(tmp_path):
     receipt = publish_trainer(paths, home=tmp_path, system="darwin")
     app = Path(receipt["path"])
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+    icon = app / "Contents/Resources" / info["CFBundleIconFile"]
+    assert icon.read_bytes() == (ICON_ASSETS / "trainer-icon.icns").read_bytes()
     executable = app / "Contents/MacOS" / info["CFBundleExecutable"]
     output = tmp_path / "invocation"
     for version in ["0.30.0", "0.31.0"]:
@@ -42,6 +48,7 @@ def test_macos_application_launches_stable_cli_after_update(tmp_path):
         subprocess.run([str(executable)], cwd="/", check=True)
         assert output.read_text() == f"{version} trainer"
     assert publish_trainer(paths, home=tmp_path, system="darwin") == receipt
+    assert icon.read_bytes() == (ICON_ASSETS / "trainer-icon.icns").read_bytes()
 
 
 def test_desktop_preserves_unrelated_app(tmp_path):
@@ -61,8 +68,195 @@ def test_linux_entry_and_core_opt_out(tmp_path, monkeypatch):
     assert target == tmp_path / "menu/applications/oel-rpo-trainer.desktop"
     assert "Terminal=false" in target.read_text()
     assert f'Exec="{paths.launcher}/oel" trainer' in target.read_text()
+    icon = paths.launcher / "trainer-icon.png"
+    assert f"Icon={icon}\n" in target.read_text()
+    assert icon.read_bytes() == (ICON_ASSETS / "trainer-icon.png").read_bytes()
+    # Desktop artwork remains available after old immutable engine versions retire.
+    shutil.rmtree(paths.version_root("0.30.0"))
+    assert icon.is_file()
+    paths.version_root("0.30.0").mkdir()
     paths.version_root("0.30.0").joinpath("installation-record.json").write_text(json.dumps({"profile": "core"}))
     assert publish_trainer(paths, home=tmp_path, system="linux")["status"] == "skipped"
+
+
+def test_linux_icon_path_escapes_backslashes_and_refreshes(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "menu"))
+    paths = InstallationPaths(tmp_path / "data\\quoted", tmp_path / "config")
+    paths.ensure()
+    paths.current_state.write_text(json.dumps({"current": "0.30.0"}))
+    root = paths.version_root("0.30.0")
+    root.mkdir()
+    (root / "installation-record.json").write_text(json.dumps({"profile": "game"}))
+    entry = Path(publish_trainer(paths, home=tmp_path, system="linux")["path"])
+    icon = paths.launcher / "trainer-icon.png"
+    assert "Icon=" + str(icon).replace("\\", "\\\\") + "\n" in entry.read_text()
+    icon.write_bytes(b"outdated")
+    publish_trainer(paths, home=tmp_path, system="linux")
+    assert icon.read_bytes() == (ICON_ASSETS / "trainer-icon.png").read_bytes()
+
+
+@pytest.mark.parametrize("system", ["darwin", "win32", "linux"])
+def test_core_profile_does_not_create_trainer_icons(tmp_path, system, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "menu"))
+    paths = installed(tmp_path, profile="core")
+    assert publish_trainer(paths, home=tmp_path, system=system)["status"] == "skipped"
+    assert list(paths.launcher.iterdir()) == []
+    assert not (tmp_path / "Applications").exists()
+
+
+def test_windows_publication_embeds_icon_before_appending_dispatcher(tmp_path, monkeypatch):
+    import pip._vendor.distlib as distlib
+    import pip._vendor.distlib.scripts as scripts
+
+    paths = installed(tmp_path)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
+    stock = Path(distlib.__file__).with_name("w64.exe").read_bytes()
+    icon_calls = []
+
+    class WindowsScriptMaker(scripts.ScriptMaker):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._is_nt = True
+
+        def _get_launcher(self, kind):
+            assert kind == "w"
+            return stock
+
+    def embed(launcher, icon, work_dir):
+        icon_calls.append(icon)
+        assert launcher == stock
+        assert icon.read_bytes() == (ICON_ASSETS / "trainer-icon.ico").read_bytes()
+        return launcher + b"ICON-BEFORE-ZIP"
+
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if argv[1] == "-c":
+            exec(compile(argv[2], "windows-launcher-generator", "exec"), {})
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(scripts, "ScriptMaker", WindowsScriptMaker)
+    monkeypatch.setattr(windows_icon, "launcher_with_icon", embed)
+    monkeypatch.setattr(subprocess, "run", run)
+    executable = Path(publish_trainer(paths, home=tmp_path, system="win32")["path"])
+    assert executable.read_bytes().startswith(stock + b"ICON-BEFORE-ZIP")
+    with zipfile.ZipFile(executable) as archive:
+        assert b"state/current.json" in archive.read("__main__.py")
+    icon = paths.launcher / "trainer-icon.ico"
+    assert icon_calls == [icon]
+    shortcut_command, shortcut_options = calls[-1]
+    assert shortcut_options["env"]["OEL_TRAINER_ICON"] == str(icon)
+    assert '$s.IconLocation="$env:OEL_TRAINER_ICON,0"' in shortcut_command[-1]
+
+
+def test_packaged_icon_formats_share_approved_master():
+    from PIL import Image
+
+    with Image.open(ICON_ASSETS / "trainer-icon.png") as master:
+        assert master.size == (1024, 1024)
+        with Image.open(ICON_ASSETS / "trainer-icon.ico") as windows:
+            assert windows.ico.sizes() == {(size, size) for size in [16, 24, 32, 48, 64, 128, 256]}
+            assert windows.convert("RGBA").tobytes() == master.resize((256, 256), Image.Resampling.LANCZOS).convert("RGBA").tobytes()
+        with Image.open(ICON_ASSETS / "trainer-icon.icns") as mac:
+            assert mac.size == (1024, 1024)
+            assert mac.convert("RGBA").tobytes() == master.convert("RGBA").tobytes()
+
+
+def test_windows_icon_group_references_every_ico_image():
+    icon = (ICON_ASSETS / "trainer-icon.ico").read_bytes()
+    resources = windows_icon.icon_resources(icon)
+    kind, group_id, group = resources[-1]
+    assert (kind, group_id) == (14, 101)
+    assert struct.unpack_from("<HHH", group) == (0, 1, 7)
+    for index, (kind, identifier, payload) in enumerate(resources[:-1]):
+        assert kind == 3
+        group_entry = group[6 + index * 14 : 20 + index * 14]
+        size, reference = struct.unpack_from("<IH", group_entry, 8)
+        assert reference == identifier == index + 1
+        assert size == len(payload)
+        assert group_entry[:8] == icon[6 + index * 16 : 14 + index * 16]
+
+
+@pytest.mark.parametrize("icon", [b"", b"\0" * 6, b"\0\0\1\0\1\0", b"\0\0\1\0\1\0" + b"\0" * 16])
+def test_windows_rejects_invalid_icon_before_resource_update(icon):
+    with pytest.raises(ValueError):
+        windows_icon.icon_resources(icon)
+
+
+@pytest.mark.parametrize("fail_update", [False, True])
+def test_windows_resource_update_commits_or_discards(tmp_path, monkeypatch, fail_update):
+    from unittest.mock import Mock
+
+    calls = []
+    kernel = SimpleNamespace(
+        BeginUpdateResourceW=Mock(return_value=123),
+        UpdateResourceW=Mock(),
+        EndUpdateResourceW=Mock(return_value=True),
+    )
+
+    def update(handle, kind, identifier, language, data, size):
+        calls.append((kind, identifier, ctypes.string_at(data, size)))
+        return not fail_update
+
+    kernel.UpdateResourceW.side_effect = update
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: kernel, raising=False)
+    monkeypatch.setattr(ctypes, "WinError", lambda code: OSError("resource update failed"), raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    icon = ICON_ASSETS / "trainer-icon.ico"
+    if fail_update:
+        with pytest.raises(OSError, match="resource update failed"):
+            windows_icon.launcher_with_icon(b"MZfixture", icon, tmp_path)
+    else:
+        assert windows_icon.launcher_with_icon(b"MZfixture", icon, tmp_path) == b"MZfixture"
+        assert calls == windows_icon.icon_resources(icon.read_bytes())
+    kernel.EndUpdateResourceW.assert_called_once_with(123, fail_update)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Native Windows PE resource and GUI launcher smoke")
+def test_native_windows_icon_launcher_preserves_executable_payload(tmp_path):
+    from ctypes import wintypes
+
+    from pip._vendor.distlib.scripts import ScriptMaker
+
+    script = tmp_path / "trainer-smoke.py"
+    output = tmp_path / "launched.txt"
+    script.write_text(f"from pathlib import Path\nPath({str(output)!r}).write_text('launched')\n")
+    maker = ScriptMaker("", str(tmp_path))
+    maker.executable = sys.executable
+    original = maker._get_launcher
+    maker._get_launcher = lambda kind: windows_icon.launcher_with_icon(
+        original(kind), ICON_ASSETS / "trainer-icon.ico", tmp_path
+    )
+    maker.make(str(script), options={"gui": True})
+    executable = tmp_path / "trainer-smoke.exe"
+    with zipfile.ZipFile(executable) as archive:
+        assert archive.read("__main__.py") == script.read_bytes()
+    subprocess.run([str(executable)], check=True, timeout=30)
+    assert output.read_text() == "launched"
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.LoadLibraryExW.argtypes = [wintypes.LPCWSTR, wintypes.HANDLE, wintypes.DWORD]
+    kernel.LoadLibraryExW.restype = wintypes.HMODULE
+    kernel.FindResourceW.argtypes = [wintypes.HMODULE, ctypes.c_void_p, ctypes.c_void_p]
+    kernel.FindResourceW.restype = wintypes.HANDLE
+    kernel.SizeofResource.argtypes = [wintypes.HMODULE, wintypes.HANDLE]
+    kernel.SizeofResource.restype = wintypes.DWORD
+    kernel.LoadResource.argtypes = [wintypes.HMODULE, wintypes.HANDLE]
+    kernel.LoadResource.restype = wintypes.HANDLE
+    kernel.LockResource.argtypes = [wintypes.HANDLE]
+    kernel.LockResource.restype = ctypes.c_void_p
+    kernel.FreeLibrary.argtypes = [wintypes.HMODULE]
+    handle = kernel.LoadLibraryExW(str(executable), None, 2)
+    assert handle
+    try:
+        for kind, identifier, expected in windows_icon.icon_resources((ICON_ASSETS / "trainer-icon.ico").read_bytes()):
+            resource = kernel.FindResourceW(handle, identifier, kind)
+            assert resource
+            size = kernel.SizeofResource(handle, resource)
+            data = kernel.LockResource(kernel.LoadResource(handle, resource))
+            assert ctypes.string_at(data, size) == expected
+    finally:
+        kernel.FreeLibrary(handle)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX fake interpreter fixture")

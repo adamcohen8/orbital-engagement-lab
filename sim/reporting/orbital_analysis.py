@@ -30,6 +30,7 @@ from sim.analysis.history_adapters import (
     history_from_single_run,
 )
 from sim.dynamics.orbit.frames import frame_context_from_mapping
+from sim.numeric_backend import normalize_numeric_backend
 
 
 def _only(mapping: dict[str, Any], allowed: set[str], path: str) -> None:
@@ -262,6 +263,7 @@ def run_scenario_orbital_analysis(*, context: Any) -> dict[str, Any]:
         "max_cell_time_comparisons", "transition_time_tolerance_s", "transition_max_iterations",
         "max_transition_refinement_evaluations",
         "include_cell_csv", "include_fraction_plot",
+        "numeric_backend",
     }
     for index, raw in enumerate(section.coverage):
         data = dict(raw)
@@ -273,6 +275,7 @@ def run_scenario_orbital_analysis(*, context: Any) -> dict[str, Any]:
         if history.attitude_quat_bn is None:
             raise ValueError("Scenario coverage requires achieved attitude; simulator attitude dynamics are disabled.")
         config = GlobalCoverageConfig(
+            numeric_backend=normalize_numeric_backend(data.get("numeric_backend", "rust")),
             analysis_id=str(data.get("analysis_id") or ""), source_asset_id=source_id,
             state_provider_id=history.state_provider_id, attitude_source_kind="achieved",
             attitude_provider_id=str(history.attitude_provider_id), sensor_id=str(data.get("sensor_id") or ""),
@@ -333,6 +336,7 @@ def run_scenario_orbital_analysis(*, context: Any) -> dict[str, Any]:
         "required_eb_n0_db", "tx_line_loss_db", "rx_line_loss_db", "misc_loss_db", "max_range_km",
         "min_fixed_site_elevation_deg", "transition_time_tolerance_s", "transition_max_iterations",
         "include_margin_plot",
+        "numeric_backend",
     }
     stations = {
         str(station.id): station
@@ -372,6 +376,7 @@ def run_scenario_orbital_analysis(*, context: Any) -> dict[str, Any]:
         if maximum_range_km is None and fixed_station is not None:
             maximum_range_km = fixed_station.max_range_km
         config = DirectedLinkConfig(
+            numeric_backend=normalize_numeric_backend(data.get("numeric_backend", "rust")),
             analysis_id=str(data.get("analysis_id") or ""), link_id=str(data.get("link_id") or ""),
             tx_terminal=tx_terminal, rx_terminal=rx_terminal,
             carrier_frequency_hz=float(data.get("carrier_frequency_hz")), tx_power_w=float(data.get("tx_power_w")),

@@ -148,7 +148,8 @@ def build_satellite_flight_software_runtime(
                 inertial_frame=inertial,
                 measurement_stale_after_s=float(params.get("measurement_stale_after_s", 30.0)),
                 expected_sensor_frames=(("ideal_own_state", inertial),),
-            )
+            ),
+            numeric_backend=params.get("numeric_backend", "rust"),
         )
         return SatelliteFlightSoftwareRuntime(
             satellite_id=object_id,
@@ -324,7 +325,8 @@ def build_satellite_flight_software_runtime(
                     detumble_entry_rate_rad_s=float(params.get("detumble_entry_rate_rad_s", 0.5)),
                     detumble_exit_rate_rad_s=float(params.get("detumble_exit_rate_rad_s", 0.02)),
                 ),
-            )
+            ),
+            numeric_backend=params.get("numeric_backend", "rust"),
         )
         return SatelliteFlightSoftwareRuntime(
             satellite_id=object_id,
@@ -380,6 +382,7 @@ def build_satellite_flight_software_runtime(
             sensor_seed=sensor_seed,
             initial_checkpoint=initial_checkpoint,
             live_game_fast_path=bool(dict(getattr(scenario_cfg, "metadata", {}).get("game", {}) or {})),
+            game_numeric_backend=str(dict(getattr(scenario_cfg, "metadata", {}).get("game", {}) or {}).get("backend", "python")),
         )
     if stack_id == "fsw.game_pilot_reference":
         return build_game_flight_software_runtime(
@@ -469,6 +472,7 @@ def _build_translation_runtime(
     sensor_period_ns: int,
     initial_checkpoint: dict[str, object] | None,
     live_game_fast_path: bool = False,
+    game_numeric_backend: str = "rust",
 ) -> SatelliteFlightSoftwareRuntime:
     defaults = {
         "fsw.orbit_reference": TranslationMode.STATIONKEEPING,
@@ -751,6 +755,10 @@ def _build_translation_runtime(
         "fsw.rpo_reference": (RpoReferenceStackConfig, RpoReferenceFlightSoftwareStack),
         "fsw.low_thrust_reference": (LowThrustReferenceStackConfig, LowThrustReferenceFlightSoftwareStack),
     }[stack_id]
+    if game_numeric_backend != "python":
+        from sim.flight_software.rust_game_stacks import game_stack_type
+
+        stack_type = game_stack_type(stack_type, game_numeric_backend)
     stack = stack_type(
         config_type(
             object_id,
@@ -828,6 +836,7 @@ def _build_translation_runtime(
             ),
         ),
         _live_navigation_fast_path=live_game_fast_path,
+        numeric_backend=params.get("numeric_backend", "rust"),
     )
     if use_continuous_engine:
         device, model = continuous_engine_device(
@@ -979,6 +988,16 @@ def build_game_flight_software_runtime(
     )
     task_period_s = _task_period_s(mode, scenario_cfg)
     task_period_ns = max(1, int(round(task_period_s * 1.0e9)))
+    knowledge = dict(getattr(agent_cfg, "knowledge", {}) or {})
+    sensor_period_s = float(knowledge.get("refresh_rate_s", task_period_s) or task_period_s)
+    sensor_period_ns = max(1, int(round(sensor_period_s * 1.0e9)))
+    sensor_error = dict(knowledge.get("sensor_error", {}) or {})
+    sensor_conditions = (
+        KnowledgeConditionConfig.from_knowledge(knowledge, default_period_s=sensor_period_s)
+        if knowledge.get("conditions")
+        else None
+    )
+    sensor_seed = int(sensor_error.get("seed", 0) or 0)
     translation_allocator = TranslationAllocatorConfig(
         object_id,
         TranslationAllocatorKind.IDEAL_WRENCH,
@@ -1055,7 +1074,13 @@ def build_game_flight_software_runtime(
         if frame_key == "moon_ric" or "moon_ric" in control_mode
         else None
     )
-    stack = GamePilotReferenceFlightSoftwareStack(
+    stack_type = GamePilotReferenceFlightSoftwareStack
+    backend = str(game.get("backend", "python"))
+    if backend != "python":
+        from sim.flight_software.rust_game_stacks import game_stack_type
+
+        stack_type = game_stack_type(stack_type, backend)
+    stack = stack_type(
         GamePilotReferenceStackConfig(
             object_id,
             body,
@@ -1071,6 +1096,7 @@ def build_game_flight_software_runtime(
             validity_ticks=task_period_ns,
             translation_reference_origin_state_eci_m_m_s=translation_origin_state,
             operator_impulse_duration_s=operator_impulse_duration_s,
+            measurement_stale_after_s=float(game.get("measurement_stale_after_s", 30.0)),
         )
     )
     runtime = SatelliteFlightSoftwareRuntime(
@@ -1081,9 +1107,13 @@ def build_game_flight_software_runtime(
         inertial_frame=inertial,
         body_frame=body,
         task_period_ns=task_period_ns,
+        sensor_period_ns=sensor_period_ns,
         tick_period_ns=1,
         reference_object_id=reference_object_id,
         dry_mass_kg=dry_mass_kg,
+        sensor_error=sensor_error,
+        sensor_conditions=sensor_conditions,
+        sensor_seed=sensor_seed,
         initial_checkpoint=initial_checkpoint,
     )
     if mode is GamePilotMode.AERODYNAMIC:

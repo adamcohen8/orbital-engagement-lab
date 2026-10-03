@@ -13,6 +13,7 @@ from sim.dynamics.orbit.cr3bp import cr3bp_system
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
 from sim.dynamics.orbit.epoch import TIME_DEPENDENT_ENV_CACHE_KEY
 from sim.dynamics.reentry import evaluate_reentry_termination, locate_reentry_termination_crossing
+from sim.execution.passive_history import PassiveHistoryCache
 from sim.rocket.navigation import build_rocket_nav_state
 from sim.runtime.satellites.flight_software_runtime import SatellitePhysicalCommand
 from sim.runtime_support import (
@@ -227,18 +228,15 @@ class _RocketStepper:
             agent.belief.state[:6] = _truth_state6(agent.truth, agent.belief.state[:6])
             agent.belief.last_update_t_s = t_next
         thrust_n = float(getattr(agent.rocket_state, "_last_step_thrust_n", 0.0))
-        fallback_axis_eci = quaternion_to_dcm_bn(agent.rocket_state.attitude_quat_bn).T @ np.array(
-            getattr(agent.rocket_state, "thrust_vector_body", agent.rocket_sim.vehicle_cfg.thrust_axis_body),
-            dtype=float,
-        )
-        accel = np.array(
-            getattr(
-                agent.rocket_state,
-                "_last_step_thrust_accel_eci_km_s2",
-                (thrust_n / max(agent.rocket_state.mass_kg, 1e-9)) * fallback_axis_eci / 1e3,
-            ),
-            dtype=float,
-        )
+        missing_acceleration = object()
+        step_acceleration = getattr(agent.rocket_state, "_last_step_thrust_accel_eci_km_s2", missing_acceleration)
+        if step_acceleration is missing_acceleration:
+            fallback_axis_eci = quaternion_to_dcm_bn(agent.rocket_state.attitude_quat_bn).T @ np.array(
+                getattr(agent.rocket_state, "thrust_vector_body", agent.rocket_sim.vehicle_cfg.thrust_axis_body),
+                dtype=float,
+            )
+            step_acceleration = (thrust_n / max(agent.rocket_state.mass_kg, 1e-9)) * fallback_axis_eci / 1e3
+        accel = np.array(step_acceleration, dtype=float)
         accel_mag = float(np.linalg.norm(accel))
         nav = build_rocket_nav_state(
             agent.rocket_state,
@@ -284,6 +282,7 @@ class _RocketStepper:
 class _SatelliteStepper:
     def __init__(self, engine: Any) -> None:
         self.engine = engine
+        self.passive_history = PassiveHistoryCache(engine)
         self._realization_cursor_by_object: dict[str, int] = {}
 
     def step(
@@ -347,6 +346,7 @@ class _SatelliteStepper:
         burned_this_step = False
         env_inner = {
             **e.base_environment,
+            "object_id": aid,
             "world_truth": dict(world_truth_decision),
             "attitude_disabled": (not e.attitude_enabled),
             TIME_DEPENDENT_ENV_CACHE_KEY: getattr(e, "_time_dependent_env_cache", {}),
@@ -491,12 +491,22 @@ class _SatelliteStepper:
         """Advance deterministic dynamics without constructing an onboard runtime."""
 
         e = self.engine
+        native_truth = self.passive_history.step(
+            aid=aid, agent=agent, initial=initial_truth, t_s=t_s, t_next=t_next,
+        )
+        if native_truth is not None:
+            return _SatelliteStepResult(
+                truth=native_truth, average_thrust_eci_km_s2=e.zero3.copy(),
+                average_torque_body_nm=e.zero3.copy(), delta_v_m_s=0.0,
+                max_accel_km_s2=0.0, burned=False,
+            )
         tr_inner = initial_truth
         current_s = float(t_s)
         final_s = float(t_next)
         substep_s = max(float(e.sim_substep_s), 1.0e-12)
         environment = {
             **e.base_environment,
+            "object_id": aid,
             "world_truth": dict(world_truth_decision),
             "attitude_disabled": (not e.attitude_enabled),
             TIME_DEPENDENT_ENV_CACHE_KEY: getattr(e, "_time_dependent_env_cache", {}),
@@ -547,45 +557,52 @@ def _retime_decision_truth(
     constant-velocity fallback.
     """
 
+    from sim.dynamics.orbit.rust_forecast import eligible, forecast_batch
+
     elapsed = float(target_time_s) - float(source_time_s)
     resolved: dict[str, StateTruth] = {own_id: own_truth}
+    prediction_environment = {
+        **dict(environment or {}), "world_truth": dict(world_truth), "attitude_disabled": True,
+    }
+    pending = []
+
+    def store(object_id, cache_key, predicted):
+        if forecast_cache is not None:
+            forecast_cache[cache_key] = predicted
+        resolved[object_id] = predicted.copy()
+
+    def flush():
+        for entry, predicted in forecast_batch(pending, elapsed, prediction_environment):
+            store(entry[0], entry[1], predicted)
+        pending.clear()
+
     for object_id, truth in world_truth.items():
         if object_id == own_id:
             continue
         dynamics = None if dynamics_by_object is None else dynamics_by_object.get(object_id)
-        cache_key = (
-            float(source_time_s),
-            float(target_time_s),
-            str(object_id),
-            id(truth),
-            id(dynamics),
-        )
+        cache_key = (float(source_time_s), float(target_time_s), str(object_id), id(truth), id(dynamics))
         predicted = None if forecast_cache is None else forecast_cache.get(cache_key)
+        if predicted is None and eligible(dynamics, truth, elapsed, prediction_environment):
+            pending.append((object_id, cache_key, dynamics, truth))
+            continue
+        # Flush before a callback, cached row or fallback to retain serial order.
+        if pending:
+            flush()
         if predicted is None:
             if elapsed > 0.0 and dynamics is not None:
-                prediction_environment = {
-                    **dict(environment or {}),
-                    "world_truth": dict(world_truth),
-                    # Relative sensing needs the other object's orbit at the
-                    # sample epoch.  Re-propagating its attitude would both be
-                    # unnecessary and double-count attitude guardrail events.
-                    "attitude_disabled": True,
-                }
-                predicted = dynamics.step(
-                    state=truth.copy(),
-                    command=Command.zero(),
-                    env=prediction_environment,
-                    dt_s=elapsed,
-                )
+                predicted = dynamics.step(state=truth.copy(), command=Command.zero(),
+                                          env=dict(prediction_environment), dt_s=elapsed)
             else:
                 predicted = truth.copy()
                 predicted.position_eci_km = np.asarray(truth.position_eci_km, dtype=float) + elapsed * np.asarray(
-                    truth.velocity_eci_km_s, dtype=float
-                )
+                    truth.velocity_eci_km_s, dtype=float)
                 predicted.t_s = float(target_time_s)
-            if forecast_cache is not None:
-                forecast_cache[cache_key] = predicted
-        resolved[object_id] = predicted.copy()
+            store(object_id, cache_key, predicted)
+        else:
+            resolved[object_id] = predicted.copy()
+    if pending:
+        flush()
+
     return resolved
 
 

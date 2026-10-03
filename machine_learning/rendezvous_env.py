@@ -4,9 +4,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from sim.acceleration.kernels.estimation import propagate_two_body_rk4_kernel
 from sim.core.models import Command
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
-from sim.dynamics.orbit.two_body import propagate_two_body_rk4
 from sim.knowledge import (
     KnowledgeConditionConfig,
     KnowledgeEKFConfig,
@@ -270,18 +270,8 @@ class RLRendezvousEnv:
         dt_lh = max(float(self.cfg.lookahead_dt_s), float(self.cfg.dt_s))
         steps = max(1, int(np.ceil(float(self.cfg.lookahead_horizon_s) / dt_lh)))
         for _ in range(steps):
-            x_chaser = propagate_two_body_rk4(
-                x_eci=x_chaser,
-                dt_s=dt_lh,
-                mu_km3_s2=EARTH_MU_KM3_S2,
-                accel_cmd_eci_km_s2=np.zeros(3),
-            )
-            x_chief = propagate_two_body_rk4(
-                x_eci=x_chief,
-                dt_s=dt_lh,
-                mu_km3_s2=EARTH_MU_KM3_S2,
-                accel_cmd_eci_km_s2=np.zeros(3),
-            )
+            x_chaser = propagate_two_body_rk4_kernel(x_chaser, dt_lh, EARTH_MU_KM3_S2)
+            x_chief = propagate_two_body_rk4_kernel(x_chief, dt_lh, EARTH_MU_KM3_S2)
             r = float(np.linalg.norm(x_chaser[:3] - x_chief[:3]))
             if r < closest:
                 closest = r

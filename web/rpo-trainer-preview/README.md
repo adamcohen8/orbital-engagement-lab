@@ -122,6 +122,38 @@ distributed with Pro source and are not copied into the public site.
 
 ## Hosted RPO Duel release gate
 
+The Pursuit Arcade API requires the `publish_unclaimed_arcade_attempt` and
+`claim_arcade_attempt` functions in `supabase/schema.sql` before deployment.
+Configure `OEL_ARCADE_PUBLIC_ORIGIN` as the exact HTTPS site origin. Email
+verification links never use request Host or forwarded headers; if the origin
+is missing or malformed, the API does not create or send a verification token.
+Both functions run the player ownership check and leaderboard write in one
+Postgres transaction. If the migration is absent, submissions and verification
+fail closed. Anonymous usernames can publish provisional scores; a verified
+username can be updated only by an unused, unexpired email token tied to the
+exact validated attempt. A recipient-wide one-hour reservation bounds sends
+across usernames and retries until the token is claimed; a successful claim
+releases only its matching reservation so the owner can submit another score.
+The migration resets legacy verified winners that lack a consumed token bound
+to the current email and exact eligible attempt. Before enabling this change on a live
+database, exercise two different email tokens claiming one username at once,
+token replay, a lower verified attempt following a higher provisional score,
+and a provisional submit racing a successful claim. Browser submissions with
+a disallowed Origin are rejected before validation or writes; nonbrowser
+requests still need provider or IP rate limiting.
+
+Treat that as a production gate whenever email sending is enabled: configure a
+Vercel edge rate rule for `POST /api/submit-attempt` keyed by the platform's
+observed client IP, and an operator-controlled account-wide send ceiling or
+budget that can stop mail, with monitoring. Choose thresholds for deployed
+traffic and the mail provider plan; the repository does not set those
+provider-console controls, and alerts alone do not bound sends.
+The recipient reservation limits repeat sends to one normalized address, not
+total sends across distinct addresses. Local mocked-fetch tests do not verify
+edge rules or provider quotas. If either production control is unavailable,
+leave `RESEND_API_KEY` unset; leaderboard submissions continue to work without
+email.
+
 For a release that includes RPO Duel, deploy the production Cloudflare Worker
 first, confirm that `oel-rpo-duel-url` contains its exact stable HTTPS URL, and
 then deploy this directory to the production Vercel project. After both

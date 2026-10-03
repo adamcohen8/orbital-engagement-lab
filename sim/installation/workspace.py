@@ -64,9 +64,10 @@ def workspace_manifest_path(value: str | Path) -> Path:
 
 
 def load_workspace(value: str | Path) -> dict[str, Any]:
-    manifest_path = workspace_manifest_path(value).resolve()
+    manifest_path = workspace_manifest_path(value).expanduser()
     if manifest_path.is_symlink():
         raise ContractError(f"Workspace manifest may not be a symbolic link: {manifest_path}")
+    manifest_path = manifest_path.resolve()
     try:
         raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:

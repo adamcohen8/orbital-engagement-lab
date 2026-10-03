@@ -1,6 +1,6 @@
 # RPO Trainer Preview Physics Contract
 
-The browser preview is a teaching and marketing surface for Orbital Engagement
+The browser preview is a teaching and marketing surface for Orbital Engineering
 Lab. It is not the canonical OEL simulator and must not be described as a
 validated replacement for `run_game.py`.
 

@@ -142,6 +142,12 @@ class RocketMissionStrategy:
     predef_target_alt_km: float = 400.0
     predef_target_ecc: float = 0.02
 
+    def __post_init__(self) -> None:
+        if self.launch_mode not in {"go_now", "go_when_possible", "wait_optimal_window"}:
+            raise ValueError(
+                "launch_mode must be one of go_now, go_when_possible, or wait_optimal_window"
+            )
+
     def update(
         self,
         *,

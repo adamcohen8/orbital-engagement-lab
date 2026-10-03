@@ -280,6 +280,11 @@ class PredictiveBurnExecution:
                     > float(max(self.min_burn_accel_km_s2, 0.0))
                 )
                 self._countdown_s = 0.0
+            elif planned_this_step:
+                # A command returned by this update applies to the interval
+                # beginning at ``t_s``.  Keep a newly planned countdown intact
+                # so a one-step lead time cannot fire in that same interval.
+                fire = False
             elif self._countdown_s < 0.0:
                 fire = False
             elif self._countdown_s <= float(max(dt_s, 1e-9)):

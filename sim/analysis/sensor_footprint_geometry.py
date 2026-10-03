@@ -338,8 +338,22 @@ def intersect_rays_wgs84(
     *,
     discriminant_tolerance: float = 1.0e-12,
     distance_tolerance_km: float = 1.0e-9,
+    numeric_backend: str = "rust",
 ) -> WGS84RayIntersections:
     """Intersect rays with WGS84 and retain each nearest positive solution."""
+
+    backend = str(numeric_backend).strip().lower()
+    if backend not in {"python", "rust"}:
+        raise ValueError(f"Unknown coverage numeric backend {numeric_backend!r}.")
+    if backend == "rust":
+        from sim.rust_coverage_backend import intersect_rays_wgs84 as rust_intersect_rays_wgs84
+
+        return rust_intersect_rays_wgs84(
+            observer_ecef_km,
+            direction_ecef,
+            discriminant_tolerance=discriminant_tolerance,
+            distance_tolerance_km=distance_tolerance_km,
+        )
 
     observer = np.asarray(observer_ecef_km, dtype=float).reshape(3)
     directions, _ = _unit_rows(direction_ecef, "direction_ecef")

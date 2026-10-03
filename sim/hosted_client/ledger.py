@@ -5,9 +5,15 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 from sim.study_planning import canonical_sha256
 
@@ -19,11 +25,11 @@ def append_event(
     event_type: str,
     details: Mapping[str, Any],
 ) -> dict[str, Any]:
-    target = Path(path).expanduser().resolve()
+    target = _ledger_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
+    target = _ledger_path(target)
     lock = target.with_suffix(target.suffix + ".lock")
-    descriptor = _acquire_lock(lock)
-    try:
+    with _locked(lock):
         events = read_ledger(target)
         previous = None if not events else events[-1]["event_sha256"]
         event = {
@@ -37,13 +43,10 @@ def append_event(
         event["event_sha256"] = canonical_sha256(event)
         _atomic_write_events(target, [*events, event])
         return event
-    finally:
-        os.close(descriptor)
-        lock.unlink(missing_ok=True)
 
 
 def read_ledger(path: str | Path) -> list[dict[str, Any]]:
-    source = Path(path).expanduser().resolve()
+    source = _ledger_path(path)
     if not source.exists():
         return []
     if source.is_symlink() or not source.is_file():
@@ -68,14 +71,43 @@ def read_ledger(path: str | Path) -> list[dict[str, Any]]:
     return events
 
 
-def _acquire_lock(path: Path) -> int:
+def _ledger_path(value: str | Path) -> Path:
+    path = Path(os.path.abspath(Path(value).expanduser()))
+    for component in (path, *path.parents):
+        if component.is_symlink():
+            raise ValueError("Hosted transaction ledger path cannot contain a symbolic link.")
+    return path
+
+
+@contextmanager
+def _locked(path: Path) -> Iterator[None]:
+    # OS locks are released if the client dies. Keep the lock inode in place so
+    # concurrent clients cannot lock two different files during replacement.
+    _ledger_path(path)
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o600)
     try:
-        return os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError as exc:
-        raise RuntimeError("Another Hosted OEL ledger update is active.") from exc
+        if os.name == "nt":
+            if os.fstat(descriptor).st_size == 0:
+                os.write(descriptor, b"\0")
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+        else:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
 
 
 def _atomic_write_events(path: Path, events: list[Mapping[str, Any]]) -> None:
+    _ledger_path(path)
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)
     try:
@@ -85,6 +117,7 @@ def _atomic_write_events(path: Path, events: list[Mapping[str, Any]]) -> None:
                 stream.write(json.dumps(event, allow_nan=False, sort_keys=True) + "\n")
             stream.flush()
             os.fsync(stream.fileno())
+        _ledger_path(path)
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)

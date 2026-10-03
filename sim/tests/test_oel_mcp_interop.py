@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -151,6 +153,28 @@ def test_interop_commit_marker_tolerates_generated_export_without_git(tmp_path: 
         "clean": None,
         "release_evidence_eligible": False,
     }
+
+
+def test_interop_export_does_not_inherit_parent_repository_provenance(tmp_path: Path) -> None:
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("Git is unavailable")
+    repository = tmp_path / "source"
+    repository.mkdir()
+    subprocess.run([git, "init", "-q"], cwd=repository, check=True)
+    subprocess.run([git, "-c", "user.name=OEL Test", "-c", "user.email=test@example.invalid",
+                    "commit", "--allow-empty", "-qm", "fixture"], cwd=repository, check=True)
+    commit = subprocess.check_output([git, "rev-parse", "HEAD"], cwd=repository, text=True).strip()
+    assert _git_commit(repository) == commit
+    assert _git_source_state(repository) == {"commit": commit, "clean": True, "release_evidence_eligible": True}
+    export = repository / "export"
+    export.mkdir()
+    (export / "README.md").write_text("Generated export without Git metadata")
+    assert _git_commit(export) == "unavailable_public_export"
+    assert _git_source_state(export) == {
+        "commit": "unavailable_public_export", "clean": None, "release_evidence_eligible": False,
+    }
+    assert _git_source_state(repository) == {"commit": commit, "clean": False, "release_evidence_eligible": False}
 
 
 def test_codex_parser_requires_one_successful_structured_oel_call() -> None:

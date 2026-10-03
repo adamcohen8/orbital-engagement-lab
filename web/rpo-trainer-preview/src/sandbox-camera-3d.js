@@ -8,11 +8,12 @@ export class RicCamera3D {
     this.elevation=0.5;
     this.focus=[0,0,0];
     this.span=1;
+    this.inTrackSign=1;
     this.initialized=false;
   }
   basis() {
     const y=this.yaw,e=this.elevation;
-    return [[0,Math.cos(y),Math.sin(y)],[Math.cos(e),Math.sin(y)*Math.sin(e),-Math.cos(y)*Math.sin(e)]];
+    return [[0,this.inTrackSign*Math.cos(y),Math.sin(y)],[Math.cos(e),this.inTrackSign*Math.sin(y)*Math.sin(e),-Math.cos(y)*Math.sin(e)]];
   }
   project(p,w,h) {
     const b=this.basis(),d=vector(p).map((v,i)=>v-this.focus[i]),s=Math.min(w,h)/this.span;
@@ -104,6 +105,8 @@ export function createSandbox3D({
     r:0,i:0,c:0
   },getState().sim];
   function sync(){
+    const sign=getState().frameConvention==='space_force'?-1:1;
+    if(camera.inTrackSign!==sign){camera.inTrackSign=sign;camera.initialized=false;}
     eligible=available();
     if(!eligible){
       cancel();
@@ -211,6 +214,8 @@ export function createSandbox3D({
     onChange();
   });
   function render(){
+    const sign=getState().frameConvention==='space_force'?-1:1;
+    if(camera.inTrackSign!==sign){camera.inTrackSign=sign;camera.initialized=false;}
     const {
       width:w,height:h
     }

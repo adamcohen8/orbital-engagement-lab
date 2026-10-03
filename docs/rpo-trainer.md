@@ -14,6 +14,11 @@ run:
 python run_game.py
 ```
 
+The Trainer selects the Rust physics and flight-software backend by default.
+The `game` installation profile requires the `oel_rust_game` and
+`oel_rust_orbit` native wheels.
+Use `python run_game.py --backend python` to select the Python backend explicitly.
+
 The selector offers Pilot and Operator modes. Use Up/Down or W/S to choose a
 level, Left/Right to change assists, Enter or Space to launch, and Escape to
 return to the selector.
@@ -64,6 +69,7 @@ Pilot mode uses direct RIC translation controls:
 - Space: pause or resume
 - R: reset the current attempt
 - Up/Down: adjust runtime speed
+- C: switch the 2D Sandbox RI/RC camera between full-trajectory and current-spacecraft framing
 - O/P: switch a supported RI or RC panel to an orbit-plane view
 - D: open the debrief folder from the pass/fail screen, when available
 - Escape: leave the active level

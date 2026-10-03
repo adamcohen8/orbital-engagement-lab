@@ -187,11 +187,15 @@ def build_policy_card(
         agent_id: list(summary.get("privileged_paths", []) or []) for agent_id, summary in observation_by_agent.items()
     }
     uses_privileged = any(paths for paths in privileged_paths.values())
-    label = "oracle_baseline" if any(s["policy_label"] == "oracle_baseline" for s in observation_by_agent.values()) else (
-        "observer_owned"
-        if all(s["policy_label"] == "observer_owned" for s in observation_by_agent.values())
-        else "mixed"
-    )
+    labels = [str(summary["policy_label"]) for summary in observation_by_agent.values()]
+    if any(label == "oracle_baseline" for label in labels):
+        label = "oracle_baseline"
+    elif labels and all(label == "simulator_metric_baseline" for label in labels):
+        label = "simulator_metric_baseline"
+    elif labels and all(label == "observer_owned" for label in labels):
+        label = "observer_owned"
+    else:
+        label = "mixed"
     envelope = _scenario_envelope(scenario)
     envelope["episode_variations"] = [getattr(v, "parameter_path", str(v)) for v in variations]
     envelope.update(dict(training_envelope or {}))

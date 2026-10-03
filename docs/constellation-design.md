@@ -24,6 +24,15 @@ python -m sim.constellation_design replay \
 
 The Python API is `sim.constellation_design`.
 
+`propagation.numeric_backend` defaults to `"rust"` for existing ONP,
+global-coverage and directed-link kernels. Explicit `"python"` selects the
+reference implementation. Both selections bind normalized input, link hashes
+and replay. Missing
+required kernels fail before member propagation. Evaluation and ranking remain
+serial Python workflows with the same public resource limits. Pro constellation
+searches inherit the setting through `public_evaluation.propagation`, including
+checkpoint identity, resume, promoted-design reevaluation and replay.
+
 ## Problem contract
 
 `oel.constellation_design_problem.v1` declares:

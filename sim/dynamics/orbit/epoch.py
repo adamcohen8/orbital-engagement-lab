@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from functools import lru_cache
 
 import numpy as np
 
@@ -85,7 +86,7 @@ def sun_position_eci_km_simple(jd_utc: float) -> np.ndarray:
     x = r_km * np.cos(lam_rad)
     y = r_km * np.cos(eps_rad) * np.sin(lam_rad)
     z = r_km * np.sin(eps_rad) * np.sin(lam_rad)
-    return np.array([x, y, z], dtype=float)
+    return _mean_equator_of_date_to_j2000(np.array([x, y, z], dtype=float), jd_utc)
 
 
 def moon_position_eci_km_simple(jd_utc: float) -> np.ndarray:
@@ -103,17 +104,38 @@ def moon_position_eci_km_simple(jd_utc: float) -> np.ndarray:
     x = x_ecl
     y = y_ecl * np.cos(eps_rad) - z_ecl * np.sin(eps_rad)
     z = y_ecl * np.sin(eps_rad) + z_ecl * np.cos(eps_rad)
-    return np.array([x, y, z], dtype=float)
+    return _mean_equator_of_date_to_j2000(np.array([x, y, z], dtype=float), jd_utc)
 
 
 def _wrap_deg(x: float) -> float:
     return float(np.mod(x, 360.0))
 
 
-def sun_position_eci_km_enhanced(jd_utc: float) -> np.ndarray:
-    """
-    Enhanced low-cost Sun ephemeris (Meeus-style) in mean-equator-of-date ECI.
-    """
+def _mean_equator_of_date_to_j2000(vector: np.ndarray, jd_utc: float) -> np.ndarray:
+    """Rotate a date-equator vector into OEL's mean-equator J2000 frame."""
+
+    t = (float(jd_utc) - 2451545.0) / 36525.0
+    arcsec_to_rad = np.deg2rad(1.0 / 3600.0)
+    zeta = (2306.2181 * t + 0.30188 * t**2 + 0.017998 * t**3) * arcsec_to_rad
+    theta = (2004.3109 * t - 0.42665 * t**2 - 0.041833 * t**3) * arcsec_to_rad
+    z = (2306.2181 * t + 1.09468 * t**2 + 0.018203 * t**3) * arcsec_to_rad
+    rz_zeta = np.array(
+        [[np.cos(-zeta), np.sin(-zeta), 0.0], [-np.sin(-zeta), np.cos(-zeta), 0.0], [0.0, 0.0, 1.0]],
+        dtype=float,
+    )
+    ry_theta = np.array(
+        [[np.cos(theta), 0.0, -np.sin(theta)], [0.0, 1.0, 0.0], [np.sin(theta), 0.0, np.cos(theta)]],
+        dtype=float,
+    )
+    rz_z = np.array(
+        [[np.cos(-z), np.sin(-z), 0.0], [-np.sin(-z), np.cos(-z), 0.0], [0.0, 0.0, 1.0]],
+        dtype=float,
+    )
+    date_from_j2000 = rz_z @ ry_theta @ rz_zeta
+    return date_from_j2000.T @ np.asarray(vector, dtype=float).reshape(3)
+
+
+def _sun_position_true_equator_of_date_km(jd_utc: float) -> np.ndarray:
     t = (float(jd_utc) - 2451545.0) / 36525.0
     l0 = _wrap_deg(280.46646 + 36000.76983 * t + 0.0003032 * (t**2))
     m = _wrap_deg(357.52911 + 35999.05029 * t - 0.0001537 * (t**2))
@@ -143,9 +165,34 @@ def sun_position_eci_km_enhanced(jd_utc: float) -> np.ndarray:
     return np.array([x, y, z], dtype=float)
 
 
+def _true_equator_of_date_to_j2000(vector: np.ndarray, jd_utc: float) -> np.ndarray:
+    """Rotate a true-equator/equinox-of-date vector into OEL/ECI/J2000."""
+
+    # Keep epoch and frame modules acyclic while sharing their authoritative
+    # IAU-76/80 matrices at call time.
+    from sim.dynamics.orbit.frames import (
+        _DEFAULT_TT_MINUS_UTC_S,
+        _nutation_iau1980_vallado_matrix,
+        _precession_iau1976_matrix,
+    )
+
+    jd_tt = float(jd_utc) + float(_DEFAULT_TT_MINUS_UTC_S) / 86400.0
+    nutation = _nutation_iau1980_vallado_matrix(jd_tt)[4]
+    precession = _precession_iau1976_matrix(jd_tt)
+    return precession.T @ nutation @ np.asarray(vector, dtype=float).reshape(3)
+
+
+def sun_position_eci_km_enhanced(jd_utc: float) -> np.ndarray:
+    """
+    Enhanced low-cost Sun ephemeris (Meeus-style) in OEL/ECI/J2000.
+    """
+    return _true_equator_of_date_to_j2000(_sun_position_true_equator_of_date_km(jd_utc), jd_utc)
+
+
 def moon_position_eci_km_enhanced(jd_utc: float) -> np.ndarray:
     """
-    Enhanced low-cost Moon ephemeris with dominant periodic terms.
+    Enhanced low-cost Moon ephemeris with dominant periodic terms in
+    OEL/ECI/J2000.
     """
     t = (float(jd_utc) - 2451545.0) / 36525.0
     l_prime = _wrap_deg(
@@ -201,7 +248,120 @@ def moon_position_eci_km_enhanced(jd_utc: float) -> np.ndarray:
     x = x_ecl
     y = y_ecl * np.cos(eps) - z_ecl * np.sin(eps)
     z = y_ecl * np.sin(eps) + z_ecl * np.cos(eps)
-    return np.array([x, y, z], dtype=float)
+    return _mean_equator_of_date_to_j2000(np.array([x, y, z], dtype=float), jd_utc)
+
+
+
+@lru_cache(maxsize=128)
+def _analytic_sun_moon_positions(jd_utc: float, simple: bool) -> tuple[np.ndarray, np.ndarray]:
+    """Reuse pure analytic ephemerides at exact epochs, without time rounding.
+
+    A short bounded cache shares repeated RK stages and satellite epochs.
+    Immutable byte-backed storage prevents accidental cache poisoning; the
+    resolver returns fresh writable copies to preserve its ownership contract.
+    """
+    if simple:
+        sun, moon = sun_position_eci_km_simple(jd_utc), moon_position_eci_km_simple(jd_utc)
+    else:
+        sun, moon = sun_position_eci_km_enhanced(jd_utc), moon_position_eci_km_enhanced(jd_utc)
+    return (
+        np.frombuffer(sun.tobytes(), dtype=np.float64),
+        np.frombuffer(moon.tobytes(), dtype=np.float64),
+    )
+
+
+def _sampled_ephemeris_position(body: str, env: dict, t_s: float) -> np.ndarray | None:
+    """Interpolate one sampled body history with strict shape and coverage checks."""
+    time_key = f"{body}_ephemeris_time_s"
+    state_key = f"{body}_ephemeris_eci_km"
+    if time_key not in env or state_key not in env:
+        return None
+    tt = np.asarray(env[time_key], dtype=float).reshape(-1)
+    rr = np.asarray(env[state_key], dtype=float)
+    if tt.size < 1 or rr.ndim != 2 or rr.shape != (tt.size, 3):
+        raise ValueError(
+            f"{body} ephemeris history must have matching (N,) times and (N, 3) states."
+        )
+    if not np.all(np.isfinite(tt)) or np.any(np.diff(tt) <= 0.0):
+        raise ValueError(f"{body} ephemeris times must be finite and strictly increasing.")
+    if not np.all(np.isfinite(rr)):
+        raise ValueError(f"{body} ephemeris states must contain only finite values.")
+    if float(t_s) < float(tt[0]) or float(t_s) > float(tt[-1]):
+        raise ValueError(
+            f"{body} ephemeris time {float(t_s):.9g} s is outside supplied coverage "
+            f"[{float(tt[0]):.9g}, {float(tt[-1]):.9g}] s."
+        )
+    return np.array([np.interp(float(t_s), tt, rr[:, j]) for j in range(3)], dtype=float)
+
+
+def resolve_sun_position_eci_km(env: dict, t_s: float) -> np.ndarray:
+    """Resolve only the Sun vector, honoring sampled, explicit, then provider inputs.
+
+    Unlike the paired resolver, this path does not inspect Moon histories or
+    require a Moon result. It uses the same deterministic ephemeris providers
+    for any missing Sun value.
+    """
+    sun = _sampled_ephemeris_position("sun", env, t_s)
+    if sun is None and "sun_pos_eci_km" in env:
+        sun = np.array(env["sun_pos_eci_km"], dtype=float)
+    if sun is not None:
+        if sun.shape != (3,) or not np.all(np.isfinite(sun)):
+            raise ValueError("sun_pos_eci_km must contain exactly three finite values.")
+        return sun
+
+    jd = resolved_jd_utc(env=env, t_s=t_s)
+    if jd is None:
+        return np.array([AU_KM, 0.0, 0.0], dtype=float)
+
+    eph_callable = env.get("ephemeris_callable", None)
+    if callable(eph_callable):
+        out = eph_callable(float(jd), env)
+        if isinstance(out, dict) and "sun_pos_eci_km" in out:
+            sun = np.array(out["sun_pos_eci_km"], dtype=float)
+            if sun.shape != (3,) or not np.all(np.isfinite(sun)):
+                raise ValueError("sun_pos_eci_km must contain exactly three finite values.")
+            return sun
+
+    mode = str(env.get("ephemeris_mode", "analytic_enhanced")).lower()
+    if mode in ("de440_hpop", "hpop_de440", "de440"):
+        from sim.acceleration.settings import acceleration_enabled_from_mode
+        from sim.dynamics.orbit.de440_hpop import (
+            hpop_de440_positions_km,
+            hpop_de440_sun_moon_positions_km,
+        )
+
+        if acceleration_enabled_from_mode():
+            sun, _moon = hpop_de440_sun_moon_positions_km(jd, env)
+        else:
+            sun = hpop_de440_positions_km(jd, env)["sun"]
+        sun = np.array(sun, dtype=float)
+    elif mode in ("spice", "spiceypy"):
+        spice_pair_callable = env.get("spice_ephemeris_callable", None)
+        spice_body_callable = env.get("spice_body_ephemeris_callable", None)
+        if callable(spice_body_callable) or not callable(spice_pair_callable):
+            from sim.dynamics.orbit.spice import spice_body_position_eci_km
+
+            sun = spice_body_position_eci_km("sun", jd, env)
+        else:
+            out = spice_pair_callable(float(jd), env)
+            if not isinstance(out, dict) or "sun_pos_eci_km" not in out:
+                raise RuntimeError(
+                    "spice_ephemeris_callable must return a dict containing 'sun_pos_eci_km'."
+                )
+            sun = np.array(out["sun_pos_eci_km"], dtype=float)
+    elif mode in ("analytic_simple", "simple"):
+        sun = sun_position_eci_km_simple(float(jd))
+    elif mode in ("analytic_enhanced", "enhanced", ""):
+        sun = sun_position_eci_km_enhanced(float(jd))
+    else:
+        raise ValueError(
+            "ephemeris_mode must be one of: analytic_enhanced, analytic_simple, de440, hpop_de440, de440_hpop, spice, spiceypy."
+        )
+
+    sun = np.asarray(sun, dtype=float)
+    if sun.shape != (3,) or not np.all(np.isfinite(sun)):
+        raise ValueError("sun_pos_eci_km must contain exactly three finite values.")
+    return np.array(sun, dtype=float, copy=True)
 
 
 def resolve_sun_moon_positions(env: dict, t_s: float) -> tuple[np.ndarray, np.ndarray]:
@@ -209,25 +369,8 @@ def resolve_sun_moon_positions(env: dict, t_s: float) -> tuple[np.ndarray, np.nd
     Resolve Sun and Moon inertial position vectors (km) using explicit env values,
     optional callable hook, then configured analytic mode.
     """
-    def sampled(body: str) -> np.ndarray | None:
-        time_key = f"{body}_ephemeris_time_s"
-        state_key = f"{body}_ephemeris_eci_km"
-        if time_key not in env or state_key not in env:
-            return None
-        tt = np.asarray(env[time_key], dtype=float).reshape(-1)
-        rr = np.asarray(env[state_key], dtype=float)
-        if tt.size < 1 or rr.ndim != 2 or rr.shape != (tt.size, 3):
-            raise ValueError(
-                f"{body} ephemeris history must have matching (N,) times and (N, 3) states."
-            )
-        if not np.all(np.isfinite(tt)) or np.any(np.diff(tt) <= 0.0):
-            raise ValueError(f"{body} ephemeris times must be finite and strictly increasing.")
-        if not np.all(np.isfinite(rr)):
-            raise ValueError(f"{body} ephemeris states must contain only finite values.")
-        return np.array([np.interp(float(t_s), tt, rr[:, j]) for j in range(3)], dtype=float)
-
-    sun_explicit = sampled("sun")
-    moon_explicit = sampled("moon")
+    sun_explicit = _sampled_ephemeris_position("sun", env, t_s)
+    moon_explicit = _sampled_ephemeris_position("moon", env, t_s)
     if sun_explicit is None and "sun_pos_eci_km" in env:
         sun_explicit = np.array(env["sun_pos_eci_km"], dtype=float)
     if moon_explicit is None and "moon_pos_eci_km" in env:
@@ -276,11 +419,17 @@ def resolve_sun_moon_positions(env: dict, t_s: float) -> tuple[np.ndarray, np.nd
         sun, moon = spice_sun_moon_positions_eci_km(jd, env)
         return sun_explicit if sun_explicit is not None else sun, moon_explicit if moon_explicit is not None else moon
     if mode in ("analytic_simple", "simple"):
-        sun, moon = sun_position_eci_km_simple(jd), moon_position_eci_km_simple(jd)
-        return sun_explicit if sun_explicit is not None else sun, moon_explicit if moon_explicit is not None else moon
+        sun, moon = _analytic_sun_moon_positions(float(jd), True)
+        return (
+            sun_explicit if sun_explicit is not None else sun.copy(),
+            moon_explicit if moon_explicit is not None else moon.copy(),
+        )
     if mode in ("analytic_enhanced", "enhanced", ""):
-        sun, moon = sun_position_eci_km_enhanced(jd), moon_position_eci_km_enhanced(jd)
-        return sun_explicit if sun_explicit is not None else sun, moon_explicit if moon_explicit is not None else moon
+        sun, moon = _analytic_sun_moon_positions(float(jd), False)
+        return (
+            sun_explicit if sun_explicit is not None else sun.copy(),
+            moon_explicit if moon_explicit is not None else moon.copy(),
+        )
     raise ValueError(
         "ephemeris_mode must be one of: analytic_enhanced, analytic_simple, de440, hpop_de440, de440_hpop, spice, spiceypy."
     )
@@ -330,6 +479,25 @@ def resolved_jd_utc(env: dict, t_s: float) -> float | None:
     if "jd_utc" in env:
         return float(env["jd_utc"])
     if "jd_utc_start" in env:
+        from sim.dynamics.orbit.frames import (
+            FRAME_MODEL_IAU76_80_EOP,
+            _validate_eop_elapsed_interval,
+            normalize_frame_model,
+        )
+
+        active_paths = []
+        for prefix in ("", "spherical_harmonics_", "drag_", "density_"):
+            model = env.get(prefix + "frame_model", env.get("drag_frame_model", "simple"))
+            if normalize_frame_model(model) == FRAME_MODEL_IAU76_80_EOP:
+                path = env.get(prefix + "eop_path", env.get("drag_eop_path") if prefix == "density_" else env.get("eop_path"))
+                if path not in (None, ""):
+                    active_paths.append(str(path))
+        if str(env.get("ephemeris_mode", "")).lower() in {"de440_hpop", "hpop_de440", "de440"}:
+            path = env.get("de440_eop_path") or env.get("spherical_harmonics_eop_path") or env.get("drag_eop_path")
+            if path:
+                active_paths.append(str(path))
+        for path in set(active_paths):
+            _validate_eop_elapsed_interval(float(env["jd_utc_start"]), t_s, path)
         return float(env["jd_utc_start"]) + float(t_s) / 86400.0
     return None
 
@@ -374,13 +542,18 @@ def resolve_time_dependent_env(
     additions = None
     if cacheable_ephemeris:
         if mode in ("de440_hpop", "hpop_de440", "de440"):
+            from sim.dynamics.orbit.de440_hpop import _resource_signature, default_de440_coeff_path
+
+            coeff_path = out.get("de440_coeff_path")
+            coeff_path = default_de440_coeff_path() if coeff_path in (None, "") else coeff_path
+            eop_resource = out.get("de440_eop_path") or out.get("spherical_harmonics_eop_path") or out.get("drag_eop_path")
             cache_key = (
                 mode,
                 float(jd),
                 out.get("de440_coeff_path"),
-                out.get("de440_eop_path")
-                or out.get("spherical_harmonics_eop_path")
-                or out.get("drag_eop_path"),
+                _resource_signature(coeff_path),
+                eop_resource,
+                None if eop_resource in (None, "") else _resource_signature(eop_resource),
                 out.get("de440_tai_utc_s"),
             )
         else:

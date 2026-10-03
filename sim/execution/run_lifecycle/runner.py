@@ -254,7 +254,7 @@ def _identity(prepared: PreparedLifecycleRun, store: LifecycleStore) -> RunIdent
 
 
 def _artifact_inventory(output_dir: Path) -> tuple[dict[str, Any], dict[str, Any]]:
-    excluded = {MANIFEST_NAME, EVENTS_NAME, ".run.lock"}
+    excluded = {MANIFEST_NAME, EVENTS_NAME, ".run.lock", ".run.lock.guard"}
     files: list[dict[str, Any]] = []
     for path in sorted(item for item in output_dir.rglob("*") if item.is_file()):
         if path.parent == output_dir / LIFECYCLE_DIR_NAME and path.name in excluded:

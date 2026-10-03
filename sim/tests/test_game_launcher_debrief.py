@@ -912,6 +912,25 @@ def test_launcher_progress_helpers_persist_user_state_without_mutating_yaml(tmp_
     assert game_launcher._progress_stars(options[0].completed_difficulties) == "☆☆☆☆"
 
 
+def test_launcher_state_paths_preserve_existing_progress_and_settings(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("OEL_GAME_PROGRESS_PATH", raising=False)
+    monkeypatch.delenv("OEL_GAME_SETTINGS_PATH", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    legacy = tmp_path / ".orbital_engagement_lab"
+    legacy.mkdir()
+    (legacy / "game_progress.yaml").write_text("scenarios: {}\n", encoding="utf-8")
+    (legacy / "game_settings.yaml").write_text("frame_convention: {}\n", encoding="utf-8")
+
+    assert game_launcher._game_progress_path() == legacy / "game_progress.yaml"
+    assert game_launcher._game_settings_path() == legacy / "game_settings.yaml"
+
+    current = tmp_path / ".orbital_engineering_lab"
+    current.mkdir()
+    (current / "game_progress.yaml").write_text("scenarios: {}\n", encoding="utf-8")
+    assert game_launcher._game_progress_path() == current / "game_progress.yaml"
+    assert game_launcher._game_settings_path() == legacy / "game_settings.yaml"
+
+
 def test_launcher_progress_is_separate_for_operator_mode(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("OEL_GAME_PROGRESS_PATH", str(tmp_path / "progress.yaml"))
     config_dir = tmp_path / "configs"

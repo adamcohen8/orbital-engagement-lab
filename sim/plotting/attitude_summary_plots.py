@@ -8,6 +8,7 @@ import numpy as np
 
 from sim.plotting.single_run_context import _array_map, _payload_arrays, _save_show_close
 from sim.plotting.single_run_math import _quat_error_series_deg, _thrust_alignment_error_deg_series
+from sim.plotting.style import tight_layout_oel_figure
 from sim.utils.figure_size import cap_figsize
 
 ArrayMap = dict[str, np.ndarray]
@@ -100,6 +101,6 @@ def plot_attitude_control_summary(
         ax.grid(True, alpha=0.3)
         if plotted:
             ax.legend(loc="best")
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _save_show_close(fig, out_path=out_path, show=show, close=close, dpi=dpi)
     return fig

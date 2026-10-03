@@ -684,33 +684,53 @@ def _evaluate_selection(
     )
 
 
-def solve_mission_schedule(problem: MissionSchedulingProblem | Mapping[str, Any]) -> MissionSchedulingResult:
+def solve_mission_schedule(
+    problem: MissionSchedulingProblem | Mapping[str, Any], *, numeric_backend: str = "rust",
+) -> MissionSchedulingResult:
     """Exactly maximize a bounded multi-asset opportunity set."""
 
     parsed = problem if isinstance(problem, MissionSchedulingProblem) else MissionSchedulingProblem.from_mapping(problem)
     candidates = tuple(sorted(parsed.opportunities, key=lambda item: item.opportunity_id))
+    backend = str(numeric_backend).strip().lower()
+    if backend not in {"python", "rust"}:
+        raise MissionSchedulingError("numeric_backend must be python or rust.")
     best_ids: tuple[str, ...] | None = None
     best_evaluation: _Evaluation | None = None
     evaluated = 0
     feasible = 0
-    for mask in range(1 << len(candidates)):
-        selected = tuple(candidates[index] for index in range(len(candidates)) if mask & (1 << index))
-        evaluation = _evaluate_selection(parsed, selected)
-        evaluated += 1
-        if not evaluation.feasible:
-            continue
-        feasible += 1
-        selected_ids = tuple(item.opportunity_id for item in selected)
-        if (
-            best_evaluation is None
-            or evaluation.objective_value > best_evaluation.objective_value
-            or (
-                evaluation.objective_value == best_evaluation.objective_value
-                and (len(selected_ids), selected_ids) < (len(best_ids or ()), best_ids or ())
-            )
-        ):
-            best_ids = selected_ids
-            best_evaluation = evaluation
+    if backend == "rust":
+        from sim.rust_mission_schedule_backend import search
+
+        try:
+            best_mask, feasible = search(parsed, candidates, _transition_required_s, epsilon=_EPS)
+        except ValueError as exc:
+            raise MissionSchedulingError(str(exc)) from exc
+        evaluated = 1 << len(candidates)
+        if best_mask is not None:
+            selected = tuple(candidates[index] for index in range(len(candidates)) if best_mask & (1 << index))
+            best_ids = tuple(item.opportunity_id for item in selected)
+            best_evaluation = _evaluate_selection(parsed, selected)
+            if not best_evaluation.feasible:
+                raise RuntimeError("Rust mission schedule selected an infeasible subset")
+    else:
+        for mask in range(1 << len(candidates)):
+            selected = tuple(candidates[index] for index in range(len(candidates)) if mask & (1 << index))
+            evaluation = _evaluate_selection(parsed, selected)
+            evaluated += 1
+            if not evaluation.feasible:
+                continue
+            feasible += 1
+            selected_ids = tuple(item.opportunity_id for item in selected)
+            if (
+                best_evaluation is None
+                or evaluation.objective_value > best_evaluation.objective_value
+                or (
+                    evaluation.objective_value == best_evaluation.objective_value
+                    and (len(selected_ids), selected_ids) < (len(best_ids or ()), best_ids or ())
+                )
+            ):
+                best_ids = selected_ids
+                best_evaluation = evaluation
     status = "complete" if best_evaluation is not None else "infeasible"
     if best_evaluation is None:
         best_ids = ()

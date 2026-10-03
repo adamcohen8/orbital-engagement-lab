@@ -85,13 +85,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("problem", help="Path to an oel.collection_opportunity_problem.v1 JSON file.")
     parser.add_argument("--output", help="Evidence JSON path. Defaults to stdout only.")
+    parser.add_argument("--orbit-history-dir", type=Path, help="Use one retained ECI orbit-history product.")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        result = assess_collection_opportunities(_read_problem(args.problem))
+        if args.orbit_history_dir is None:
+            result = assess_collection_opportunities(_read_problem(args.problem))
+        else:
+            from sim.analysis.orbit_history_product import verify_orbit_history_product
+
+            _, history = verify_orbit_history_product(args.orbit_history_dir)
+            result = assess_collection_opportunities(_read_problem(args.problem), orbit_history=history)
         if args.output:
             write_collection_evidence(result, args.output)
     except (CollectionOpportunityError, OSError, ValueError) as exc:

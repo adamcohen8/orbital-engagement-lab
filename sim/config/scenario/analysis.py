@@ -68,13 +68,20 @@ def _parse_mc_variation(value: Any) -> MonteCarloVariation:
     path = d.get("parameter_path")
     if not isinstance(path, str) or not path:
         raise ValueError("monte_carlo.variations[*].parameter_path must be a non-empty string.")
-    weights_raw = d.get("weights", []) or []
+    options_raw = d.get("options")
+    if options_raw is None:
+        options_raw = []
+    if not isinstance(options_raw, list):
+        raise ValueError("analysis.monte_carlo.variations[*].options must be a list.")
+    weights_raw = d.get("weights")
+    if weights_raw is None:
+        weights_raw = []
     if not isinstance(weights_raw, list):
         raise ValueError("analysis.monte_carlo.variations[*].weights must be a list.")
     variation = MonteCarloVariation(
         parameter_path=path,
         mode=str(d.get("mode", "choice")).strip().lower(),
-        options=list(d.get("options", []) or []),
+        options=list(options_raw),
         weights=[_parse_float(v, "analysis.monte_carlo.variations[*].weights[*]") for v in weights_raw],
         low=_parse_optional_float(d.get("low"), "analysis.monte_carlo.variations[*].low"),
         high=_parse_optional_float(d.get("high"), "analysis.monte_carlo.variations[*].high"),
@@ -172,14 +179,19 @@ def _parse_mc_constraint(value: Any) -> MonteCarloConstraint:
         raise ValueError("Monte Carlo constraints require left_path and op (<, <=, >, >=, ==, !=).")
     has_right_path = d.get("right_path") is not None
     has_right_value = "right_value" in d
-    if has_right_path and d.get("right_value") is not None:
+    if has_right_path and has_right_value:
         raise ValueError("Monte Carlo constraints require exactly one of right_path or right_value.")
     if not has_right_path and not has_right_value:
         raise ValueError("Monte Carlo constraints require exactly one of right_path or right_value.")
     right = d.get("right_path")
     if has_right_path and (not isinstance(right, str) or not right):
         raise ValueError("Monte Carlo constraint right_path must be a non-empty string.")
-    return MonteCarloConstraint(left_path=left, op=op, right_path=right, right_value=d.get("right_value"))
+    right_value = d.get("right_value")
+    if not has_right_path:
+        if isinstance(right_value, bool) or right_value is None:
+            raise ValueError("Monte Carlo constraint right_value must be a finite numeric constant.")
+        right_value = _parse_float(right_value, "analysis.monte_carlo.constraints[*].right_value")
+    return MonteCarloConstraint(left_path=left, op=op, right_path=right, right_value=right_value)
 
 
 def _parse_mc_correlated_normal(value: Any) -> MonteCarloCorrelatedNormal:
@@ -497,8 +509,14 @@ def _parse_covariance_section(value: Any) -> CovarianceSection:
     _reject_unknown_fields(
         d,
         "analysis.covariance",
-        {"enabled", "objects", "pairs", "finite_difference", "process_noise", "write_review_tables"},
+        {"enabled", "objects", "pairs", "finite_difference", "process_noise", "write_review_tables", "numeric_backend"},
     )
+    value = d.get("numeric_backend", "rust")
+    if value is not None and not isinstance(value, str):
+        raise ValueError("analysis.covariance.numeric_backend must be python or rust.")
+    numeric_backend = ("rust" if value is None else value).strip().lower()
+    if numeric_backend not in {"python", "rust"}:
+        raise ValueError("analysis.covariance.numeric_backend must be python or rust.")
     objects_raw = d.get("objects", {}) or {}
     if not isinstance(objects_raw, dict):
         raise ValueError("analysis.covariance.objects must be a mapping.")
@@ -562,6 +580,7 @@ def _parse_covariance_section(value: Any) -> CovarianceSection:
             acceleration_sigma_km_s2=accel_sigma,
         ),
         write_review_tables=_parse_bool(d.get("write_review_tables", True), "analysis.covariance.write_review_tables"),
+        numeric_backend=numeric_backend,
     )
 
 

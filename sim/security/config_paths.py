@@ -61,6 +61,7 @@ class ConfigPathPolicy:
     write_roots: tuple[Path, ...] = field(default_factory=tuple)
     allow_external_config_paths: bool = False
     allow_external_ai_prompt_files: bool = False
+    restrict_ai_prompt_to_read_roots: bool = False
 
     @classmethod
     def default(
@@ -164,7 +165,7 @@ class ConfigPathPolicy:
             raise FileNotFoundError(f"{purpose} file does not exist: {path}")
         if self.allow_external_ai_prompt_files:
             return path
-        roots = _as_resolved_roots([self.config_dir])
+        roots = self.read_roots if self.restrict_ai_prompt_to_read_roots else _as_resolved_roots([self.config_dir])
         self._ensure_allowed(
             path,
             roots=roots,

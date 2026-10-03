@@ -14,6 +14,7 @@ import numpy as np
 from sim.analysis.coverage_queries import CoverageProduct, validate_global_coverage_product
 from sim.analysis.global_coverage import CoverageCellMetrics, summarize_sampled_coverage_mask
 from sim.analysis.healpix import HEALPIX_GRID_ID, WGS84_SURFACE_AREA_KM2, healpix_npix
+from sim.numeric_backend import normalize_numeric_backend
 
 CONSTELLATION_COVERAGE_CONTRACT_VERSION = "oel.constellation-coverage-aggregation.v0.2"
 _MAX_MULTIPLICITY_MEMBERS = int(np.iinfo(np.uint16).max)
@@ -27,6 +28,7 @@ class ConstellationCoverageConfig:
     service_definition_id: str
     required_multiplicity: int = 1
     max_asset_cell_time_values: int = 500_000_000
+    numeric_backend: str = "rust"
 
     def __post_init__(self) -> None:
         analysis_id = str(self.analysis_id or "").strip()
@@ -67,6 +69,8 @@ class ConstellationCoverageConfig:
         object.__setattr__(self, "order", int(self.order))
         object.__setattr__(self, "required_multiplicity", int(multiplicity))
         object.__setattr__(self, "max_asset_cell_time_values", int(resource_limit))
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="numeric_backend must be python or rust.")
+        object.__setattr__(self, "numeric_backend", backend)
 
 
 @dataclass(frozen=True)
@@ -184,22 +188,41 @@ def evaluate_constellation_coverage(
     }
     if values > config.max_asset_cell_time_values:
         raise ValueError("Constellation aggregation exceeds max_asset_cell_time_values.")
-    multiplicity = np.zeros((sample_count, cell_count), dtype=np.uint16)
-    active_assets = np.zeros(sample_count, dtype=np.int64)
-    for product in products:
-        member_mask = _dense_mask(product)
-        np.add(multiplicity, member_mask, out=multiplicity, casting="unsafe")
-        active_assets += np.any(member_mask, axis=1)
-    qualified = multiplicity >= config.required_multiplicity
-    metrics = summarize_sampled_coverage_mask(qualified, reference.times_s)
-    covered = np.count_nonzero(qualified, axis=1).astype(np.int64)
-    mean_multiplicity = np.mean(multiplicity, axis=0)
-    max_multiplicity = np.max(multiplicity, axis=0)
-    maximum_by_sample = np.max(multiplicity, axis=1)
-    histogram = np.bincount(
-        multiplicity.reshape(-1).astype(np.int64),
-        minlength=len(products) + 1,
+    member_masks = np.stack([_dense_mask(product) for product in products], axis=0)
+    if config.numeric_backend == "rust":
+        from sim.rust_coverage_backend import aggregate_multiplicity
+
+        native = aggregate_multiplicity(
+            member_masks,
+            required_multiplicity=config.required_multiplicity,
+        )
+        multiplicity = native["multiplicity"]
+        qualified = native["qualified"]
+        active_assets = native["active_asset_count_by_sample"]
+        maximum_by_sample = native["maximum_multiplicity_by_sample"]
+        mean_multiplicity = native["mean_multiplicity_per_cell"]
+        max_multiplicity = native["max_multiplicity_per_cell"]
+        histogram = native["multiplicity_histogram"]
+    else:
+        multiplicity = np.zeros((sample_count, cell_count), dtype=np.uint16)
+        active_assets = np.zeros(sample_count, dtype=np.int64)
+        for member_mask in member_masks:
+            np.add(multiplicity, member_mask, out=multiplicity, casting="unsafe")
+            active_assets += np.any(member_mask, axis=1)
+        qualified = multiplicity >= config.required_multiplicity
+        mean_multiplicity = np.mean(multiplicity, axis=0)
+        max_multiplicity = np.max(multiplicity, axis=0)
+        maximum_by_sample = np.max(multiplicity, axis=1)
+        histogram = np.bincount(
+            multiplicity.reshape(-1).astype(np.int64),
+            minlength=len(products) + 1,
+        )
+    metrics = summarize_sampled_coverage_mask(
+        qualified,
+        reference.times_s,
+        numeric_backend=config.numeric_backend,
     )
+    covered = np.count_nonzero(qualified, axis=1).astype(np.int64)
     member_hashes = tuple(product.interval_semantic_sha256 for product in products)
     semantic_hash = _semantic_hash(
         config,
@@ -248,10 +271,15 @@ def _semantic_hash(
     multiplicity: np.ndarray,
     member_hashes: tuple[str, ...],
 ) -> str:
+    scientific_config = asdict(config)
+    # The backend selects an implementation for the same scientific
+    # contract.  Keep it visible in normalized manifests, but do not let a
+    # Python/Rust execution choice change the interval semantic identity.
+    scientific_config.pop("numeric_backend", None)
     digest = hashlib.sha256(
         json.dumps(
             {
-                "config": asdict(config),
+                "config": scientific_config,
                 "contract_version": CONSTELLATION_COVERAGE_CONTRACT_VERSION,
                 "grid_identity": HEALPIX_GRID_ID,
                 "member_semantic_sha256": member_hashes,

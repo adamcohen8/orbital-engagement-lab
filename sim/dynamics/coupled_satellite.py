@@ -9,6 +9,7 @@ import numpy as np
 
 from sim.utils.quaternion import (
     normalize_quaternion,
+    omega_matrix,
     quaternion_delta_from_body_rate,
     quaternion_multiply,
     quaternion_to_dcm_bn,
@@ -198,9 +199,15 @@ class CoupledPropagationResult:
 
 
 class CoupledSatelliteIntegrator:
-    def __init__(self, config: CoupledIntegratorConfig, derivative_model: CoupledDerivativeModel) -> None:
+    def __init__(
+        self, config: CoupledIntegratorConfig, derivative_model: CoupledDerivativeModel,
+        *, numeric_backend: str = "rust",
+    ) -> None:
         self.config = config
         self.derivative_model = derivative_model
+        if numeric_backend not in {"python", "rust"}:
+            raise ValueError("numeric_backend must be python or rust")
+        self.numeric_backend = numeric_backend
 
     def propagate(
         self,
@@ -243,6 +250,8 @@ class CoupledSatelliteIntegrator:
         return CoupledPropagationResult(current, tuple(records), tuple(boundary_hits), tuple(samples))
 
     def _microstep(self, state: CoupledSatelliteState, h: float, control: object) -> CoupledSatelliteState:
+        if self.numeric_backend == "rust":
+            return self._microstep_rust(state, h, control)
         z0 = _pack_state(state)
         q0 = state.attitude_quat_bn
         actuator_size = state.actuator_state.size
@@ -252,27 +261,60 @@ class CoupledSatelliteIntegrator:
         w1 = state1.angular_rate_body_rad_s
 
         z2 = z0 + 0.5 * h * d1
-        q2 = _advance_quaternion(q0, w1, 0.5 * h)
+        q2 = _rk_stage_quaternion(q0, w1, 0.5 * h)
         state2 = _unpack_state(z2, q2, state.t_s + 0.5 * h, actuator_size)
         d2 = self.derivative_model(state2.t_s, state2, control).as_vector(actuator_size)
         w2 = state2.angular_rate_body_rad_s
 
         z3 = z0 + 0.5 * h * d2
-        q3 = _advance_quaternion(q0, w2, 0.5 * h)
+        q3 = _rk_stage_quaternion(q0, w2, 0.5 * h, previous=q2)
         state3 = _unpack_state(z3, q3, state.t_s + 0.5 * h, actuator_size)
         d3 = self.derivative_model(state3.t_s, state3, control).as_vector(actuator_size)
         w3 = state3.angular_rate_body_rad_s
 
         z4 = z0 + h * d3
-        q4 = _advance_quaternion(q0, w3, h)
+        q4 = _rk_stage_quaternion(q0, w3, h, previous=q3)
         state4 = _unpack_state(z4, q4, state.t_s + h, actuator_size)
         d4 = self.derivative_model(state4.t_s, state4, control).as_vector(actuator_size)
         w4 = state4.angular_rate_body_rad_s
 
         z_next = z0 + (h / 6.0) * (d1 + 2.0 * d2 + 2.0 * d3 + d4)
-        rotation_vector = (h / 6.0) * (w1 + 2.0 * w2 + 2.0 * w3 + w4)
-        q_next = _advance_quaternion(q0, rotation_vector, 1.0)
+        q_rates = (
+            _quaternion_rate(q0, w1),
+            _quaternion_rate(q2, w2),
+            _quaternion_rate(q3, w3),
+            _quaternion_rate(q4, w4),
+        )
+        q_next = normalize_quaternion(q0 + (h / 6.0) * (q_rates[0] + 2.0 * q_rates[1] + 2.0 * q_rates[2] + q_rates[3]))
         return _unpack_state(z_next, q_next, state.t_s + h, actuator_size)
+
+    def _microstep_rust(self, state: CoupledSatelliteState, h: float, control: object) -> CoupledSatelliteState:
+        from sim.rust_orbit_backend import rk4_coupled_callback
+
+        z0 = _pack_state(state)
+        q0 = state.attitude_quat_bn
+        actuator_size = state.actuator_state.size
+        stage_quaternions: list[Array] = [q0]
+        stage_rates: list[Array] = []
+
+        def stage_callback(index: int, t_s: float, values: list[float]):
+            z = np.asarray(values, dtype=float)
+            if index == 0:
+                quaternion = q0
+            else:
+                previous = stage_quaternions[-1]
+                duration = h if index == 3 else 0.5 * h
+                quaternion = _rk_stage_quaternion(
+                    q0, stage_rates[-1], duration, previous=previous if index >= 2 else None,
+                )
+                stage_quaternions.append(quaternion)
+            stage_state = _unpack_state(z, quaternion, t_s, actuator_size)
+            derivative = self.derivative_model(t_s, stage_state, control).as_vector(actuator_size)
+            stage_rates.append(stage_state.angular_rate_body_rad_s)
+            return derivative.tolist(), _quaternion_rate(quaternion, stage_state.angular_rate_body_rad_s).tolist()
+
+        z_next, q_next = rk4_coupled_callback(z0, q0, state.t_s, h, stage_callback)
+        return _unpack_state(z_next, normalize_quaternion(q_next), state.t_s + h, actuator_size)
 
 
 def two_body_gravity(mu_km3_s2: float) -> GravityModel:
@@ -323,6 +365,26 @@ def _unpack_state(z: Array, quaternion: Array, t_s: float, actuator_size: int) -
 def _advance_quaternion(quaternion: Array, body_rotation_rate: Array, duration_s: float) -> Array:
     increment = quaternion_delta_from_body_rate(np.asarray(body_rotation_rate, dtype=float), float(duration_s))
     return normalize_quaternion(quaternion_multiply(quaternion, increment))
+
+
+def _quaternion_rate(quaternion: Array, body_rotation_rate: Array) -> Array:
+    """Evaluate q_dot for the body-rate quaternion convention used by OEL."""
+
+    return 0.5 * (omega_matrix(np.asarray(body_rotation_rate, dtype=float)) @ np.asarray(quaternion, dtype=float))
+
+
+def _rk_stage_quaternion(
+    base: Array,
+    body_rotation_rate: Array,
+    duration_s: float,
+    *,
+    previous: Array | None = None,
+) -> Array:
+    """Build a normalized RK4 stage attitude from the preceding stage state."""
+
+    prior = np.asarray(base if previous is None else previous, dtype=float)
+    stage = np.asarray(base, dtype=float) + float(duration_s) * _quaternion_rate(prior, body_rotation_rate)
+    return normalize_quaternion(stage)
 
 
 def _retime_state(state: CoupledSatelliteState, t_s: float) -> CoupledSatelliteState:

@@ -623,6 +623,8 @@ class GymSimulationEnv(gym.Env):
         if seed is not None:
             self.rng = np.random.default_rng(int(seed))
         scenario_dict = deepcopy(self.base_scenario_dict)
+        if seed is not None:
+            scenario_dict.setdefault("metadata", {})["seed"] = int(seed)
         options = dict(options or {})
         self.sampled_parameters = _sample_episode_variations(
             scenario_dict, tuple(self.cfg.episode_variations), self.rng
@@ -914,6 +916,8 @@ class MultiAgentSimulationEnv:
         if seed is not None:
             self.rng = np.random.default_rng(int(seed))
         scenario_dict = deepcopy(self.base_scenario_dict)
+        if seed is not None:
+            scenario_dict.setdefault("metadata", {})["seed"] = int(seed)
         options = dict(options or {})
         self.sampled_parameters = _sample_episode_variations(
             scenario_dict, tuple(self.cfg.episode_variations), self.rng

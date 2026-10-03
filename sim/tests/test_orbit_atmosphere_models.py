@@ -25,7 +25,6 @@ from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S, SOLAR_PRESSURE_
 from sim.dynamics.orbit.epoch import (
     AU_KM,
     datetime_to_julian_date,
-    gmst_angle_rad_from_jd,
     sun_position_eci_km_enhanced,
 )
 from sim.dynamics.orbit.frames import FrameContext, apparent_sidereal_time_hpop_like, transform_state
@@ -512,7 +511,6 @@ class TestOrbitAtmosphereModels(unittest.TestCase):
     def test_density_msis86_uses_hpop_angle_compatibility(self):
         r = np.array([5100.0, 3400.0, 2800.0], dtype=float)
         dt_utc = datetime(2024, 3, 20, 12, 0, 0, tzinfo=timezone.utc)
-        jd_utc = datetime_to_julian_date(dt_utc)
         env = {
             "atmo_epoch_utc": dt_utc,
             "geodetic_model": "wgs84",
@@ -523,7 +521,7 @@ class TestOrbitAtmosphereModels(unittest.TestCase):
 
         alt_km = _altitude_km_from_eci(r, 0.0, env=env)
         lat_deg, lon_deg = _spherical_lat_lon_deg_from_eci(r, 0.0, env=env)
-        lst_hr = ((np.radians(lon_deg) + gmst_angle_rad_from_jd(jd_utc)) % (2.0 * np.pi)) * 24.0 / (2.0 * np.pi)
+        lst_hr = _local_solar_time_hr(lon_deg, dt_utc, env)
         expected = msis86_backend_density(
             alt_km,
             np.radians(lat_deg),

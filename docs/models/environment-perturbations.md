@@ -183,6 +183,15 @@ atmosphere layers through 86 km and log-space interpolation to 1000 km. The
 other atmosphere paths are source-local or callable-backed engineering models
 with solar/geomagnetic inputs supplied through `atmosphere_env`.
 
+NRLMSISE-00 derives apparent local solar time by transforming the selected
+J2000 Sun ephemeris into the same Earth-fixed frame used for density longitude.
+Explicit and sampled Sun inputs follow the normal ephemeris precedence and
+coverage rules. `nrlmsise00_lst_hr` overrides this geometry; a custom density
+callable retains ownership of its inputs. Weather day and seconds remain UTC.
+At the rotation axis, solar time follows the longitude convention returned by
+the geodetic conversion. The Python, optional Numba, and optional Rust paths
+share this input contract. MSIS-86 retains its legacy solar-time convention.
+
 The drag acceleration is:
 
 ```text

@@ -17,17 +17,18 @@ class SandboxCamera:
     elevation: float = 0.5
     focus: np.ndarray = field(default_factory=lambda: np.zeros(3))
     span: float = 1.0
+    in_track_sign: int = 1
     initialized: bool = False
     drag_button: int = 0
     pan_drag: bool = False
     zoom_until: float = 0.0
 
     def basis(self):
-        right = np.array([0.0, np.cos(self.yaw), np.sin(self.yaw)])
+        right = np.array([0.0, self.in_track_sign * np.cos(self.yaw), np.sin(self.yaw)])
         up = np.array(
             [
                 np.cos(self.elevation),
-                np.sin(self.yaw) * np.sin(self.elevation),
+                self.in_track_sign * np.sin(self.yaw) * np.sin(self.elevation),
                 -np.cos(self.yaw) * np.sin(self.elevation),
             ]
         )
@@ -165,6 +166,10 @@ class Dashboard3DMixin:
     def _draw_sandbox_3d(self, rect):
         pg = self.pygame
         camera = self._sandbox_camera()
+        sign = self._axis_display_sign(1)
+        if camera.in_track_sign != sign:
+            camera.in_track_sign = sign
+            camera.initialized = False
         pg.draw.rect(self.screen, (20, 27, 36), rect, border_radius=10)
         self._text("RIC · 3D / orthographic", (rect.x + 14, rect.y + 10), self.font, (230, 235, 242))
         plot = pg.Rect(rect.x + 18, rect.y + 48, rect.width - 36, rect.height - 86)

@@ -439,12 +439,12 @@ def _magnetic_torque_kernel(
         r_hat = np.empty(3, dtype=np.float64)
         for axis in range(3):
             r_hat[axis] = r_i_m[axis] / r_norm_m
-        dipole_dot_r = 7.94e15 * r_hat[2]
+        dipole_dot_r = -7.94e15 * r_hat[2]
         denominator = r_norm_m**3
         b_eci = np.empty(3, dtype=np.float64)
         b_eci[0] = 3.0 * r_hat[0] * dipole_dot_r / denominator
         b_eci[1] = 3.0 * r_hat[1] * dipole_dot_r / denominator
-        b_eci[2] = (3.0 * r_hat[2] * dipole_dot_r - 7.94e15) / denominator
+        b_eci[2] = (3.0 * r_hat[2] * dipole_dot_r + 7.94e15) / denominator
     b_body = c_bn @ b_eci
     return _cross3_kernel(magnetic_dipole_body_a_m2, b_body)
 

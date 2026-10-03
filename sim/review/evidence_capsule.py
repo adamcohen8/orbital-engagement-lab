@@ -18,6 +18,7 @@ from typing import Any, Iterator, Sequence
 EVIDENCE_CAPSULE_SCHEMA = "oel.evidence_capsule.v1"
 EVIDENCE_CAPSULE_MANIFEST = "evidence_capsule.json"
 _CHUNK_BYTES = 1024 * 1024
+MAX_REVIEW_HYDRATION_BYTES = 1_000_000_000
 
 
 class EvidenceCapsuleError(ValueError):
@@ -151,7 +152,10 @@ def evidence_file_sha256(logical_path: str | Path) -> str:
     digest = str(entry.get("original_sha256", "") or "")
     if len(digest) != 64:
         raise EvidenceCapsuleError(f"Evidence capsule has an invalid original digest: {_manifest_path(path)}")
-    materialized = materialize_evidence(path, prefer_capsule=True)
+    materialized = materialize_evidence(
+        path, prefer_capsule=True,
+        max_original_bytes=MAX_REVIEW_HYDRATION_BYTES if _is_sqlite(path) else None,
+    )
     try:
         if _sha256(materialized.path) != digest:
             raise EvidenceCapsuleError(f"Evidence capsule original digest verification failed: {path}")
@@ -197,17 +201,47 @@ class MaterializedEvidence:
 
 
 def materialize_evidence(
-    logical_path: str | Path, *, prefer_capsule: bool = False
+    logical_path: str | Path,
+    *,
+    prefer_capsule: bool = False,
+    max_original_bytes: int | None = None,
 ) -> MaterializedEvidence:
     path = Path(logical_path).expanduser().resolve()
     if path.is_file() and not path.is_symlink() and not prefer_capsule:
         return MaterializedEvidence(logical_path=path, path=path)
     compressed, entry = _compressed_entry(path, verify_compressed=True)
+    try:
+        original_bytes = int(entry.get("original_bytes", -1))
+    except (TypeError, ValueError) as exc:
+        raise EvidenceCapsuleError(f"Evidence capsule has an invalid original size: {path}") from exc
+    if original_bytes < 0:
+        raise EvidenceCapsuleError(f"Evidence capsule has an invalid original size: {path}")
+    if max_original_bytes is not None and original_bytes > int(max_original_bytes):
+        raise EvidenceCapsuleError(
+            f"Hydrated evidence exceeds the {int(max_original_bytes)}-byte size budget: {path}"
+        )
     temporary = tempfile.TemporaryDirectory(prefix="oel-evidence-")
     hydrated = Path(temporary.name) / path.name
     try:
         with gzip.open(compressed, "rb") as source, hydrated.open("wb") as destination:
-            shutil.copyfileobj(source, destination, length=_CHUNK_BYTES)
+            written = 0
+            while written < original_bytes:
+                remaining = original_bytes - written
+                chunk = source.read(min(_CHUNK_BYTES, remaining + 1))
+                if not chunk:
+                    break
+                if len(chunk) > remaining:
+                    raise EvidenceCapsuleError(
+                        f"Hydrated evidence exceeds its declared size before completion: {path}"
+                    )
+                destination.write(chunk)
+                written += len(chunk)
+            # Probe one byte after the declared size to reject understated
+            # manifests without writing beyond the configured bound.
+            if written == original_bytes and source.read(1):
+                raise EvidenceCapsuleError(
+                    f"Hydrated evidence exceeds its declared size before completion: {path}"
+                )
         if hydrated.stat().st_size != int(entry.get("original_bytes", -1)):
             raise EvidenceCapsuleError(f"Hydrated evidence size does not match its manifest: {path}")
         if _sha256(hydrated) != str(entry.get("original_sha256", "")):
@@ -240,7 +274,10 @@ def materialize_evidence(
 
 @contextmanager
 def materialized_evidence_file(logical_path: str | Path) -> Iterator[Path]:
-    materialized = materialize_evidence(logical_path)
+    materialized = materialize_evidence(
+        logical_path,
+        max_original_bytes=MAX_REVIEW_HYDRATION_BYTES if _is_sqlite(Path(logical_path)) else None,
+    )
     try:
         yield materialized.path
     finally:

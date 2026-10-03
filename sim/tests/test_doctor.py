@@ -61,8 +61,9 @@ def test_dependency_compatibility_reports_missing_and_out_of_range_versions() ->
     assert statuses[1].compatible is True
     assert statuses[2].version is None
     assert "missing" in statuses[2].detail
-    assert dependency_is_compatible("2.4.6", CORE_SPECS[0])
-    assert not dependency_is_compatible("2.5.0", CORE_SPECS[0])
+    numpy_spec = next(spec for spec in CORE_SPECS if spec.distribution == "numpy")
+    assert dependency_is_compatible("2.4.6", numpy_spec)
+    assert not dependency_is_compatible("2.5.0", numpy_spec)
 
 
 def test_doctor_prints_windows_recovery_commands() -> None:

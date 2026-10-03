@@ -11,10 +11,13 @@ from sim.dynamics.orbit.atmosphere import density_from_model
 from sim.dynamics.orbit.eclipse import srp_shadow_factor
 from sim.dynamics.orbit.environment import EARTH_ROT_RATE_RAD_S, srp_pressure_n_m2
 from sim.dynamics.spacecraft_geometry import GeometryAreaProfile, RectangularPrismGeometry
+from sim.numeric_backend import normalize_numeric_backend
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 # Earth dipole field parameter in T*m^3 for a simple centered dipole model.
-EARTH_MAGNETIC_DIPOLE_T_M3 = 7.94e15
+# The IGRF g10 coefficient is negative, so the equivalent dipole points toward
+# geographic south (negative ECI z in the fallback model).
+EARTH_MAGNETIC_DIPOLE_T_M3 = -7.94e15
 _EARTH_MAGNETIC_DIPOLE_ECI_T_M3 = np.array([0.0, 0.0, EARTH_MAGNETIC_DIPOLE_T_M3])
 _FACET_MODE_NONE = 0
 _FACET_MODE_SCALAR = 1
@@ -58,6 +61,7 @@ class DisturbanceTorqueConfig:
     rectangular_prism_dims_m: tuple[float, float, float] | None = None
     geometry_area_profile: GeometryAreaProfile | None = None
     center_of_mass_body_m: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    numeric_backend: str = "rust"
 
 
 @dataclass(frozen=True)
@@ -84,6 +88,7 @@ class DisturbanceTorqueModel:
     _compiled_drag_cp_offset: np.ndarray = field(init=False, repr=False, compare=False)
     _compiled_srp_cp_offset: np.ndarray = field(init=False, repr=False, compare=False)
     _compiled_zero3: np.ndarray = field(init=False, repr=False, compare=False)
+    _compiled_native_context_cache: tuple | None = field(default=None, init=False, repr=False, compare=False)
     _rect_prism_geometry_cache: RectangularPrismGeometry | None = field(
         default=None,
         init=False,
@@ -93,6 +98,7 @@ class DisturbanceTorqueModel:
 
     def __post_init__(self) -> None:
         config = self.config
+        normalize_numeric_backend(config.numeric_backend, error_message="numeric_backend must be 'python' or 'rust'.")
         supported = config.geometry_area_profile is None and not config.use_rectangular_prism_faces
         enabled = np.asarray(
             [config.use_gravity_gradient, config.use_magnetic, config.use_drag, config.use_srp],
@@ -184,20 +190,30 @@ class DisturbanceTorqueModel:
         env: dict,
         substeps_s: np.ndarray,
         acceleration_mode: str,
+        numeric_backend: str | None = None,
         acceleration_enabled: bool | None = None,
     ) -> tuple[np.ndarray, np.ndarray] | None:
         """Use the numeric built-in torque plan, or return ``None`` for the Python fallback."""
 
         global _PROPAGATE_ATTITUDE_BUILTIN_DISTURBANCES_KERNEL
 
+        config = self.config
+        selected_backend = normalize_numeric_backend(
+            config.numeric_backend if numeric_backend is None else numeric_backend,
+            error_message="numeric_backend must be 'python' or 'rust'.",
+        )
         if (
             type(self) is not DisturbanceTorqueModel
             or not self._compiled_plan_supported
             or not self._compiled_has_disturbances
             or not (
-                acceleration_enabled_from_mode(acceleration_mode)
-                if acceleration_enabled is None
-                else acceleration_enabled
+                True
+                if selected_backend == "rust"
+                else (
+                    acceleration_enabled_from_mode(acceleration_mode)
+                    if acceleration_enabled is None
+                    else acceleration_enabled
+                )
             )
         ):
             return None
@@ -249,6 +265,46 @@ class DisturbanceTorqueModel:
                         * shadow
                     )
 
+        if selected_backend == "rust":
+            from sim.rust_attitude_backend import propagate_builtin_disturbances
+
+            prepared_context = self._native_disturbance_context()
+            rust_result = propagate_builtin_disturbances(
+                quat_bn=np.asarray(quat_bn, dtype=float).reshape(4),
+                omega_body_rad_s=np.asarray(omega_body_rad_s, dtype=float).reshape(3),
+                inertia_kg_m2=self._compiled_inertia,
+                command_torque_body_nm=np.asarray(command_torque_body_nm, dtype=float).reshape(3),
+                substeps_s=np.asarray(substeps_s, dtype=float).reshape(-1),
+                position_eci_km=np.asarray(position_eci_km, dtype=float).reshape(3),
+                mu_km3_s2=float(self.mu_km3_s2),
+                enabled=self._compiled_enabled,
+                magnetic_dipole_body_a_m2=self._compiled_magnetic_dipole,
+                magnetic_field_eci_t=np.asarray(magnetic_field, dtype=float).reshape(3),
+                magnetic_field_provided=bool(magnetic_field_provided),
+                density_kg_m3=float(density),
+                drag_v_rel_eci_m_s=np.asarray(drag_v_rel, dtype=float).reshape(3),
+                drag_v_rel_norm_m_s=float(drag_v_norm),
+                drag_mode=int(self._compiled_drag_mode),
+                drag_area_m2=float(config.drag_area_m2),
+                drag_cd=float(config.drag_cd),
+                drag_cp_offset_body_m=self._compiled_drag_cp_offset,
+                drag_facet_normals_body=self._compiled_drag_facet_normals,
+                drag_facet_areas_m2=self._compiled_drag_facet_areas,
+                drag_facet_cd=self._compiled_drag_facet_cd,
+                drag_facet_cp_offsets_body_m=self._compiled_drag_facet_cp_offsets,
+                sun_dir_eci_unit=np.asarray(sun_dir, dtype=float).reshape(3),
+                srp_pressure_scaled_n_m2=float(pressure_scaled),
+                srp_mode=int(self._compiled_srp_mode),
+                srp_area_m2=float(config.srp_area_m2),
+                srp_cp_offset_body_m=self._compiled_srp_cp_offset,
+                srp_facet_normals_body=self._compiled_srp_facet_normals,
+                srp_facet_areas_m2=self._compiled_srp_facet_areas,
+                srp_facet_cp_offsets_body_m=self._compiled_srp_facet_cp_offsets,
+                prepared_context=prepared_context,
+            )
+            _add_guardrail_counts(rust_result[2])
+            return rust_result[0], rust_result[1]
+
         if _PROPAGATE_ATTITUDE_BUILTIN_DISTURBANCES_KERNEL is None:
             from sim.acceleration.kernels.attitude import propagate_attitude_builtin_disturbances_kernel
 
@@ -287,6 +343,43 @@ class DisturbanceTorqueModel:
         )
         _add_guardrail_counts(counts)
         return q_next, omega_next
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_compiled_native_context_cache"] = None
+        return state
+
+    def _native_disturbance_context(self):
+        from sim.rust_attitude_backend import prepare_builtin_disturbance_context
+
+        config = self.config
+        arrays = (self._compiled_inertia, self._compiled_enabled, self._compiled_magnetic_dipole,
+                  self._compiled_drag_cp_offset, self._compiled_drag_facet_normals,
+                  self._compiled_drag_facet_areas, self._compiled_drag_facet_cd,
+                  self._compiled_drag_facet_cp_offsets, self._compiled_srp_cp_offset,
+                  self._compiled_srp_facet_normals, self._compiled_srp_facet_areas,
+                  self._compiled_srp_facet_cp_offsets)
+        signature = (self.mu_km3_s2, self._compiled_drag_mode, config.drag_area_m2, config.drag_cd,
+                     self._compiled_srp_mode, config.srp_area_m2, *(value.tobytes() for value in arrays))
+        cached = self._compiled_native_context_cache
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+        context = prepare_builtin_disturbance_context(
+            inertia_kg_m2=self._compiled_inertia, mu_km3_s2=self.mu_km3_s2,
+            enabled=self._compiled_enabled, magnetic_dipole_body_a_m2=self._compiled_magnetic_dipole,
+            drag_mode=self._compiled_drag_mode, drag_area_m2=config.drag_area_m2, drag_cd=config.drag_cd,
+            drag_cp_offset_body_m=self._compiled_drag_cp_offset,
+            drag_facet_normals_body=self._compiled_drag_facet_normals,
+            drag_facet_areas_m2=self._compiled_drag_facet_areas, drag_facet_cd=self._compiled_drag_facet_cd,
+            drag_facet_cp_offsets_body_m=self._compiled_drag_facet_cp_offsets,
+            srp_mode=self._compiled_srp_mode, srp_area_m2=config.srp_area_m2,
+            srp_cp_offset_body_m=self._compiled_srp_cp_offset,
+            srp_facet_normals_body=self._compiled_srp_facet_normals,
+            srp_facet_areas_m2=self._compiled_srp_facet_areas,
+            srp_facet_cp_offsets_body_m=self._compiled_srp_facet_cp_offsets,
+        )
+        object.__setattr__(self, "_compiled_native_context_cache", (signature, context))
+        return context
 
     def _refresh_mutable_facet_staging(self) -> bool:
         """Refresh copied facet values only when a public nested mapping changed."""

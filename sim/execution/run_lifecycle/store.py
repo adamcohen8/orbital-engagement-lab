@@ -5,10 +5,15 @@ import os
 import tempfile
 import time
 import uuid
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 from .models import (
     RUN_LOCATOR_SCHEMA,
@@ -33,6 +38,7 @@ MANIFEST_NAME = "run_manifest.json"
 EVENTS_NAME = "run_events.jsonl"
 OWNER_NAME = "execution_owner.json"
 LIFECYCLE_DIR_NAME = "lifecycle"
+_MALFORMED_LOCK_GRACE_S = 1.0
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -116,21 +122,72 @@ class _RunLock(AbstractContextManager["_RunLock"]):
             }
         ) + b"\n"
         while True:
-            try:
-                descriptor = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            except FileExistsError:
-                if self._reclaim_orphaned_lock():
+            with self._publication_guard(deadline):
+                temporary_descriptor, temporary_name = tempfile.mkstemp(
+                    prefix=".run-lock-", dir=self.path.parent
+                )
+                temporary = Path(temporary_name)
+                linked = False
+                try:
+                    with os.fdopen(temporary_descriptor, "wb") as stream:
+                        stream.write(payload)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    try:
+                        # Publish only a fully written and fsynced lock. Atomic
+                        # hard-link creation cannot replace another owner's lock.
+                        os.link(temporary, self.path)
+                        linked = True
+                    except FileExistsError:
+                        pass
+                finally:
+                    try:
+                        temporary.unlink()
+                    except FileNotFoundError:
+                        pass
+                reclaimed = not linked and self._reclaim_orphaned_lock()
+            if not linked:
+                if reclaimed:
                     continue
                 if time.monotonic() >= deadline:
                     raise RunPolicyError("Timed out waiting for the lifecycle run lock.") from None
                 time.sleep(0.05)
                 continue
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(payload)
-                stream.flush()
-                os.fsync(stream.fileno())
+            _fsync_directory(self.path.parent)
             self._owned = True
             return self
+
+    @contextmanager
+    def _publication_guard(self, deadline: float) -> Iterator[None]:
+        # Keep this inode permanently: replacing/unlinking a guard lets two
+        # processes lock different inodes. OS locks release after a crash.
+        path = self.path.with_name(self.path.name + ".guard")
+        descriptor = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        locked = False
+        try:
+            if os.name == "nt" and os.fstat(descriptor).st_size == 0:
+                os.write(descriptor, b"\0")
+            while not locked:
+                try:
+                    if os.name == "nt":
+                        os.lseek(descriptor, 0, os.SEEK_SET)
+                        msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+                    else:
+                        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    locked = True
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise RunPolicyError("Timed out waiting for the lifecycle run lock.") from None
+                    time.sleep(0.05)
+            yield
+        finally:
+            if locked:
+                if os.name == "nt":
+                    os.lseek(descriptor, 0, os.SEEK_SET)
+                    msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
 
     def _reclaim_orphaned_lock(self) -> bool:
         """Remove only a content-stable lock owned by a dead process on this host."""
@@ -139,7 +196,7 @@ class _RunLock(AbstractContextManager["_RunLock"]):
             token = str(observed.get("token", ""))
             pid = int(observed.get("pid", 0))
         except (MalformedRunStateError, TypeError, ValueError):
-            return False
+            return self._reclaim_stable_malformed_lock()
         if not token or pid < 1 or str(observed.get("host_sha256", "")) != local_host_sha256():
             return False
         if _process_alive(pid):
@@ -157,15 +214,43 @@ class _RunLock(AbstractContextManager["_RunLock"]):
         _fsync_directory(self.path.parent)
         return True
 
+    def _reclaim_stable_malformed_lock(self) -> bool:
+        """Recover a legacy torn lock after a short, content-stable grace period."""
+
+        try:
+            before = self.path.stat()
+        except FileNotFoundError:
+            return True
+        if time.time() - before.st_mtime < _MALFORMED_LOCK_GRACE_S:
+            return False
+        try:
+            after = self.path.stat()
+        except FileNotFoundError:
+            return True
+        if (
+            before.st_ino != after.st_ino
+            or before.st_mtime_ns != after.st_mtime_ns
+            or before.st_size != after.st_size
+        ):
+            return False
+        try:
+            self.path.unlink()
+        except FileNotFoundError:
+            return True
+        _fsync_directory(self.path.parent)
+        return True
+
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         if not self._owned:
             return
         try:
-            current = _read_json_object(self.path)
-            if str(current.get("token", "")) == self.token:
-                self.path.unlink(missing_ok=True)
+            with self._publication_guard(time.monotonic() + self.timeout_s):
+                current = _read_json_object(self.path)
+                if str(current.get("token", "")) == self.token:
+                    self.path.unlink(missing_ok=True)
         finally:
             self._owned = False
+
 
 
 class LifecycleStore:

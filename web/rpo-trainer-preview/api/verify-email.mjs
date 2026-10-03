@@ -1,129 +1,120 @@
-import { escapeHtml, hashVerificationToken, publicOrigin } from "./_email.mjs";
-import { isLeaderboardEligibleStatus, upsertLeaderboardIfBetter } from "./_leaderboard.mjs";
-import { canVerifyUsernameForEmail } from "./_ownership.mjs";
+import { escapeHtml, hashVerificationToken } from "./_email.mjs";
 import { supabaseRest } from "./_supabase.mjs";
 
 export default async function handler(req, res) {
-  if (req.method !== "GET") {
-    sendHtml(res, 405, "Use GET for email verification.");
+  if (req.method !== "GET" && req.method !== "POST") {
+    sendHtml(res, 405, "Use the verification page and its confirmation button.");
     return;
   }
 
   try {
-    const url = new URL(req.url || "/api/verify-email", publicOrigin(req));
-    const token = url.searchParams.get("token") || "";
-    if (!token) {
-      sendHtml(res, 400, "The verification link is missing its token.");
+    const token = req.method === "GET" ? tokenFromUrl(req) : tokenFromBody(req);
+    if (!token || token.length > 128) {
+      sendHtml(res, 400, req.method === "GET"
+        ? "The verification link is missing a usable token."
+        : "The verification token is missing or invalid.");
       return;
     }
 
-    const query = new URLSearchParams({
-      token_hash: `eq.${hashVerificationToken(token)}`,
-      select: "id,player_id,attempt_id,email,expires_at,verified_at",
-      limit: "1",
-    });
-    const rows = await supabaseRest(`email_verifications?${query.toString()}`);
-    const verification = rows?.[0];
-    if (!verification) {
-      sendHtml(res, 404, "This verification link was not found.");
-      return;
-    }
-    if (new Date(verification.expires_at).getTime() < Date.now()) {
-      sendHtml(res, 410, "This verification link has expired.");
+    if (req.method === "GET") {
+      sendConfirmation(res, token);
       return;
     }
 
-    const playerQuery = new URLSearchParams({
-      id: `eq.${verification.player_id}`,
-      select: "id,username,email,email_verified_at,username_locked_at",
-      limit: "1",
-    });
-    const players = await supabaseRest(`players?${playerQuery.toString()}`);
-    const player = players?.[0];
-    if (!player) {
-      sendHtml(res, 404, "The username for this verification link was not found.");
-      return;
-    }
-    if (!canVerifyUsernameForEmail({ player, email: verification.email })) {
-      sendHtml(res, 409, "This username is already reserved to a different verified email address.");
+    // Generated verification tokens are 32 random bytes encoded as base64url.
+    // Do not call the claim RPC for malformed or oversized form submissions.
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) {
+      sendHtml(res, 400, "The verification token is missing or invalid.");
       return;
     }
 
-    const verifiedAt = verification.verified_at || new Date().toISOString();
-    if (!verification.verified_at) {
-      await supabaseRest(`email_verifications?id=eq.${verification.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ verified_at: verifiedAt }),
-      });
-    }
-    await supabaseRest(`players?id=eq.${verification.player_id}`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        email: verification.email,
-        email_verified_at: verifiedAt,
-        username_locked_at: player.username_locked_at || verifiedAt,
-      }),
+    // One database transaction owns the token and player locks, first-claim
+    // transition, and exact-attempt promotion. A missing migration fails closed.
+    const result = await supabaseRest("rpc/claim_arcade_attempt", {
+      method: "POST",
+      body: JSON.stringify({ p_token_hash: hashVerificationToken(token) }),
     });
-    const promoted = await promoteVerifiedAttempt(verification, player);
-    sendSuccess(
-      res,
-      promoted
-        ? "Email verified. Your username is now reserved and your best linked score is on the leaderboard."
-        : "Email verified. Your username is now reserved.",
-    );
+    switch (result?.status) {
+      case "verified":
+        sendHtml(res, 200, result.promoted
+          ? "Email verified. Your username is now reserved and your linked score is on the leaderboard."
+          : "Email verified. Your username is now reserved.", true);
+        return;
+      case "already_verified":
+        sendHtml(res, 200, "This link was already used to verify your username.", true);
+        return;
+      case "expired":
+        sendHtml(res, 410, "This verification link has expired.");
+        return;
+      case "locked":
+        sendHtml(res, 409, "This username is already reserved to a different verified email address.");
+        return;
+      case "invalid_attempt":
+        sendHtml(res, 409, "The linked attempt is no longer eligible for verification.");
+        return;
+      default:
+        sendHtml(res, 404, "This verification link was not found.");
+    }
   } catch (error) {
     sendHtml(res, 500, error instanceof Error ? error.message : String(error));
   }
 }
 
-async function promoteVerifiedAttempt(verification, player) {
-  if (!verification.attempt_id) return false;
-  const attemptQuery = new URLSearchParams({
-    id: `eq.${verification.attempt_id}`,
-    select: "id,player_id,challenge_id,status,score,metrics,submitted_at",
-    limit: "1",
-  });
-  const attempts = await supabaseRest(`attempts?${attemptQuery.toString()}`);
-  const attempt = attempts?.[0];
-  if (!attempt || attempt.player_id !== verification.player_id || !isLeaderboardEligibleStatus(attempt.status)) {
-    return false;
+function tokenFromUrl(req) {
+  try {
+    const url = new URL(req.url || "/api/verify-email", "https://localhost.invalid");
+    return url.searchParams.get("token") || "";
+  } catch {
+    return "";
   }
-  return await upsertLeaderboardIfBetter({
-    challengeId: attempt.challenge_id,
-    playerId: attempt.player_id,
-    attemptId: attempt.id,
-    score: attempt.score,
-    metrics: attempt.metrics || {},
-    username: player.username,
-    submittedAt: attempt.submitted_at,
-    emailVerified: true,
+}
+
+function tokenFromBody(req) {
+  const body = req.body;
+  if (typeof body === "string") {
+    const contentType = String(req.headers?.["content-type"] || req.headers?.["Content-Type"] || "");
+    if (contentType.toLowerCase().includes("application/x-www-form-urlencoded")) {
+      return new URLSearchParams(body).get("token") || "";
+    }
+    return "";
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return "";
+  return typeof body.token === "string" ? body.token : "";
+}
+
+function sendConfirmation(res, token) {
+  sendHtml(res, 200, "Opening this page has not verified your email or reserved your username. Press the button below to confirm.", {
+    title: "Confirm email verification",
+    formToken: token,
   });
 }
 
-function sendSuccess(res, message) {
-  sendHtml(res, 200, message, true);
-}
-
-function sendHtml(res, statusCode, message, ok = false) {
+function sendHtml(res, statusCode, message, options = {}) {
+  const view = typeof options === "boolean" ? { ok: options } : options;
   res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Referrer-Policy", "no-referrer");
   res.status(statusCode).send(`<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OEL Email Verification</title>
+    <title>${escapeHtml(view.title || "OEL Email Verification")}</title>
     <style>
       body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0d141f; color: #e8eef8; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
       main { max-width: 560px; padding: 32px; border: 2px solid #53657e; background: #111a26; }
       h1 { margin: 0 0 16px; font-size: 24px; }
       p { margin: 0 0 24px; color: #b7c4d7; }
       a { color: #8fd3ff; }
+      form { margin: 0 0 24px; }
+      button { padding: 12px 18px; border: 0; background: #8fd3ff; color: #0d141f; font: inherit; font-weight: 700; cursor: pointer; }
     </style>
   </head>
   <body>
     <main>
-      <h1>${ok ? "Verified" : "Verification issue"}</h1>
+      <h1>${view.formToken !== undefined ? "Confirm email" : view.ok ? "Verified" : "Verification issue"}</h1>
       <p>${escapeHtml(message)}</p>
+      ${view.formToken !== undefined ? `<form method="post" action="/api/verify-email"><input type="hidden" name="token" value="${escapeHtml(view.formToken)}" /><button type="submit">Confirm and reserve username</button></form>` : ""}
       <a href="/">Return to Pursuit Arcade</a>
     </main>
   </body>

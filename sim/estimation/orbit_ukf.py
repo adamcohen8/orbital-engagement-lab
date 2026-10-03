@@ -8,6 +8,18 @@ from sim.core.interfaces import Estimator
 from sim.core.models import Measurement, StateBelief
 from sim.dynamics.orbit.accelerations import OrbitContext
 from sim.dynamics.orbit.propagator import OrbitPropagator
+from sim.numeric_backend import normalize_numeric_backend
+
+rust_estimation_backend = None
+
+
+def _load_rust_estimation_backend():
+    global rust_estimation_backend
+    if rust_estimation_backend is None:
+        from sim import rust_estimation_backend as backend
+
+        rust_estimation_backend = backend
+    return rust_estimation_backend
 
 
 @dataclass
@@ -20,6 +32,7 @@ class OrbitUKFEstimator(Estimator):
     alpha: float = 1e-3
     beta: float = 2.0
     kappa: float = 0.0
+    numeric_backend: str = "rust"
 
     def __post_init__(self) -> None:
         if not np.isfinite(float(self.dt_s)) or float(self.dt_s) <= 0.0:
@@ -28,6 +41,9 @@ class OrbitUKFEstimator(Estimator):
             raise ValueError("alpha must be finite and positive.")
         if not np.isfinite(float(self.beta)) or not np.isfinite(float(self.kappa)):
             raise ValueError("beta and kappa must be finite.")
+        self.numeric_backend = normalize_numeric_backend(self.numeric_backend, error_message="numeric_backend must be 'python' or 'rust'.")
+        if self.numeric_backend not in {"python", "rust"}:
+            raise ValueError("numeric_backend must be 'python' or 'rust'.")
         for name in ("process_noise_diag", "meas_noise_diag"):
             values = np.asarray(getattr(self, name), dtype=float).reshape(-1)
             if values.size == 0 or np.any(~np.isfinite(values)) or np.any(values < 0.0):
@@ -116,30 +132,55 @@ class OrbitUKFEstimator(Estimator):
 
         sigma = self._sigma_points(state, covariance, lam)
         dt_s = max(float(to_t_s) - float(from_t_s), 0.0)
-        sigma_pred = np.array(
-            [
-                self.propagator.propagate(
-                    x_eci=s,
-                    dt_s=dt_s,
-                    t_s=float(from_t_s),
-                    command_accel_eci_km_s2=np.zeros(3),
-                    env={},
-                    ctx=self.context,
-                )
-                for s in sigma
-            ]
-        )
+        sigma_pred = None
+        if self.numeric_backend == "rust":
+            from sim.rust_relative_backend import try_orbit_trial_batch
+
+            sigma_pred = try_orbit_trial_batch(self.propagator, sigma, [dt_s], self.context)
+        if sigma_pred is None:
+            sigma_pred = np.array(
+                [
+                    self.propagator.propagate(
+                        x_eci=s,
+                        dt_s=dt_s,
+                        t_s=float(from_t_s),
+                        command_accel_eci_km_s2=np.zeros(3),
+                        env={},
+                        ctx=self.context,
+                    )
+                    for s in sigma
+                ]
+            )
 
         x_pred = np.sum(wm[:, None] * sigma_pred, axis=0)
         q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
-        p_pred = np.diag(self.process_noise_diag) * max(q_scale, 0.0)
-        for i in range(2 * n + 1):
-            dx = sigma_pred[i] - x_pred
-            p_pred += wc[i] * np.outer(dx, dx)
-        return x_pred, 0.5 * (p_pred + p_pred.T), sigma_pred, wm, wc
+        process_covariance = np.diag(self.process_noise_diag) * max(q_scale, 0.0)
+        if self.numeric_backend == "rust":
+            x_pred, p_pred = _load_rust_estimation_backend().ukf_recombine(
+                sigma_pred,
+                wm,
+                wc,
+                process_covariance,
+            )
+        else:
+            p_pred = process_covariance
+            for i in range(2 * n + 1):
+                dx = sigma_pred[i] - x_pred
+                p_pred += wc[i] * np.outer(dx, dx)
+            p_pred = 0.5 * (p_pred + p_pred.T)
+        return x_pred, p_pred, sigma_pred, wm, wc
 
     def _sigma_points(self, x: np.ndarray, p: np.ndarray, lam: float) -> np.ndarray:
         n = x.size
+        if self.numeric_backend == "rust":
+            points, _wm, _wc = _load_rust_estimation_backend().ukf_sigma_points(
+                x,
+                p,
+                alpha=self.alpha,
+                beta=self.beta,
+                kappa=self.kappa,
+            )
+            return points
         c = np.linalg.cholesky((n + lam) * p + 1e-12 * np.eye(n))
         points = [x]
         for i in range(n):

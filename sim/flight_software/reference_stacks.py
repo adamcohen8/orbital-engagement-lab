@@ -320,9 +320,23 @@ BUILTIN_STACKS: Final = (
 
 class ReferenceStackBase:
     stack_id: str
+    numeric_backend = "python"
 
-    def __init__(self, *, satellite_id: str, identity_material: object) -> None:
+    def __init__(self, *, satellite_id: str, identity_material: object, numeric_backend: str | None = None) -> None:
         self._satellite_id = satellite_id
+        self._native_packet_encoder = None
+        self._native_packet_validator = None
+        self._native_actuator_pipeline = numeric_backend == "rust"
+        if numeric_backend not in (None, "python", "rust"):
+            raise ValueError("numeric_backend must be python or rust")
+        if numeric_backend is not None:
+            self.numeric_backend = numeric_backend
+        if self._native_actuator_pipeline:
+            from .rust_actuator_backend import extension
+            from .rust_game_packets import boundary_validator, trusted_evidence_encoder
+            extension()
+            self._native_packet_encoder = trusted_evidence_encoder()
+            self._native_packet_validator = boundary_validator()
         implementation_hash = sha256(
             canonical_json_bytes(
                 {
@@ -333,12 +347,23 @@ class ReferenceStackBase:
                 }
             )
         ).hexdigest()
-        self._configuration_hash = sha256(canonical_json_bytes(identity_material)).hexdigest()
+        if self._native_actuator_pipeline:
+            from .rust_actuator_backend import implementation_digest
+            implementation_hash = sha256((implementation_hash + implementation_digest()).encode()).hexdigest()
+            identity_material = {"config": identity_material, "numeric_backend": "rust"}
+        self._configuration_hash = sha256(self._canonical_bytes(identity_material)).hexdigest()
         self._identity = StackIdentity(self.stack_id, STACK_VERSION, CONTRACT_MAJOR, implementation_hash, True)
         self._lifecycle = _Lifecycle.COLD
         self._boot_id: str | None = None
         self._last_invocation_id = 0
         self._command_sequence = 0
+
+    def _canonical_bytes(self, value):
+        if self._native_packet_encoder is None:
+            return canonical_json_bytes(value)
+        from .schemas import _canonical_primitive_json_bytes
+        self._native_packet_validator.check(value)
+        return _canonical_primitive_json_bytes(self._native_packet_encoder.convert(value))
 
     @property
     def identity(self) -> StackIdentity:
@@ -384,7 +409,7 @@ class ReferenceStackBase:
         if self._lifecycle not in {_Lifecycle.BOOTED, _Lifecycle.SHUTDOWN}:
             raise RuntimeError("flight-software stack has not been booted")
         active_load_id, active_load_revision = self._active_load_identity()
-        state_bytes = canonical_json_bytes(
+        state_bytes = self._canonical_bytes(
             {
                 "implementation_hash": self.identity.implementation_hash,
                 "configuration_hash": self._configuration_hash,
@@ -493,8 +518,8 @@ class ReferenceStackBase:
 class PassiveFlightSoftwareStack(ReferenceStackBase):
     stack_id = "fsw.passive"
 
-    def __init__(self, config: PassiveStackConfig) -> None:
-        super().__init__(satellite_id=config.satellite_id, identity_material=config)
+    def __init__(self, config: PassiveStackConfig, *, numeric_backend: str | None = None) -> None:
+        super().__init__(satellite_id=config.satellite_id, identity_material=config, numeric_backend=numeric_backend)
         self.config = config
         self._event_count = 0
         self._measurement_count = 0
@@ -675,8 +700,8 @@ class PassiveFlightSoftwareStack(ReferenceStackBase):
 class AttitudeReferenceFlightSoftwareStack(ReferenceStackBase):
     stack_id = "fsw.attitude_reference"
 
-    def __init__(self, config: AttitudeReferenceStackConfig) -> None:
-        super().__init__(satellite_id=config.satellite_id, identity_material=config)
+    def __init__(self, config: AttitudeReferenceStackConfig, *, numeric_backend: str | None = None) -> None:
+        super().__init__(satellite_id=config.satellite_id, identity_material=config, numeric_backend=numeric_backend)
         self.config = config
         self._navigator = AttitudeNavigator(
             body_frame=config.body_frame,
@@ -687,6 +712,9 @@ class AttitudeReferenceFlightSoftwareStack(ReferenceStackBase):
         self._reference = AttitudeReferenceGenerator(config.reference, inertial_frame=config.inertial_frame)
         self._controller = config.controller
         self._allocator = AttitudeAllocator(config.allocator)
+        if self._native_actuator_pipeline:
+            from .rust_actuator_backend import NativeAttitudeAllocator
+            self._allocator = NativeAttitudeAllocator(config.allocator)
         self._health = StackHealthManager(config.health)
         self._adcs = AdcsModeManager(config.momentum_unload, config.mode_config)
         self._commands = OnboardCommandService()
@@ -730,8 +758,11 @@ class AttitudeReferenceFlightSoftwareStack(ReferenceStackBase):
         elif adcs_mode is AdcsOperationalMode.DEGRADED and not reference_available:
             effort = self._detumble_effort(solution)
         elif reference is not None:
-            effort = self._controller.control(solution, reference)
-        if effort is not None:
+            if self._native_actuator_pipeline:
+                effort, allocation = self._allocator.fused_control(solution, reference, self._controller, self._next_command_id)
+            else:
+                effort = self._controller.control(solution, reference)
+        if effort is not None and allocation is None:
             allocation = self._allocator.allocate(
                 effort,
                 solution,
@@ -1033,8 +1064,9 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
         config: TranslationReferenceStackConfig,
         *,
         _live_navigation_fast_path: bool = False,
+        numeric_backend: str | None = None,
     ) -> None:
-        super().__init__(satellite_id=config.satellite_id, identity_material=config)
+        super().__init__(satellite_id=config.satellite_id, identity_material=config, numeric_backend=numeric_backend)
         self.config = config
         self._live_navigation_fast_path = bool(_live_navigation_fast_path)
         primary_mode = TranslationMode(config.executive.primary_mode)
@@ -1046,13 +1078,16 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
                 raise ValueError(f"{self.stack_id} does not advertise action mode {action_mode.value!r}")
         TranslationMode(config.executive.recovery_mode)
         self._navigator = self._new_navigator()
-        self._controller = TranslationController(config.control)
+        self._controller = self._new_controller(config.control)
         self._allocator = TranslationAllocator(config.allocator)
         self._executive_config = config.executive
         self._executive = ReferenceMissionExecutive(self._executive_config)
         self._attitude_allocator = (
             None if config.attitude_allocator is None else AttitudeAllocator(config.attitude_allocator)
         )
+        if self._native_actuator_pipeline and self._attitude_allocator is not None:
+            from .rust_actuator_backend import NativeAttitudeAllocator
+            self._attitude_allocator = NativeAttitudeAllocator(config.attitude_allocator)
         self._attitude_reference = (
             None
             if config.attitude_reference is None
@@ -1223,13 +1258,19 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
         ):
             reference = self._attitude_reference.generate(solution.attitude)
             if reference is not None:
-                effort = self.config.attitude_controller.control(solution.attitude, reference)
-                if effort is not None:
-                    pointing_allocation = self._attitude_allocator.allocate(
-                        effort,
-                        solution.attitude,
-                        command_id=self._next_command_id(),
+                if self._native_actuator_pipeline:
+                    effort, pointing_allocation = self._attitude_allocator.fused_control(
+                        solution.attitude, reference, self.config.attitude_controller, self._next_command_id
                     )
+                else:
+                    effort = self.config.attitude_controller.control(solution.attitude, reference)
+                    if effort is not None:
+                        pointing_allocation = self._attitude_allocator.allocate(
+                            effort,
+                            solution.attitude,
+                            command_id=self._next_command_id(),
+                        )
+                if pointing_allocation is not None:
                     commands.extend(pointing_allocation.proposed_commands)
         commands = [command for command in commands if command.actuator_id not in faulted_components]
         if (
@@ -1483,7 +1524,7 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
         executive_config = self._config_for_load(active_load)
         navigator = self._new_navigator()
         navigator.restore_state(navigation_state)  # type: ignore[arg-type]
-        controller = TranslationController(self._control_config_for_load(active_load))
+        controller = self._new_controller(self._control_config_for_load(active_load))
         controller.restore_state(controller_state)  # type: ignore[arg-type]
         executive = ReferenceMissionExecutive(executive_config)
         executive.restore_state(executive_state)  # type: ignore[arg-type]
@@ -1585,6 +1626,9 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
             retain_full_provenance=not self._live_navigation_fast_path,
         )
 
+    def _new_controller(self, config: TranslationControlConfig) -> TranslationController:
+        return TranslationController(config)
+
     def _new_mission_manager(self) -> MissionLoadManager:
         capabilities = tuple(
             sorted(
@@ -1618,7 +1662,7 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
                     return accepted, reason
                 try:
                     executive_config = self._config_for_load(load)
-                    controller = TranslationController(self._control_config_for_load(load))
+                    controller = self._new_controller(self._control_config_for_load(load))
                     executive = ReferenceMissionExecutive(executive_config)
                 except (TypeError, ValueError) as exc:
                     return False, f"mission load parameters are invalid: {exc}"
@@ -1836,16 +1880,21 @@ class _TranslationReferenceFlightSoftwareStack(ReferenceStackBase):
         ).generate(attitude_solution)
         if reference is None:
             return None, None
-        effort = self.config.attitude_controller.control(attitude_solution, reference)
-        allocation = (
-            None
-            if effort is None
-            else self._attitude_allocator.allocate(
-                effort,
-                attitude_solution,
-                command_id=self._next_command_id(),
+        if self._native_actuator_pipeline:
+            effort, allocation = self._attitude_allocator.fused_control(
+                attitude_solution, reference, self.config.attitude_controller, self._next_command_id
             )
-        )
+        else:
+            effort = self.config.attitude_controller.control(attitude_solution, reference)
+            allocation = (
+                None
+                if effort is None
+                else self._attitude_allocator.allocate(
+                    effort,
+                    attitude_solution,
+                    command_id=self._next_command_id(),
+                )
+            )
         quaternion = attitude_solution.attitude_quat_bn
         if quaternion is None:
             return None, allocation

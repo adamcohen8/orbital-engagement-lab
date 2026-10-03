@@ -18,6 +18,8 @@ import numpy as np
 
 from sim.analysis.history_adapters import AnalysisHistory
 from sim.analysis.mission_scheduling import verify_mission_scheduling_artifacts
+from sim.analysis.rust_numeric import AnalyticSunEvaluator
+from sim.analysis.rust_numeric import numeric_backend as validate_numeric_backend
 from sim.dynamics.orbit.eclipse import resolve_srp_geometry, srp_shadow_factor
 from sim.dynamics.orbit.environment import EARTH_RADIUS_KM, SUN_RADIUS_KM
 from sim.utils.io import SafeReadError, read_regular_file_nofollow
@@ -259,6 +261,8 @@ class SpacecraftPowerProblem:
     activities: tuple[PowerActivity, ...]
     schema_version: str = SPACECRAFT_POWER_PROBLEM_SCHEMA
 
+    numeric_backend: str = "rust"
+
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> SpacecraftPowerProblem:
         raw = _mapping(value, "spacecraft-power problem")
@@ -280,6 +284,7 @@ class SpacecraftPowerProblem:
             "base_load_w",
             "activities",
         }
+        backend = raw.pop("numeric_backend", "rust")
         _exact_fields(raw, fields, "spacecraft-power problem")
         if raw["schema_version"] != SPACECRAFT_POWER_PROBLEM_SCHEMA:
             raise SpacecraftPowerError(f"Unsupported spacecraft-power schema {raw['schema_version']!r}.")
@@ -292,6 +297,7 @@ class SpacecraftPowerProblem:
         if isinstance(iterations, (bool, np.bool_)) or not isinstance(iterations, int):
             raise SpacecraftPowerError("transition_max_iterations must be an integer.")
         return cls(
+            numeric_backend=backend,
             schema_version=raw["schema_version"],
             analysis_id=_required_text(raw["analysis_id"], "analysis_id"),
             asset_id=_required_text(raw["asset_id"], "asset_id"),
@@ -313,6 +319,10 @@ class SpacecraftPowerProblem:
         )
 
     def __post_init__(self) -> None:
+        try:
+            validate_numeric_backend(self.numeric_backend)
+        except ValueError as exc:
+            raise SpacecraftPowerError(str(exc)) from exc
         if self.schema_version != SPACECRAFT_POWER_PROBLEM_SCHEMA:
             raise SpacecraftPowerError(f"Unsupported spacecraft-power schema {self.schema_version!r}.")
         object.__setattr__(self, "analysis_id", _required_text(self.analysis_id, "analysis_id"))
@@ -613,10 +623,30 @@ def _regular_times(problem: SpacecraftPowerProblem, history: AnalysisHistory) ->
     return result
 
 
+class _PowerGeometryEvaluator:
+    def __init__(self, problem: SpacecraftPowerProblem, history: AnalysisHistory) -> None:
+        self.sun = AnalyticSunEvaluator(problem.numeric_backend, problem.ephemeris_model)
+        self.epoch = problem.epoch_jd_utc
+        self.cache = {} if type(history) is AnalysisHistory and history.evaluator_at_time is None else None
+
+    def geometry(self, state, time_s: float):
+        if self.cache is not None and time_s in self.cache:
+            return self.cache[time_s]
+        geometry = resolve_srp_geometry(state.position_eci_km, time_s, {
+            "sun_pos_eci_km": self.sun.at_jd(self.epoch + time_s / 86400.0),
+        })
+        if self.cache is not None:
+            self.cache[time_s] = geometry
+            if len(self.cache) > 4096:
+                self.cache.pop(next(iter(self.cache)))
+        return geometry
+
+
 def _instantaneous(
     problem: SpacecraftPowerProblem,
     history: AnalysisHistory,
     time_s: float,
+    geometry_evaluator: _PowerGeometryEvaluator | None = None,
 ) -> tuple[float, float, float, float, str]:
     state = history.state_at(time_s)
     env = {
@@ -624,7 +654,8 @@ def _instantaneous(
         "ephemeris_mode": problem.ephemeris_model,
         "srp_shadow_model": problem.shadow_model,
     }
-    geometry = resolve_srp_geometry(state.position_eci_km, time_s, env)
+    geometry = (resolve_srp_geometry(state.position_eci_km, time_s, env) if geometry_evaluator is None
+                else geometry_evaluator.geometry(state, time_s))
     shadow = float(
         srp_shadow_factor(
             state.position_eci_km,
@@ -668,15 +699,16 @@ def _refine_membership_change(
     *,
     original_left: float,
     original_right: float,
+    geometry_evaluator: _PowerGeometryEvaluator | None = None,
 ) -> _RefinedTransition:
-    left_value = predicate(_instantaneous(problem, history, left)[0])
-    right_value = predicate(_instantaneous(problem, history, right)[0])
+    left_value = predicate(_instantaneous(problem, history, left, geometry_evaluator)[0])
+    right_value = predicate(_instantaneous(problem, history, right, geometry_evaluator)[0])
     if left_value == right_value:
         raise RuntimeError("Transition refinement requires a bracketed membership change.")
     iterations = 0
     while right - left > problem.transition_time_tolerance_s and iterations < problem.transition_max_iterations:
         midpoint = 0.5 * (left + right)
-        middle_value = predicate(_instantaneous(problem, history, midpoint)[0])
+        middle_value = predicate(_instantaneous(problem, history, midpoint, geometry_evaluator)[0])
         if middle_value == left_value:
             left = midpoint
         else:
@@ -703,6 +735,7 @@ def _transition_metric(
     history: AnalysisHistory,
     time_s: float,
     boundary: str,
+    geometry_evaluator: _PowerGeometryEvaluator | None = None,
 ) -> float:
     """Continuous signed metric; negative means membership in the named shadow phase."""
 
@@ -712,7 +745,8 @@ def _transition_metric(
         "ephemeris_mode": problem.ephemeris_model,
         "srp_shadow_model": problem.shadow_model,
     }
-    geometry = resolve_srp_geometry(state.position_eci_km, time_s, env)
+    geometry = (resolve_srp_geometry(state.position_eci_km, time_s, env) if geometry_evaluator is None
+                else geometry_evaluator.geometry(state, time_s))
     r_sc = np.asarray(geometry["r_sc_eci_km"], dtype=float)
     r_norm = float(geometry["r_sc_norm_km"])
     if r_norm <= EARTH_RADIUS_KM:
@@ -781,12 +815,13 @@ def _transition_probes(
     left: float,
     right: float,
     boundary: str,
+    geometry_evaluator: _PowerGeometryEvaluator | None = None,
 ) -> list[float]:
     """Find sampled and interior-extremum probes that expose whole sub-step shadow phases."""
 
     probes = [left + (right - left) * index / 4.0 for index in range(5)]
     def metric(time_s: float) -> float:
-        return _transition_metric(problem, history, time_s, boundary)
+        return _transition_metric(problem, history, time_s, boundary, geometry_evaluator)
 
     values = [metric(time_s) for time_s in probes]
     extrema: list[float] = []
@@ -813,6 +848,7 @@ def _transition_probes(
 def _grid_with_refined_transitions(
     problem: SpacecraftPowerProblem,
     history: AnalysisHistory,
+    geometry_evaluator: _PowerGeometryEvaluator | None = None,
 ) -> tuple[list[float], list[_RefinedTransition]]:
     base = _regular_times(problem, history)
     if problem.shadow_model == "none":
@@ -823,8 +859,8 @@ def _grid_with_refined_transitions(
         boundaries += (("umbra", lambda shadow: shadow <= _EPS),)
     for left, right in zip(base, base[1:]):
         for boundary, predicate in boundaries:
-            probes = _transition_probes(problem, history, left, right, boundary)
-            memberships = [predicate(_instantaneous(problem, history, time_s)[0]) for time_s in probes]
+            probes = _transition_probes(problem, history, left, right, boundary, geometry_evaluator)
+            memberships = [predicate(_instantaneous(problem, history, time_s, geometry_evaluator)[0]) for time_s in probes]
             for bracket_left, bracket_right, left_value, right_value in zip(
                 probes, probes[1:], memberships, memberships[1:]
             ):
@@ -836,6 +872,7 @@ def _grid_with_refined_transitions(
                             bracket_left,
                             bracket_right,
                             predicate,
+                            geometry_evaluator=geometry_evaluator,
                             original_left=left,
                             original_right=right,
                         )
@@ -850,11 +887,12 @@ def _illumination_intervals(
     problem: SpacecraftPowerProblem,
     history: AnalysisHistory,
     times: Sequence[float],
+    geometry_evaluator: _PowerGeometryEvaluator | None = None,
 ) -> tuple[PowerInterval, ...]:
     raw: list[tuple[float, float, str]] = []
     for left, right in zip(times, times[1:]):
         midpoint = 0.5 * (left + right)
-        raw.append((left, right, _instantaneous(problem, history, midpoint)[4]))
+        raw.append((left, right, _instantaneous(problem, history, midpoint, geometry_evaluator)[4]))
     grouped: list[tuple[float, float, str]] = []
     for left, right, kind in raw:
         if grouped and grouped[-1][2] == kind and abs(grouped[-1][1] - left) <= 1.0e-9:
@@ -875,8 +913,18 @@ def assess_spacecraft_power(
 
     parsed, normalized_history = validate_spacecraft_power_inputs(problem, history)
 
-    times, refined = _grid_with_refined_transitions(parsed, normalized_history)
-    intervals = _illumination_intervals(parsed, normalized_history, times)
+    if type(normalized_history) is AnalysisHistory and normalized_history.evaluator_at_time is None:
+        arrays = {}
+        for field in ("times_s", "position_eci_km", "velocity_eci_km_s", "attitude_quat_bn"):
+            value = getattr(normalized_history, field)
+            if value is not None:
+                value = value.copy()
+                value.flags.writeable = False
+            arrays[field] = value
+        normalized_history = replace(normalized_history, **arrays)
+    geometry_evaluator = _PowerGeometryEvaluator(parsed, normalized_history)
+    times, refined = _grid_with_refined_transitions(parsed, normalized_history, geometry_evaluator)
+    intervals = _illumination_intervals(parsed, normalized_history, times, geometry_evaluator)
     battery = parsed.battery
     minimum_energy = battery.minimum_soc_fraction * battery.capacity_wh
     maximum_energy = battery.maximum_soc_fraction * battery.capacity_wh
@@ -893,7 +941,7 @@ def assess_spacecraft_power(
     maximum_soc = minimum_soc
     events: list[PowerEvent] = []
 
-    initial = _instantaneous(parsed, normalized_history, times[0])
+    initial = _instantaneous(parsed, normalized_history, times[0], geometry_evaluator)
     samples = [
         PowerSample(
             time_s=times[0],
@@ -914,9 +962,9 @@ def assess_spacecraft_power(
     for left, right in zip(times, times[1:]):
         midpoint = 0.5 * (left + right)
         dt_hours = (right - left) / 3600.0
-        left_values = _instantaneous(parsed, normalized_history, left)
-        middle_values = _instantaneous(parsed, normalized_history, midpoint)
-        right_values = _instantaneous(parsed, normalized_history, right)
+        left_values = _instantaneous(parsed, normalized_history, left, geometry_evaluator)
+        middle_values = _instantaneous(parsed, normalized_history, midpoint, geometry_evaluator)
+        right_values = _instantaneous(parsed, normalized_history, right, geometry_evaluator)
         generation_w = (left_values[2] + 4.0 * middle_values[2] + right_values[2]) / 6.0
         load_w = middle_values[3]
         generated_wh = generation_w * dt_hours
@@ -989,7 +1037,7 @@ def assess_spacecraft_power(
         soc = stored / battery.capacity_wh
         minimum_soc = min(minimum_soc, soc)
         maximum_soc = max(maximum_soc, soc)
-        end_values = _instantaneous(parsed, normalized_history, right)
+        end_values = _instantaneous(parsed, normalized_history, right, geometry_evaluator)
         samples.append(
             PowerSample(
                 time_s=right,

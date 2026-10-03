@@ -296,12 +296,13 @@ def test_candidate_tree_hash_preserves_directory_read_errors(tmp_path, monkeypat
             raise OSError(errno.EIO, "device failure", str(path))
         return real_scandir(path)
 
-    monkeypatch.setattr(os, "scandir", unreadable)
-    if permission_denied:
-        assert sha256_tree(tmp_path) == sha256_value([])
-    else:
-        with pytest.raises(OSError, match="device failure"):
-            sha256_tree(tmp_path)
+    with monkeypatch.context() as scoped:
+        scoped.setattr(os, "scandir", unreadable)
+        if permission_denied:
+            assert sha256_tree(tmp_path) == sha256_value([])
+        else:
+            with pytest.raises(OSError, match="device failure"):
+                sha256_tree(tmp_path)
 
 
 def test_reload_prefers_package_over_same_named_module(tmp_path, monkeypatch):

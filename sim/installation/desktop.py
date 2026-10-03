@@ -15,6 +15,7 @@ from pathlib import Path
 from .paths import InstallationPaths
 
 MARKER = "oel.rpo-trainer.desktop.v1"
+ICON_ASSETS = Path(__file__).with_name("data")
 
 
 def publish_trainer(paths: InstallationPaths, *, home: Path | None = None, system: str | None = None) -> dict[str, str]:
@@ -53,6 +54,9 @@ def publish_trainer(paths: InstallationPaths, *, home: Path | None = None, syste
         _check_owner(target, marker, paths)
         contents = target / "Contents"
         (contents / "MacOS").mkdir(parents=True, exist_ok=True)
+        resources = contents / "Resources"
+        resources.mkdir(exist_ok=True)
+        shutil.copyfile(ICON_ASSETS / "trainer-icon.icns", resources / "trainer-icon.icns")
         executable = contents / "MacOS" / "RPO Trainer"
         log_dir = paths.data_root / "logs"
         executable.write_text(
@@ -68,11 +72,13 @@ def publish_trainer(paths: InstallationPaths, *, home: Path | None = None, syste
         (contents / "Info.plist").write_bytes(
             plistlib.dumps(
                 {
+                    # Keep the installed app identity stable across the product rename.
                     "CFBundleIdentifier": "org.orbitalengagementlab.trainer",
                     "CFBundleName": "RPO Trainer",
                     "CFBundleExecutable": "RPO Trainer",
                     "CFBundlePackageType": "APPL",
                     "CFBundleVersion": "1",
+                    "CFBundleIconFile": "trainer-icon.icns",
                     "NSHighResolutionCapable": True,
                 }
             )
@@ -93,16 +99,22 @@ def publish_trainer(paths: InstallationPaths, *, home: Path | None = None, syste
         windowed_python = base_python.with_name("pythonw.exe")
         if windowed_python.is_file():
             base_python = windowed_python
+        icon = paths.launcher / "trainer-icon.ico"
+        shutil.copyfile(ICON_ASSETS / "trainer-icon.ico", icon)
         with tempfile.TemporaryDirectory(dir=paths.cache) as temp:
             generator = (
-                "from pip._vendor.distlib.scripts import ScriptMaker; "
-                f'm=ScriptMaker("", {temp!r}); m.executable={str(base_python)!r}; '
-                f'm.make({str(script)!r}, options={{"gui": True}})'
+                "from pathlib import Path\n"
+                "from pip._vendor.distlib.scripts import ScriptMaker\n"
+                "from sim.installation.windows_icon import launcher_with_icon\n"
+                f'm=ScriptMaker("", {temp!r})\nm.executable={str(base_python)!r}\n'
+                "original=m._get_launcher\n"
+                f"m._get_launcher=lambda kind: launcher_with_icon(original(kind), Path({str(icon)!r}), Path({temp!r}))\n"
+                f'm.make({str(script)!r}, options={{"gui": True}})\n'
             )
             subprocess.run([str(runtime_python), "-c", generator], check=True)
             shutil.copy2(Path(temp) / "rpo-trainer.exe", target)
         marker.write_text(json.dumps({"owner": MARKER, "data_root": str(paths.data_root)}))
-        env = dict(os.environ, OEL_TRAINER_LINK=str(shortcut), OEL_TRAINER_EXE=str(target))
+        env = dict(os.environ, OEL_TRAINER_LINK=str(shortcut), OEL_TRAINER_EXE=str(target), OEL_TRAINER_ICON=str(icon))
         subprocess.run(
             [
                 "powershell.exe",
@@ -111,7 +123,8 @@ def publish_trainer(paths: InstallationPaths, *, home: Path | None = None, syste
                 "-Command",
                 "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:OEL_TRAINER_LINK); "
                 'if ((Test-Path $env:OEL_TRAINER_LINK) -and $s.TargetPath -ne $env:OEL_TRAINER_EXE) { throw "Unrelated shortcut" }; '
-                '$s.TargetPath=$env:OEL_TRAINER_EXE; $s.Description="OEL RPO Trainer"; $s.Save()',
+                '$s.TargetPath=$env:OEL_TRAINER_EXE; $s.IconLocation="$env:OEL_TRAINER_ICON,0"; '
+                '$s.Description="OEL RPO Trainer"; $s.Save()',
             ],
             env=env,
             check=True,
@@ -132,16 +145,21 @@ def publish_trainer(paths: InstallationPaths, *, home: Path | None = None, syste
             .replace("$", "\\$")
             .replace("%", "%%")
         )
-        command = command.replace("\\", "\\\\")
         if any(c in str(paths.launcher) for c in ("\n", "\r", "\t", "=")):
             raise ValueError("Desktop launcher path contains unsupported characters")
+        icon = paths.launcher / "trainer-icon.png"
+        shutil.copyfile(ICON_ASSETS / "trainer-icon.png", icon)
+        icon_value = str(icon).replace("\\", "\\\\")
         target.write_text(
             "[Desktop Entry]\nType=Application\nName=RPO Trainer\n"
             "Comment=Orbital Engineering Lab RPO Trainer\n"
-            f'Exec="{command}" trainer\nTerminal=false\nCategories=Education;Science;\n'
+            f'Exec="{command}" trainer\nIcon={icon_value}\nTerminal=false\nCategories=Education;Science;\n'
         )
         target.chmod(0o755)
     marker.write_text(json.dumps({"owner": MARKER, "data_root": str(paths.data_root)}))
+    if system == "darwin":
+        # Finder refreshes cached bundle icons when the application changes.
+        target.touch()
     return {"status": "ready", "path": str(target)}
 
 

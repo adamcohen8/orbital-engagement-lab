@@ -307,6 +307,16 @@ relative-state analysis, but they do not accept OEL thrust, orbit controllers,
 maneuver objectives, or special-perturbations force flags as trajectory
 modifiers. TLEs with orbital period at or above 225 minutes dispatch to
 OGP-SDP4/deep-space/resonance handling.
+`general.numeric_backend` defaults to `rust` and selects the `oel_rust_orbit` wheel
+for both OGP-SGP4 and OGP-SDP4. The wheel evaluates the general-perturbations
+equations in native Rust; OEL still parses TLEs, transforms frames, and writes
+scenario evidence in Python. The same selection works with OGP mean elements.
+Rust and Python outputs are compared within stated numerical tolerances rather
+than treated as bitwise identical. Scale catalog propagation also accepts
+`scale_catalog.propagation.backend: rust` for OGP products and downstream
+recompute and refinement; the existing `scalar` backend remains the default.
+OGP mean-element fitting accepts `propagation_backend="rust"` through its
+Python API or `fit_options.propagation_backend: rust` in an OGP PV packet.
 OGP product metadata defaults to `output_frame: teme`, preserving the requested
 catalog-product frame. Shared engine truth histories are always canonical ECI;
 payload and review state-frame metadata therefore report `eci`. Native TEME
@@ -614,6 +624,22 @@ request the Numba backend explicitly. Unsupported dynamics combinations fall
 back to the standard Python path. Set `acceleration.warmup: true` to compile
 supported kernels before the run starts.
 
+`simulator.dynamics.orbit.numeric_backend` defaults to `rust` in v0.32.0.
+Select `python` explicitly for reference execution. The required `oel_rust_orbit` wheel for
+Earth-centered two-body ONP special propagation with RK4, RKF78, or DOPRI5,
+or ideal rotating barycentric CR3BP (`model: cr3bp`, requiring wheel 0.6.0
+or newer). CR3BP state and reference/STM integration use native equations
+and the existing configured Earth–Moon system and physical units.
+J2/J3/J4 and supported normalized spherical harmonics, drag, SRP, and Sun/Moon
+gravity use native Rust force evaluation. Other built-in forces, Pro forces,
+and user-supplied Python force models use the existing Python force callback
+at every Rust integration stage. Synchronized two-object forces and coupled
+orbit/attitude stepping also use Python stage callbacks. Validation rejects an
+unavailable wheel, an older wheel without CR3BP when requested, or an unsupported
+propagation family. The Python runtime still
+prepares frames, atmosphere, ephemerides, controllers, events, and outputs.
+Rust selection is experimental and does not imply a whole-run speed improvement.
+
 `simulator.frames` is the scenario-level frame policy for Earth-fixed
 transforms used by ONP force models, ground-station geometry, ground tracks,
 and frame provenance. The default `model: simple_gmst` is the legacy simple
@@ -749,6 +775,55 @@ simulator:
 
 This lets a launch vehicle, disposed stage, or atmospheric test article coexist
 with satellites whose mission should continue.
+
+### Elastic spherical collisions
+
+`simulator.collisions` enables an idealized, frictionless collision response for
+exactly two enabled `trajectory_only` satellites propagated by Earth-centered
+ONP. Specify each sphere radius in meters; the response uses the satellites'
+current `specs.mass_kg` values and restitution 1.0:
+
+```yaml
+objects:
+  a:
+    kind: satellite
+    runtime_profile: trajectory_only
+    specs: {mass_kg: 100.0}
+    initial_state:
+      position_eci_km: [7000.0, 0.0, 0.0]
+      velocity_eci_km_s: [0.01, 7.5, 0.0]
+  b:
+    kind: satellite
+    runtime_profile: trajectory_only
+    specs: {mass_kg: 200.0}
+    initial_state:
+      position_eci_km: [7000.01, 0.0, 0.0]
+      velocity_eci_km_s: [-0.01, 7.5, 0.0]
+simulator:
+  duration_s: 1.0
+  dt_s: 1.0
+  dynamics:
+    attitude: {enabled: false}
+  collisions:
+    enabled: true
+    radii_m: {a: 2.0, b: 2.0}
+outputs:
+  output_dir: outputs/elastic_spheres
+  plots: {enabled: false}
+  review: {enabled: true, detail: standard}
+```
+
+The engine searches the swept relative path within each step, propagates both
+objects to first contact with the configured dynamics, applies a center-line
+elastic impulse, then propagates the remainder. `collision_events` in the full
+run payload contains contact time, ECI positions, normal, closing speed, and
+pre/post ECI velocities. The review `events` table records each impact as
+`spherical_collision`. A collision does not count as propulsion delta-v.
+This first slice requires serial execution and attitude disabled; validation
+rejects OGP, controllers/flight software, force plugins, bridges, reference
+orbits, and spacecraft resources. It does not model spin, friction, deformation,
+fragmentation, or damage. Use sufficiently short propagation substeps for curved
+close approaches and verify convergence of contact time and post-impact state.
 
 SRP uses OEL's default solar radiation pressure at 1 AU unless a scenario needs
 to match a specific reference source. Set `simulator.environment.srp_pressure_n_m2`

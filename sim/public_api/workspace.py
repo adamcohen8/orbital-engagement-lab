@@ -303,12 +303,27 @@ class SimulationWorkspace:
             config_dict = dict(item["config_dict"])
             config_dict.setdefault("analysis", {})["enabled"] = False
             run_cfg = scenario_config_from_dict(config_dict)
+            run_config = SimulationConfig(run_cfg)
+            # Re-apply the workspace policy to every generated child before any
+            # plugin-importing validation or engine construction.  Batch
+            # variation paths can change an existing plugin pointer after the
+            # base config has passed sealed-mode validation.
+            self._enforce_sealed_mode(run_config)
             if strict_plugins:
-                errors = validate_scenario_plugins(run_cfg)
+                errors = validate_scenario_plugins(
+                    run_cfg,
+                    import_plugins=(
+                        self._sealed_policy is None
+                        or self._sealed_policy.allow_untrusted_plugin_imports
+                    ),
+                )
                 if errors:
                     msg = f"Plugin validation failed in Monte Carlo iteration {iteration}:\n- " + "\n- ".join(errors)
                     raise ValueError(msg)
-            run_result = SimulationSession.from_config(SimulationConfig(run_cfg)).run(step_callback=step_callback)
+            run_result = SimulationSession.from_config(
+                run_config,
+                sealed_policy=self._sealed_policy,
+            ).run(step_callback=step_callback)
             custom_metrics = run_result.evaluate_metrics(metrics)
             runs.append(
                 {
@@ -350,7 +365,11 @@ class SimulationWorkspace:
                 cfg_i = cfg_i.with_output_dir(
                     str(output_dir_template).format(index=idx, value=value, scenario=cfg_i.scenario_name)
                 )
-            result = SimulationSession.from_config(cfg_i).run(step_callback=step_callback)
+            self._enforce_sealed_mode(cfg_i)
+            result = SimulationSession.from_config(
+                cfg_i,
+                sealed_policy=self._sealed_policy,
+            ).run(step_callback=step_callback)
             custom_metrics = result.evaluate_metrics(metrics) if metrics is not None else {}
             runs.append(
                 {

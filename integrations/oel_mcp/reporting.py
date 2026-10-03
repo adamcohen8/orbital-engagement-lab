@@ -42,6 +42,14 @@ def prepare_report_packet(
     handling: dict[str, Any],
     approval_id: str,
 ) -> dict[str, Any]:
+    # A report packet is a downstream view of a completed MCP execution. Do
+    # not turn a source manifest's ``artifacts_complete`` flag into a trust
+    # decision without rechecking the content-bound records. The source
+    # manifest and mutable index are intentionally excluded from that list.
+    source_manifest_path = source_output_dir / "mcp_execution_manifest.json"
+    source_manifest_present = source_manifest_path.is_file()
+    if source_manifest_present:
+        _validate_source_manifest(source_manifest_path, source_output_dir)
     inspection = inspect_output(
         source_output_dir,
         query_names=query_names or None,
@@ -51,6 +59,11 @@ def prepare_report_packet(
         max_result_bytes=MAX_REVIEW_RESULT_BYTES,
     )
     artifacts, artifacts_truncated = _artifact_inventory(inspection, source_output_dir=source_output_dir)
+    # inspect_output and artifact inventory read mutable source files. Recheck
+    # the execution manifest after those reads so a source mutation cannot be
+    # turned into a completed, ready-to-cite packet by the initial check.
+    if source_manifest_present:
+        _validate_source_manifest(source_manifest_path, source_output_dir)
     required_artifacts_missing = any(row["required"] and not row["exists"] for row in artifacts)
     review = _review_projection(dict(inspection.get("review", {}) or {}))
     query_evidence = _query_evidence(review)
@@ -144,6 +157,7 @@ def prepare_report_packet(
             "Deterministic OEL artifacts remain the evidence authority.",
         ],
     }
+
     packet["packet_sha256"] = _sha256_json({key: value for key, value in packet.items() if key != "packet_sha256"})
     packet_bytes = _serialized_json(packet)
     if len(packet_bytes) > MAX_REPORT_SOURCE_BYTES:
@@ -181,6 +195,62 @@ def prepare_report_packet(
         "provider_call_made": False,
         "non_claims": list(packet["non_claims"]),
     }
+
+
+def _source_manifest_artifacts_valid(manifest: dict[str, Any], output: Path) -> bool:
+    """Validate immutable source artifacts before projecting a report packet."""
+
+    if not bool(manifest.get("artifacts_complete", False)):
+        return False
+    mutable_paths = {(output / "index.md").resolve()}
+    artifacts = [
+        str(path)
+        for path in list(manifest.get("artifacts", []) or [])
+        if Path(str(path)).resolve() not in mutable_paths
+    ]
+    records = [
+        dict(raw or {})
+        for raw in list(manifest.get("artifact_records", []) or [])
+        if Path(str(dict(raw or {}).get("path", "") or "")).resolve() not in mutable_paths
+    ]
+    if not artifacts or len(records) != len(artifacts):
+        return False
+    expected_paths = set(artifacts)
+    if len(expected_paths) != len(artifacts):
+        return False
+    seen: set[str] = set()
+    for record in records:
+        raw_path = str(record.get("path", "") or "")
+        path = Path(raw_path)
+        if raw_path not in expected_paths or raw_path in seen:
+            return False
+        try:
+            path.resolve().relative_to(output.resolve())
+        except ValueError:
+            return False
+        if not path.is_file() or path.is_symlink():
+            return False
+        try:
+            expected_bytes = int(record.get("bytes", -1))
+        except (TypeError, ValueError):
+            return False
+        if expected_bytes != path.stat().st_size:
+            return False
+        if str(record.get("sha256", "")) != _sha256_file(path):
+            return False
+        seen.add(raw_path)
+    return seen == expected_paths
+
+
+def _validate_source_manifest(path: Path, output: Path) -> None:
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("The source execution manifest is invalid.") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError("The source execution manifest is invalid.")
+    if manifest.get("status") == "completed" and not _source_manifest_artifacts_valid(manifest, output):
+        raise ValueError("The source execution manifest artifact records do not match the current output.")
 
 
 def audit_report(

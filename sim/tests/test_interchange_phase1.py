@@ -12,7 +12,7 @@ import sim.handoff as handoff
 from sim.interchange.architecture import INTERCHANGE_CAPABILITY_FAMILIES
 from sim.interchange.cli import main as handoff_main
 from sim.interchange.contracts import AGE_STATUSES, INTEGRITY_STATUSES, QUALITY_DISPOSITIONS
-from sim.interchange.materialization import canonical_scenario_digest, materialize_onp
+from sim.interchange.materialization import ONPMaterializationError, canonical_scenario_digest, materialize_onp
 from sim.interchange.provenance import canonical_json_bytes, compute_manifest_id, compute_product_id
 from sim.interchange.validation import validate_document, validate_product
 
@@ -298,3 +298,15 @@ def test_materialize_onp_cli_reports_success_and_never_executes(tmp_path: Path, 
     assert payload["status"] == "materialized"
     assert payload["execution_occurred"] is False
     assert scenario_path.is_file()
+
+
+def test_materialize_onp_rejects_source_scenario_path_collision(tmp_path: Path) -> None:
+    with pytest.raises(ONPMaterializationError, match="targets must be distinct"):
+        materialize_onp(
+            ACCEPTED_PRODUCT,
+            scenario_name="collision",
+            scenario_path=ACCEPTED_PRODUCT,
+            output_dir=tmp_path / "run",
+            duration_s=60.0,
+            dt_s=10.0,
+        )

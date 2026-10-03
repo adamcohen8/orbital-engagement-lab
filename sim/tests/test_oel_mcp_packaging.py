@@ -117,7 +117,6 @@ def test_m5_wheel_packages_supported_mcp_profiles_and_keeps_dependency_optional(
         text=True,
         env=installed_env,
     )
-
     # Prove the wheel owns imports and seeds its packaged guide outside the checkout.
     identity = subprocess.run(
         [str(python), "-c",

@@ -309,9 +309,11 @@ def validate_stack_params(stack_id: str, params: dict[str, object]) -> None:
     )
     if allowed is None:
         return
-    unknown = sorted(set(params) - allowed)
+    unknown = sorted(set(params) - allowed - {"numeric_backend"})
     if unknown:
         raise ValueError(f"flight_software.params has unsupported field(s) for {stack_id}: {', '.join(unknown)}.")
+    if params.get("numeric_backend", "rust") not in ("python", "rust"):
+        raise ValueError("flight_software.params.numeric_backend must be python or rust.")
     if "wheel_axes_body" in params:
         try:
             axes = [[float(component) for component in axis] for axis in params["wheel_axes_body"]]  # type: ignore[union-attr]

@@ -169,3 +169,15 @@ horizon, or campaign-scale multi-asset and multi-target scheduling, campaign-
 scale storage/downlink timelines, advanced radar and radiometry, proprietary
 data connections, and review-ready customer trade studies. The separate public
 exact scheduler remains available for at most 18 supplied opportunities.
+
+## Numeric backend
+
+`numeric_backend` defaults to `"rust"`. Use `"python"` to select the reference
+arithmetic explicitly. The selected backend is retained in the normalized
+problem and its semantic identity, including when `"python"` is selected. The
+Rust path uses native local-nadir, target-track frame, gimbal-vector, and
+analytic Sun arithmetic (wheel 0.17.0 or newer); missing required native symbols
+fail before propagation. Geometry gates, quality metrics, footprint
+boundaries, transition refinement, resource screening, and evidence remain
+Python. Each assessment snapshots the retained state arrays once and
+neighboring slew queries evaluate only their required gimbal vectors.

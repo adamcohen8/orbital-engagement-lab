@@ -17,6 +17,8 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from sim.analysis.rust_numeric import numeric_backend as validate_numeric_backend
+from sim.analysis.rust_numeric import require_native
 from sim.dynamics.orbit.accelerations import OrbitContext
 from sim.dynamics.orbit.atmosphere import density_from_model
 from sim.dynamics.orbit.elements import rv_to_coe_eci
@@ -153,16 +155,36 @@ def _file_identity(relative_path: str) -> dict[str, Any]:
     }
 
 
-def _implementation_identity(atmosphere_models: Sequence[str]) -> dict[str, Any]:
+def _implementation_identity(atmosphere_models: Sequence[str], numeric_backend: str = "rust") -> dict[str, Any]:
     paths = set(_IMPLEMENTATION_FILES)
+    paths.add("sim/analysis/rust_numeric.py")
+    if numeric_backend == "rust":
+        native_sources = _PROJECT_ROOT / "rust/oel-orbit"
+        if (native_sources / "Cargo.toml").is_file():
+            paths.update(str(path.relative_to(_PROJECT_ROOT)) for path in (native_sources / "src").rglob("*.rs"))
+            paths.update(("rust/oel-orbit/Cargo.toml", "rust/oel-orbit/Cargo.lock"))
+        paths.update(("sim/dynamics/orbit/rust_force_plan.py", "sim/dynamics/orbit/rust_stage_context.py",
+                      "sim/rust_environment_backend.py"))
     for model in atmosphere_models:
         paths.update(_ATMOSPHERE_IMPLEMENTATION_FILES.get(model, ()))
     files = [_file_identity(path) for path in sorted(paths)]
-    return {
+    identity = {
         "algorithm_id": "oel.orbit_lifetime.v1",
         "source_tree_sha256": _digest(files),
         "files": files,
     }
+    if numeric_backend == "rust":
+        native = require_native("ONPForceContext.rk4")
+        from sim.rust_orbit_backend import native_extension_path
+
+        content = read_regular_file_nofollow(
+            native_extension_path(), min_bytes=1, max_bytes=64 * 1024 * 1024
+        )
+        identity["native_runtime"] = {
+            "module": "oel_rust_orbit", "version": str(native.__version__),
+            "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest(),
+        }
+    return identity
 
 
 @dataclass(frozen=True)
@@ -367,6 +389,8 @@ class OrbitLifetimeProblem:
     thresholds: LifetimeThresholds
     schema_version: str = ORBIT_LIFETIME_PROBLEM_SCHEMA
 
+    numeric_backend: str = "rust"
+
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> OrbitLifetimeProblem:
         raw = _mapping(value, "orbit-lifetime problem")
@@ -391,10 +415,12 @@ class OrbitLifetimeProblem:
             "atmosphere",
             "thresholds",
         }
+        backend = raw.pop("numeric_backend", "rust")
         _exact(raw, fields, "orbit-lifetime problem")
         if raw["schema_version"] != ORBIT_LIFETIME_PROBLEM_SCHEMA:
             raise OrbitLifetimeError(f"Unsupported orbit-lifetime schema {raw['schema_version']!r}.")
         return cls(
+            numeric_backend=backend,
             schema_version=raw["schema_version"],
             analysis_id=_text(raw["analysis_id"], "analysis_id"),
             asset_id=_text(raw["asset_id"], "asset_id"),
@@ -421,6 +447,10 @@ class OrbitLifetimeProblem:
         )
 
     def __post_init__(self) -> None:
+        try:
+            validate_numeric_backend(self.numeric_backend)
+        except ValueError as exc:
+            raise OrbitLifetimeError(str(exc)) from exc
         if self.schema_version != ORBIT_LIFETIME_PROBLEM_SCHEMA:
             raise OrbitLifetimeError(f"Unsupported orbit-lifetime schema {self.schema_version!r}.")
         object.__setattr__(self, "analysis_id", _text(self.analysis_id, "analysis_id"))
@@ -708,7 +738,10 @@ def _propagator(problem: OrbitLifetimeProblem) -> tuple[OrbitPropagator, dict[st
     plugins = [drag_plugin] if problem.drag_enabled else []
     if problem.include_j2:
         plugins.insert(0, j2_plugin)
-    propagator = OrbitPropagator(model="two_body", integrator="rk4", plugins=plugins, acceleration_mode="off")
+    propagator = OrbitPropagator(
+        model="two_body", integrator="rk4", plugins=plugins, acceleration_mode="off",
+        numeric_backend=problem.numeric_backend,
+    )
     env = problem.atmosphere.environment(problem.epoch_jd_utc)
     env.update(
         {
@@ -746,14 +779,32 @@ def _propagate_checked(
     context: OrbitContext,
 ) -> np.ndarray:
     try:
-        propagated = propagator.propagate(
-            state,
-            duration_s,
-            start_time_s,
-            np.zeros(3),
-            env,
-            context,
-        )
+        if problem.numeric_backend == "rust":
+            from sim.dynamics.orbit.rust_force_plan import make_plan
+            prepared = getattr(propagator, "_lifetime_native_plan", None)
+            if prepared is None:
+                propagator.numeric_backend = "rust"
+                prepared = make_plan(propagator, state, start_time_s, env, context)
+                propagator._lifetime_native_plan = prepared
+            if prepared is not None and prepared[-1] is not None:
+                propagated = np.asarray(prepared[-1].rk4(
+                    state.tolist(), start_time_s, duration_s, [0.0, 0.0, 0.0], prepared[-2]
+                ), dtype=float)
+            else:
+                # Atmosphere owners outside the prepared native envelope keep
+                # their real stage callbacks through OEL's native integrator.
+                propagated = propagator.propagate(
+                    state, duration_s, start_time_s, np.zeros(3), env, context,
+                )
+        else:
+            propagated = propagator.propagate(
+                state,
+                duration_s,
+                start_time_s,
+                np.zeros(3),
+                env,
+                context,
+            )
     except OrbitLifetimeError:
         raise
     except (ArithmeticError, OSError, RuntimeError, ValueError) as exc:
@@ -994,6 +1045,12 @@ def assess_orbit_lifetime(
     """Propagate one declared ONP drag case and retain bounded lifetime evidence."""
 
     parsed = problem if isinstance(problem, OrbitLifetimeProblem) else OrbitLifetimeProblem.from_mapping(problem)
+    if parsed.numeric_backend == "rust":
+        require_native("ONPForceContext.rk4", "ONPStageContext")
+        try:
+            from sim.dynamics.orbit.rust_force_plan import make_plan  # noqa: F401
+        except ImportError as exc:
+            raise OrbitLifetimeError("Rust lifetime force adapter is unavailable in this installation.") from exc
     state = parsed.initial_state()
     initial_elements = rv_to_coe_eci(state[:3], state[3:])
     samples = [_sample(parsed, state, 0.0, 0, initial_elements.a_km)]
@@ -1162,7 +1219,7 @@ def assess_orbit_lifetime(
         },
         "atmosphere": parsed.atmosphere.to_dict(),
         "atmosphere_effective": parsed.atmosphere.effective_record(),
-        "implementation_identity": _implementation_identity((parsed.atmosphere.model,)),
+        "implementation_identity": _implementation_identity((parsed.atmosphere.model,), parsed.numeric_backend),
         "spacecraft": {
             "mass_kg": parsed.mass_kg,
             "drag_area_m2": parsed.drag_area_m2,
@@ -1271,7 +1328,7 @@ def compare_orbit_lifetime_models(
         "case_count": len(rows),
         "identical_non_atmosphere_inputs": True,
         "implementation_identity": _implementation_identity(
-            tuple(case.atmosphere.model for case in parsed.cases)
+            tuple(case.atmosphere.model for case in parsed.cases), parsed.base_problem.numeric_backend
         ),
         "cases": case_summaries,
         "claim_limits": [

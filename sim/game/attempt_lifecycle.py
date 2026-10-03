@@ -143,7 +143,9 @@ def _start_game_attempt(
         ric_reference_object_id
     )
     config = SimulationConfig.from_dict(root, source_path=config.source_path)
-    session = GamePhysicsSession(
+    from sim.game.backend import create_game_physics_session
+
+    session = create_game_physics_session(
         _attempt_config_for_training_clock(config, training_cfg),
         retained_history_samples=_game_retained_history_samples(config),
     )

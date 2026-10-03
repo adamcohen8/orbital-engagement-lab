@@ -7,7 +7,14 @@ from unittest.mock import patch
 import numpy as np
 
 from sim.acceleration.benchmarks import benchmark_attitude_kernel, benchmark_estimation_kernel, benchmark_orbit_kernel
-from sim.acceleration.kernels.frames import ric_curv_to_rect_kernel, ric_dcm_ir_from_rv_kernel, ric_rect_to_curv_kernel
+from sim.acceleration.kernels.frames import (
+    eci_relative_to_ric_rect_rva_kernel,
+    ric_angular_rate_eci_from_rva_kernel,
+    ric_curv_to_rect_kernel,
+    ric_dcm_ir_from_rv_kernel,
+    ric_rect_state_to_eci_rva_kernel,
+    ric_rect_to_curv_kernel,
+)
 from sim.acceleration.kernels.geodesy import ecef_to_geodetic_deg_km_kernel
 from sim.acceleration.kernels.orbit import (
     j2_accel_eci,
@@ -52,6 +59,7 @@ from sim.estimation.attitude_ekf import AttitudeEKFEstimator
 from sim.estimation.orbit_ekf import OrbitEKFEstimator
 from sim.utils.frames import (
     eci_relative_to_ric_rect,
+    ric_angular_rate_eci_from_rv,
     ric_curv_to_rect,
     ric_dcm_ir_from_rv,
     ric_rect_state_to_eci,
@@ -186,6 +194,37 @@ class TestAcceleration(unittest.TestCase):
             np.testing.assert_allclose(ric_rect_to_curv(rel, r0), baseline["rect_to_curv"], atol=1.0e-12)
             np.testing.assert_allclose(ric_rect_state_to_eci(rel, r, v), baseline["rect_state_to_eci"], atol=1.0e-12)
             np.testing.assert_allclose(eci_relative_to_ric_rect(dep, chief), baseline["eci_relative"], atol=1.0e-12)
+
+    def test_acceleration_aware_ric_wrappers_match_kernel_and_preserve_default_path(self):
+        r = np.array([7000.0, -20.0, 30.0], dtype=float)
+        v = np.array([0.0, 7.5, 0.01], dtype=float)
+        a = np.array([1.0e-7, -2.0e-7, 1.0e-6], dtype=float)
+        chief = np.hstack((r, v))
+        rel = np.array([0.1, -1.0, 0.05, 0.0, 0.0001, -0.00002], dtype=float)
+
+        with patch.dict(os.environ, {ACCELERATION_ENV: "off"}, clear=False):
+            python_rate = ric_angular_rate_eci_from_rv(r, v, chief_accel_eci_km_s2=a)
+            python_dep = ric_rect_state_to_eci(rel, r, v, chief_accel_eci_km_s2=a)
+            python_relative = eci_relative_to_ric_rect(python_dep, chief, chief_accel_eci_km_s2=a)
+            default_dep = ric_rect_state_to_eci(rel, r, v)
+            zero_dep = ric_rect_state_to_eci(rel, r, v, chief_accel_eci_km_s2=np.zeros(3))
+
+        with patch.dict(os.environ, {ACCELERATION_ENV: "auto"}, clear=False):
+            accelerated_rate = ric_angular_rate_eci_from_rv(r, v, chief_accel_eci_km_s2=a)
+            accelerated_dep = ric_rect_state_to_eci(rel, r, v, chief_accel_eci_km_s2=a)
+            accelerated_relative = eci_relative_to_ric_rect(
+                accelerated_dep,
+                chief,
+                chief_accel_eci_km_s2=a,
+            )
+
+        np.testing.assert_allclose(accelerated_rate, python_rate, rtol=0.0, atol=1.0e-14)
+        np.testing.assert_allclose(accelerated_dep, python_dep, rtol=0.0, atol=1.0e-13)
+        np.testing.assert_allclose(accelerated_relative, python_relative, rtol=0.0, atol=1.0e-13)
+        np.testing.assert_allclose(ric_angular_rate_eci_from_rva_kernel(r, v, a), python_rate, rtol=0.0, atol=1.0e-14)
+        np.testing.assert_allclose(ric_rect_state_to_eci_rva_kernel(rel, r, v, a), python_dep, rtol=0.0, atol=1.0e-13)
+        np.testing.assert_allclose(eci_relative_to_ric_rect_rva_kernel(python_dep, chief, a), python_relative, rtol=0.0, atol=1.0e-13)
+        np.testing.assert_allclose(zero_dep, default_dep, rtol=0.0, atol=1.0e-13)
 
     def test_frame_wrappers_follow_config_context(self):
         cfg = scenario_config_from_dict({"simulator": {"acceleration": {"mode": "auto"}}})

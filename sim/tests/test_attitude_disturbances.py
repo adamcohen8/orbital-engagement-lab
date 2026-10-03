@@ -35,10 +35,13 @@ class _MidpointRecordingDisturbance:
 
 class _EnvironmentRecordingPropagator:
     def __init__(self) -> None:
+        self.state_frame = "eci"
         self.environment: dict | None = None
+        self.environments: list[dict] = []
 
     def propagate(self, *, x_eci, env, **kwargs):
         self.environment = dict(env)
+        self.environments.append(dict(env))
         return np.array(x_eci, dtype=float)
 
 
@@ -118,6 +121,43 @@ class TestAttitudeDisturbances(unittest.TestCase):
         self.assertNotIn("lift_coefficient", propagator.environment)
         self.assertNotIn("lift_direction_eci", propagator.environment)
 
+    def test_directional_area_follows_attitude_at_each_orbit_substep(self):
+        propagator = _EnvironmentRecordingPropagator()
+        profile = dynamics_model_module.GeometryAreaProfile(
+            directions_body=np.array(
+                [
+                    [-1.0, 0.0, 0.0],
+                    [0.0, -1.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                ]
+            ),
+            projected_area_m2=np.array([1.0, 2.0, 1.0, 2.0]),
+            center_of_pressure_body_m=np.zeros((4, 3)),
+        )
+        dynamics = OrbitalAttitudeDynamics(
+            mu_km3_s2=398600.4418,
+            inertia_kg_m2=np.eye(3),
+            geometry_area_profile=profile,
+            orbit_substep_s=0.25,
+            orbit_propagator=propagator,
+        )
+        state = StateTruth(
+            position_eci_km=np.array([7000.0, 0.0, 0.0]),
+            velocity_eci_km_s=np.array([0.0, 7.5, 0.0]),
+            attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0]),
+            angular_rate_body_rad_s=np.array([0.0, 0.0, np.pi / 2.0]),
+            mass_kg=100.0,
+            t_s=0.0,
+        )
+
+        dynamics.step(state, Command.zero(), {}, dt_s=2.0)
+
+        areas = np.array([entry["drag_area_m2"] for entry in propagator.environments])
+        self.assertEqual(len(areas), 8)
+        self.assertGreater(float(np.ptp(areas)), 0.25)
+        self.assertGreater(float(np.max(np.abs(np.diff(areas)))), 0.05)
+
     def test_disturbance_torque_nonzero_for_representative_state(self):
         inertia = np.diag([120.0, 100.0, 80.0])
         state = StateTruth(
@@ -163,6 +203,32 @@ class TestAttitudeDisturbances(unittest.TestCase):
 
         self.assertGreater(float(np.linalg.norm(tau)), 1e-5)
         self.assertLess(float(np.linalg.norm(tau)), 1e-4)
+
+    def test_fallback_magnetic_field_has_igrf_equatorial_polarity(self):
+        state = StateTruth(
+            position_eci_km=np.array([6378.137, 0.0, 0.0]),
+            velocity_eci_km_s=np.zeros(3),
+            attitude_quat_bn=np.array([1.0, 0.0, 0.0, 0.0]),
+            angular_rate_body_rad_s=np.zeros(3),
+            mass_kg=300.0,
+            t_s=0.0,
+        )
+        model = DisturbanceTorqueModel(
+            mu_km3_s2=398600.4418,
+            inertia_kg_m2=np.eye(3),
+            config=DisturbanceTorqueConfig(
+                use_gravity_gradient=False,
+                use_magnetic=True,
+                use_drag=False,
+                use_srp=False,
+                magnetic_dipole_body_a_m2=np.array([1.0, 0.0, 0.0]),
+            ),
+        )
+
+        # Negative dipole moment produces +z field at the equator; x cross +z
+        # points in -y.
+        torque = model.total_torque_body_nm(state)
+        assert torque[1] < 0.0
 
     def test_dynamics_with_disturbances_changes_angular_rate(self):
         inertia = np.diag([120.0, 100.0, 80.0])

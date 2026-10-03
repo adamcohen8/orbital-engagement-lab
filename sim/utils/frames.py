@@ -3,52 +3,55 @@ from __future__ import annotations
 import numpy as np
 
 from sim.acceleration.settings import acceleration_cache_key, acceleration_settings_from_mode
+from sim.numeric_backend import normalize_numeric_backend
 
 _FRAME_ACCEL_CACHE_KEY: tuple[str, bool] | None = None
 _FRAME_ACCEL_CACHE_ENABLED: bool | None = None
 eci_relative_to_ric_rect_kernel = None
 ric_angular_rate_eci_from_rv_kernel = None
+ric_angular_rate_eci_from_rva_kernel = None
 ric_curv_to_rect_kernel = None
 ric_dcm_ir_from_rv_kernel = None
 ric_rect_state_to_eci_kernel = None
+ric_rect_state_to_eci_rva_kernel = None
 ric_rect_to_curv_kernel = None
+eci_relative_to_ric_rect_rva_kernel = None
 
 
 def _frame_acceleration_enabled() -> bool:
     global _FRAME_ACCEL_CACHE_ENABLED, _FRAME_ACCEL_CACHE_KEY
     global eci_relative_to_ric_rect_kernel, ric_angular_rate_eci_from_rv_kernel
+    global ric_angular_rate_eci_from_rva_kernel, eci_relative_to_ric_rect_rva_kernel
     global ric_curv_to_rect_kernel, ric_dcm_ir_from_rv_kernel
-    global ric_rect_state_to_eci_kernel, ric_rect_to_curv_kernel
+    global ric_rect_state_to_eci_kernel, ric_rect_state_to_eci_rva_kernel, ric_rect_to_curv_kernel
     cache_key = acceleration_cache_key()
     if cache_key != _FRAME_ACCEL_CACHE_KEY:
         _FRAME_ACCEL_CACHE_KEY = cache_key
         _FRAME_ACCEL_CACHE_ENABLED = bool(acceleration_settings_from_mode().enabled)
-        if _FRAME_ACCEL_CACHE_ENABLED and ric_dcm_ir_from_rv_kernel is None:
-            from sim.acceleration.kernels.frames import (
-                eci_relative_to_ric_rect_kernel as accelerated_eci_relative_to_ric_rect,
-            )
-            from sim.acceleration.kernels.frames import (
-                ric_angular_rate_eci_from_rv_kernel as accelerated_ric_angular_rate,
-            )
-            from sim.acceleration.kernels.frames import (
-                ric_curv_to_rect_kernel as accelerated_ric_curv_to_rect,
-            )
-            from sim.acceleration.kernels.frames import (
-                ric_dcm_ir_from_rv_kernel as accelerated_ric_dcm,
-            )
-            from sim.acceleration.kernels.frames import (
-                ric_rect_state_to_eci_kernel as accelerated_ric_rect_state_to_eci,
-            )
-            from sim.acceleration.kernels.frames import (
-                ric_rect_to_curv_kernel as accelerated_ric_rect_to_curv,
-            )
+        if _FRAME_ACCEL_CACHE_ENABLED:
+            # Load each missing kernel independently.  Existing globals are a
+            # deliberate patch seam used by the acceleration-context tests and
+            # by downstream callers that provide an instrumented kernel.
+            from sim.acceleration.kernels import frames as accelerated_frames
 
-            eci_relative_to_ric_rect_kernel = accelerated_eci_relative_to_ric_rect
-            ric_angular_rate_eci_from_rv_kernel = accelerated_ric_angular_rate
-            ric_curv_to_rect_kernel = accelerated_ric_curv_to_rect
-            ric_dcm_ir_from_rv_kernel = accelerated_ric_dcm
-            ric_rect_state_to_eci_kernel = accelerated_ric_rect_state_to_eci
-            ric_rect_to_curv_kernel = accelerated_ric_rect_to_curv
+            if eci_relative_to_ric_rect_kernel is None:
+                eci_relative_to_ric_rect_kernel = accelerated_frames.eci_relative_to_ric_rect_kernel
+            if ric_angular_rate_eci_from_rv_kernel is None:
+                ric_angular_rate_eci_from_rv_kernel = accelerated_frames.ric_angular_rate_eci_from_rv_kernel
+            if ric_angular_rate_eci_from_rva_kernel is None:
+                ric_angular_rate_eci_from_rva_kernel = accelerated_frames.ric_angular_rate_eci_from_rva_kernel
+            if ric_curv_to_rect_kernel is None:
+                ric_curv_to_rect_kernel = accelerated_frames.ric_curv_to_rect_kernel
+            if ric_dcm_ir_from_rv_kernel is None:
+                ric_dcm_ir_from_rv_kernel = accelerated_frames.ric_dcm_ir_from_rv_kernel
+            if ric_rect_state_to_eci_kernel is None:
+                ric_rect_state_to_eci_kernel = accelerated_frames.ric_rect_state_to_eci_kernel
+            if ric_rect_state_to_eci_rva_kernel is None:
+                ric_rect_state_to_eci_rva_kernel = accelerated_frames.ric_rect_state_to_eci_rva_kernel
+            if ric_rect_to_curv_kernel is None:
+                ric_rect_to_curv_kernel = accelerated_frames.ric_rect_to_curv_kernel
+            if eci_relative_to_ric_rect_rva_kernel is None:
+                eci_relative_to_ric_rect_rva_kernel = accelerated_frames.eci_relative_to_ric_rect_rva_kernel
     return bool(_FRAME_ACCEL_CACHE_ENABLED)
 
 
@@ -60,7 +63,10 @@ def ric_dcm_ir_from_rv(r_eci_km: np.ndarray, v_eci_km_s: np.ndarray) -> np.ndarr
         )
     r = np.asarray(r_eci_km, dtype=float).reshape(3)
     v = np.asarray(v_eci_km_s, dtype=float).reshape(3)
-    r_hat = r / max(float(np.sqrt(np.dot(r, r))), 1e-12)
+    r_norm = float(np.sqrt(np.dot(r, r)))
+    if not np.isfinite(r_norm) or r_norm <= 1e-12:
+        raise ValueError("RIC frame is undefined for a zero or non-finite position vector.")
+    r_hat = r / r_norm
     h = np.array(
         [
             r[1] * v[2] - r[2] * v[1],
@@ -69,7 +75,10 @@ def ric_dcm_ir_from_rv(r_eci_km: np.ndarray, v_eci_km_s: np.ndarray) -> np.ndarr
         ],
         dtype=float,
     )
-    c_hat = h / max(float(np.sqrt(np.dot(h, h))), 1e-12)
+    h_norm = float(np.sqrt(np.dot(h, h)))
+    if not np.isfinite(h_norm) or h_norm <= 1e-12:
+        raise ValueError("RIC frame is undefined for zero angular momentum.")
+    c_hat = h / h_norm
     i_hat = np.array(
         [
             c_hat[1] * r_hat[2] - c_hat[2] * r_hat[1],
@@ -78,11 +87,58 @@ def ric_dcm_ir_from_rv(r_eci_km: np.ndarray, v_eci_km_s: np.ndarray) -> np.ndarr
         ],
         dtype=float,
     )
-    i_hat = i_hat / max(float(np.sqrt(np.dot(i_hat, i_hat))), 1e-12)
+    i_norm = float(np.sqrt(np.dot(i_hat, i_hat)))
+    if not np.isfinite(i_norm) or i_norm <= 1e-12:
+        raise ValueError("RIC frame is undefined for a degenerate basis.")
+    i_hat = i_hat / i_norm
     return np.column_stack((r_hat, i_hat, c_hat))
 
 
-def ric_angular_rate_eci_from_rv(r_eci_km: np.ndarray, v_eci_km_s: np.ndarray) -> np.ndarray:
+def _ric_angular_rate_eci_from_rva_python(
+    r_eci_km: np.ndarray,
+    v_eci_km_s: np.ndarray,
+    a_eci_km_s2: np.ndarray,
+) -> np.ndarray:
+    r = np.asarray(r_eci_km, dtype=float).reshape(3)
+    v = np.asarray(v_eci_km_s, dtype=float).reshape(3)
+    acceleration = np.asarray(a_eci_km_s2, dtype=float).reshape(3)
+    r_norm = float(np.linalg.norm(r))
+    h = np.cross(r, v)
+    h_norm = float(np.linalg.norm(h))
+    if not np.isfinite(r_norm) or r_norm <= 1e-12:
+        raise ValueError("RIC frame is undefined for a zero or non-finite position vector.")
+    if not np.isfinite(h_norm) or h_norm <= 1e-12:
+        raise ValueError("RIC frame is undefined for zero angular momentum.")
+    if not np.all(np.isfinite(acceleration)):
+        raise ValueError("RIC angular rate requires a finite acceleration vector.")
+    transverse_speed = h_norm / r_norm
+    if not np.isfinite(transverse_speed) or transverse_speed <= 1e-12:
+        raise ValueError("RIC angular rate is undefined for negligible transverse speed.")
+    r_hat = r / r_norm
+    c_hat = h / h_norm
+    return h / (r_norm * r_norm) + (float(acceleration @ c_hat) / transverse_speed) * r_hat
+
+
+def ric_angular_rate_eci_from_rv(
+    r_eci_km: np.ndarray,
+    v_eci_km_s: np.ndarray,
+    *,
+    chief_accel_eci_km_s2: np.ndarray | None = None,
+) -> np.ndarray:
+    """Return RIC angular rate, optionally including cross-track acceleration.
+
+    The historical r/v-only call retains its fixed-plane behavior.  Supplying
+    the chief acceleration adds the instantaneous radial basis rate required
+    when the orbit-plane normal moves.
+    """
+
+    if chief_accel_eci_km_s2 is not None:
+        r = np.asarray(r_eci_km, dtype=float).reshape(3)
+        v = np.asarray(v_eci_km_s, dtype=float).reshape(3)
+        acceleration = np.asarray(chief_accel_eci_km_s2, dtype=float).reshape(3)
+        if _frame_acceleration_enabled():
+            return ric_angular_rate_eci_from_rva_kernel(r, v, acceleration)
+        return _ric_angular_rate_eci_from_rva_python(r, v, acceleration)
     if _frame_acceleration_enabled():
         return ric_angular_rate_eci_from_rv_kernel(
             np.asarray(r_eci_km, dtype=float).reshape(3),
@@ -110,7 +166,39 @@ def ric_rect_state_to_eci(
     x_rel_ric_rect: np.ndarray,
     r_chief_eci_km: np.ndarray,
     v_chief_eci_km_s: np.ndarray,
+    *,
+    chief_accel_eci_km_s2: np.ndarray | None = None,
+    numeric_backend: str = "rust",
 ) -> np.ndarray:
+    """Convert a rectangular RIC relative state to ECI.
+
+    ``chief_accel_eci_km_s2`` is optional for compatibility.  Without it the
+    existing fixed-plane r/v-only rate is used; with it the full instantaneous
+    RIC basis rate is applied.
+    """
+
+    backend = normalize_numeric_backend(numeric_backend, error_message="numeric_backend must be 'python' or 'rust'.")
+    if backend == "rust" and chief_accel_eci_km_s2 is None:
+        from sim.rust_relative_backend import ric_relative_to_eci_batch
+
+        return ric_relative_to_eci_batch(
+            np.asarray(x_rel_ric_rect, dtype=float).reshape(1, 6),
+            np.hstack((np.asarray(r_chief_eci_km, dtype=float).reshape(3),
+                       np.asarray(v_chief_eci_km_s, dtype=float).reshape(3))).reshape(1, 6),
+        )[0]
+    if chief_accel_eci_km_s2 is not None:
+        x_rel = np.asarray(x_rel_ric_rect, dtype=float).reshape(6)
+        r = np.asarray(r_chief_eci_km, dtype=float).reshape(3)
+        v = np.asarray(v_chief_eci_km_s, dtype=float).reshape(3)
+        acceleration = np.asarray(chief_accel_eci_km_s2, dtype=float).reshape(3)
+        if _frame_acceleration_enabled():
+            return ric_rect_state_to_eci_rva_kernel(x_rel, r, v, acceleration)
+        c_ir = ric_dcm_ir_from_rv(r, v)
+        omega_ric_eci = _ric_angular_rate_eci_from_rva_python(r, v, acceleration)
+        dr_eci = c_ir @ x_rel[:3]
+        omega_cross_dr = np.cross(omega_ric_eci, dr_eci)
+        dv_eci = c_ir @ x_rel[3:] + omega_cross_dr
+        return np.hstack((r + dr_eci, v + dv_eci))
     if _frame_acceleration_enabled():
         return ric_rect_state_to_eci_kernel(
             np.asarray(x_rel_ric_rect, dtype=float).reshape(6),
@@ -141,7 +229,40 @@ def ric_rect_state_to_eci(
 def eci_relative_to_ric_rect(
     x_dep_eci: np.ndarray,
     x_chief_eci: np.ndarray,
+    *,
+    chief_accel_eci_km_s2: np.ndarray | None = None,
+    numeric_backend: str = "rust",
 ) -> np.ndarray:
+    """Convert an ECI deputy/chief pair to rectangular RIC coordinates.
+
+    ``chief_accel_eci_km_s2`` is optional for compatibility.  Without it the
+    existing fixed-plane r/v-only rate is used; with it the full instantaneous
+    RIC basis rate is applied.
+    """
+
+    backend = normalize_numeric_backend(numeric_backend, error_message="numeric_backend must be 'python' or 'rust'.")
+    if backend == "rust" and chief_accel_eci_km_s2 is None:
+        from sim.rust_relative_backend import eci_relative_to_ric_batch
+
+        return eci_relative_to_ric_batch(
+            np.asarray(x_dep_eci, dtype=float).reshape(1, 6),
+            np.asarray(x_chief_eci, dtype=float).reshape(1, 6),
+        )[0]
+    if chief_accel_eci_km_s2 is not None:
+        deputy = np.asarray(x_dep_eci, dtype=float).reshape(6)
+        chief = np.asarray(x_chief_eci, dtype=float).reshape(6)
+        acceleration = np.asarray(chief_accel_eci_km_s2, dtype=float).reshape(3)
+        if _frame_acceleration_enabled():
+            return eci_relative_to_ric_rect_rva_kernel(deputy, chief, acceleration)
+        r_chief = chief[:3]
+        v_chief = chief[3:]
+        c_ir = ric_dcm_ir_from_rv(r_chief, v_chief)
+        omega_ric_eci = _ric_angular_rate_eci_from_rva_python(r_chief, v_chief, acceleration)
+        dr_eci = deputy[:3] - r_chief
+        dv_eci = deputy[3:] - v_chief
+        dr_ric = c_ir.T @ dr_eci
+        dv_ric = c_ir.T @ (dv_eci - np.cross(omega_ric_eci, dr_eci))
+        return np.hstack((dr_ric, dv_ric))
     if _frame_acceleration_enabled():
         return eci_relative_to_ric_rect_kernel(
             np.asarray(x_dep_eci, dtype=float).reshape(6),

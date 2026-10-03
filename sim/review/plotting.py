@@ -164,7 +164,17 @@ class EvidencePlotter:
         if y is not None:
             spec = _replace_spec(spec, y_columns=_coerce_y_columns(y))
         output = kwargs.pop("output", None)
-        return self.save(_replace_spec(spec, plot_type=plot_type, **_spec_kwargs(kwargs)), output=output)
+        # ``result`` already contains the bounded, authorized query output
+        # used to infer the automatic specification.  Reuse it during the
+        # render so automatic plotting does not execute an expensive source
+        # query a second time.
+        spec = _replace_spec(spec, plot_type=plot_type, **_spec_kwargs(kwargs))
+        return _save_review_plot_from_result(
+            self.workspace,
+            spec,
+            result=result,
+            path=_resolve_output_path(self.workspace, output),
+        )
 
     def plot(
         self,

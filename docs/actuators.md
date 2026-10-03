@@ -213,3 +213,53 @@ component-level checks until physical v2 hardware profiles and their telemetry
 feedback contracts are promoted. Their scenario files validate hardware
 metadata and the attitude reference stack, but do not claim physical execution
 of those three component controllers.
+
+
+## Optional Rust pipeline for built-in v2 stacks
+
+This experimental parallel backend requires `oel-rust-orbit >=0.12.0` and
+a compatible `oel-rust-game` wheel in the simulation's Python environment.
+Version 0.5.0 enables batched validation; older compatible packet wheels retain
+per-record native validation. Runtime-built stacks default to Rust. Select a
+backend per object under the maintained flight-software params:
+
+```yaml
+objects:
+  satellite:
+    flight_software:
+      stack: fsw.attitude_reference
+      hardware_profile: hardware.reaction_wheels.v1
+      params:
+        numeric_backend: rust
+```
+
+The selector is also accepted by `fsw.passive`, `fsw.orbit_reference`,
+`fsw.rpo_reference` and `fsw.low_thrust_reference`. Orbit and attitude dynamics
+have their own independent `numeric_backend` selectors. Explicit Rust
+selection requires compatible optional wheels; missing native classes raise
+an error before execution.
+
+Rust combines quaternion PD control and attitude allocation within one
+controller release. Supported allocation models are ideal wrench, reaction
+wheels, magnetorquers and the existing simplified CMG triad. Within each
+hardware interval, Rust computes ideal-wrench lag/limits, reaction-wheel
+momentum/torque limits, magnetorquer dipole/torque, simplified CMG gimbal state,
+and continuous-engine thrust/mass flow. NumPy reductions and prepared matrix
+products retain the reference arithmetic to preserve trajectories. Custom
+attitude controllers continue through their Python control method, followed
+by the supported native allocator.
+
+Python retains release scheduling, command validity and sequence policy,
+fault/availability handling, mass depletion, record construction and stored
+state. Unsupported hardware, including RCS pulse/on-off and aerodynamic
+position devices, retains its existing Python implementation. The selector
+does not turn legacy actuator presets into concrete v2 hardware profiles.
+
+Packet validation and internal evidence conversion are batched through the
+native packet wheel. Boundary checks remain mandatory; external objects keep
+the Python validator's reflection and diagnostics. The existing Python JSON
+writer and public serializer still own the persisted format. Hardware state
+remains available to snapshots and restore. Native checkpoint identities bind
+the selected backend and implementation; cross-backend restore is rejected.
+Speed and deterministic parity do not establish actuator model accuracy or
+flight qualification.

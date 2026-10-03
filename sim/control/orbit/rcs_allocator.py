@@ -8,6 +8,7 @@ import numpy as np
 from sim.config.plugin_specs import instantiate_plugin_spec
 from sim.core.interfaces import Controller
 from sim.core.models import Command, StateBelief
+from sim.numeric_backend import normalize_numeric_backend
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 
@@ -31,26 +32,21 @@ def _bounded_nonnegative_lstsq(a: np.ndarray, b: np.ndarray, upper: np.ndarray) 
     matrix = np.array(a, dtype=float)
     target = np.array(b, dtype=float).reshape(matrix.shape[0])
     upper = np.array(upper, dtype=float).reshape(matrix.shape[1])
-    free = np.ones(matrix.shape[1], dtype=bool)
+    from scipy.optimize import lsq_linear
+
     x = np.zeros(matrix.shape[1], dtype=float)
-    residual = target.copy()
-    for _ in range(matrix.shape[1] + 1):
-        if not np.any(free):
-            break
-        sol, *_ = np.linalg.lstsq(matrix[:, free], residual, rcond=None)
-        trial = np.zeros_like(x)
-        trial[free] = sol
-        too_low = trial < 0.0
-        too_high = trial > upper
-        if not np.any(too_low | too_high):
-            x[free] = trial[free]
-            break
-        fixed = free & (too_low | too_high)
-        x[fixed & too_low] = 0.0
-        x[fixed & too_high] = upper[fixed & too_high]
-        free[fixed] = False
-        residual = target - matrix @ x
+    usable = upper > 0.0
+    if not np.any(usable):
+        return x
+    solution = lsq_linear(
+        matrix[:, usable], target, bounds=(0.0, upper[usable]),
+        method="bvls", tol=1.0e-12,
+    )
+    if not solution.success:
+        raise RuntimeError("RCS bounded allocation failed to converge.")
+    x[usable] = solution.x
     return np.clip(x, 0.0, upper)
+
 
 
 @dataclass
@@ -61,12 +57,53 @@ class RCSAllocationAwareController(Controller):
     allocation_mode: Literal["force_only", "torque_only", "force_torque"] = "force_only"
     torque_body_nm: np.ndarray | None = None
     attitude_quat_slice: tuple[int, int] = (6, 10)
+    numeric_backend: str = "rust"
 
     def __post_init__(self) -> None:
         self.base_controller = _construct_controller(self.base_controller)
         self.thrusters = tuple(dict(row or {}) for row in self.thrusters)
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="numeric_backend must be python or rust")
+        self.numeric_backend = backend
         if self.attitude_quat_slice[1] - self.attitude_quat_slice[0] != 4:
             raise ValueError("attitude_quat_slice must select exactly 4 elements.")
+
+    def _geometry(self):
+        signature = None
+        if self.numeric_backend == "rust":
+            # Read every mutable field on each command. In-place array/dict changes
+            # must invalidate prepared matrices, bounds, names, and native storage.
+            signature = tuple((
+                tuple(np.asarray(row.get("force_direction_body", [1., 0., 0.]), dtype=float).reshape(3)),
+                tuple(np.asarray(row.get("position_body_m", [0., 0., 0.]), dtype=float).reshape(3)),
+                float(max(row.get("max_thrust_n", 0.0), 0.0)), str(row.get("name", f"rcs_{idx}")),
+            ) for idx, row in enumerate(self.thrusters))
+            cached = getattr(self, "_prepared_geometry", None)
+            if cached is not None and cached[0] == signature:
+                return cached[1]
+        force_dirs = []
+        torque_dirs = []
+        max_forces = []
+        names = []
+        for idx, row in enumerate(self.thrusters):
+            force_dir = _unit(np.array(row.get("force_direction_body", [1.0, 0.0, 0.0]), dtype=float))
+            pos = np.array(row.get("position_body_m", [0.0, 0.0, 0.0]), dtype=float).reshape(3)
+            force_dirs.append(force_dir)
+            torque_dirs.append(np.cross(pos, force_dir))
+            max_forces.append(float(max(row.get("max_thrust_n", 0.0), 0.0)))
+            names.append(str(row.get("name", f"rcs_{idx}")))
+        if not force_dirs:
+            return None
+        force_matrix = np.array(force_dirs, dtype=float).T
+        torque_matrix = np.array(torque_dirs, dtype=float).T
+        native = None
+        if self.numeric_backend == "rust":
+            from sim.rust_control_backend import prepare_rcs_geometry
+
+            native = prepare_rcs_geometry(force_matrix, torque_matrix)
+        geometry = (force_matrix, torque_matrix, max_forces, names, native)
+        if self.numeric_backend == "rust":
+            self._prepared_geometry = (signature, geometry)
+        return geometry
 
     def act(self, belief: StateBelief, t_s: float, budget_ms: float) -> Command:
         base = self.base_controller.act(belief, t_s, budget_ms)
@@ -84,32 +121,44 @@ class RCSAllocationAwareController(Controller):
             if self.torque_body_nm is None
             else np.array(self.torque_body_nm, dtype=float).reshape(3)
         )
-        force_dirs = []
-        torque_dirs = []
-        max_forces = []
-        names = []
-        for idx, row in enumerate(self.thrusters):
-            force_dir = _unit(np.array(row.get("force_direction_body", [1.0, 0.0, 0.0]), dtype=float))
-            pos = np.array(row.get("position_body_m", [0.0, 0.0, 0.0]), dtype=float).reshape(3)
-            force_dirs.append(force_dir)
-            torque_dirs.append(np.cross(pos, force_dir))
-            max_forces.append(float(max(row.get("max_thrust_n", 0.0), 0.0)))
-            names.append(str(row.get("name", f"rcs_{idx}")))
-        if not force_dirs:
+        geometry = self._geometry()
+        if geometry is None:
             return base
+        force_matrix, torque_matrix, max_forces, names, native = geometry
+        max_forces, names = list(max_forces), list(names)
         if self.allocation_mode == "torque_only":
-            allocation = np.column_stack(torque_dirs)
+            allocation = torque_matrix
             target = desired_torque
         elif self.allocation_mode == "force_torque":
-            allocation = np.vstack((np.column_stack(force_dirs), np.column_stack(torque_dirs)))
+            allocation = np.vstack((force_matrix, torque_matrix))
             target = np.hstack((desired_force_body_n, desired_torque))
         else:
-            allocation = np.column_stack(force_dirs)
+            allocation = force_matrix
             target = desired_force_body_n
+        # The bounded active-set policy is deliberately retained in Python.
+        # It uses NumPy's mature least-squares implementation and its exact
+        # bound-freezing order is part of the controller's behavior.  The Rust
+        # backend remains available for the linear MPC/projection kernels.
         forces = _bounded_nonnegative_lstsq(allocation, target, np.array(max_forces, dtype=float))
-        achieved_force = np.sum(np.array(force_dirs).T * forces.reshape(1, -1), axis=1)
-        achieved_torque = np.sum(np.array(torque_dirs).T * forces.reshape(1, -1), axis=1)
-        achieved_force_eci = c_bn.T @ achieved_force
+        if self.numeric_backend == "rust":
+            # Keep the mature Python bounded active-set allocation policy, but
+            # route the repeated achieved-force/torque products through the
+            # selected native arithmetic kernel so this selector does real
+            # numerical work without changing allocation semantics.
+            from sim.rust_control_backend import mat_vec
+
+            if native is not None:
+                from sim.rust_control_backend import rcs_achieved
+
+                achieved_force, achieved_torque, achieved_force_eci = rcs_achieved(native, forces, c_bn.T)
+            else:
+                achieved_force = mat_vec(force_matrix, forces)
+                achieved_torque = mat_vec(torque_matrix, forces)
+                achieved_force_eci = mat_vec(c_bn.T, achieved_force)
+        else:
+            achieved_force = np.sum(force_matrix * forces.reshape(1, -1), axis=1)
+            achieved_torque = np.sum(torque_matrix * forces.reshape(1, -1), axis=1)
+            achieved_force_eci = c_bn.T @ achieved_force
         accel = achieved_force_eci / max(float(self.mass_kg), 1e-12) / 1e3
         mode_flags = dict(base.mode_flags or {})
         mode_flags.update(
@@ -134,4 +183,8 @@ class RCSAllocationAwareController(Controller):
                 "rcs_torque_error_nm": (desired_torque - achieved_torque).tolist(),
             }
         )
+        if self.numeric_backend == "rust":
+            mode_flags["rcs_numeric_backend"] = self.numeric_backend
+            mode_flags["rcs_numeric_path"] = ("python_reference_active_set_rust_prepared_geometry"
+                                              if native is not None else "python_reference_active_set_rust_matvec")
         return Command(thrust_eci_km_s2=accel, torque_body_nm=achieved_torque, mode_flags=mode_flags)

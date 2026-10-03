@@ -2,6 +2,13 @@
 from .dashboard_common import *
 from .geometry import *
 
+def _prediction_backend_options(numeric_backend: str = "rust") -> dict[str, str]:
+    if numeric_backend not in {"python", "rust"}:
+        raise ValueError("prediction numeric_backend must be python or rust")
+    # Forward the selector even when Python is explicitly requested.
+    return {"numeric_backend": numeric_backend}
+
+
 def _cw_coast_state(x0: np.ndarray, t_s: float, mean_motion_rad_s: float) -> np.ndarray:
     x, y, z, xd, yd, zd = np.array(x0, dtype=float).reshape(6)
     n = float(mean_motion_rad_s)
@@ -230,7 +237,9 @@ def _nonlinear_cr3bp_moon_ric_coast_prediction(
     target_state: np.ndarray,
     times: np.ndarray,
     current_t_s: float,
+    numeric_backend: str = "rust",
 ) -> np.ndarray:
+    options = _prediction_backend_options(numeric_backend)
     reference = np.array(target_state, dtype=float).reshape(6)
     deputy = _moon_ric_rect_state_to_cr3bp(rel0, reference)
     rows: list[np.ndarray] = []
@@ -239,8 +248,8 @@ def _nonlinear_cr3bp_moon_ric_coast_prediction(
     for target_t in np.array(times, dtype=float).reshape(-1):
         step_s = float(target_t - previous_t)
         if step_s > 0.0:
-            deputy = _dashboard_dep("propagate_cr3bp_state", propagate_cr3bp_state)(deputy, step_s, current_t)
-            reference = _dashboard_dep("propagate_cr3bp_state", propagate_cr3bp_state)(reference, step_s, current_t)
+            deputy = _dashboard_dep("propagate_cr3bp_state", propagate_cr3bp_state)(deputy, step_s, current_t, **options)
+            reference = _dashboard_dep("propagate_cr3bp_state", propagate_cr3bp_state)(reference, step_s, current_t, **options)
             current_t += step_s
         rows.append(_cr3bp_state_to_moon_ric_rect(deputy, reference))
         previous_t = float(target_t)
@@ -253,7 +262,9 @@ def _linearized_cr3bp_moon_ric_coast_prediction(
     target_state: np.ndarray,
     times: np.ndarray,
     current_t_s: float,
+    numeric_backend: str = "rust",
 ) -> np.ndarray:
+    options = _prediction_backend_options(numeric_backend)
     reference = np.array(target_state, dtype=float).reshape(6)
     deputy0 = _moon_ric_rect_state_to_cr3bp(rel0, reference)
     delta0 = deputy0 - reference
@@ -264,7 +275,7 @@ def _linearized_cr3bp_moon_ric_coast_prediction(
     for target_t in np.array(times, dtype=float).reshape(-1):
         step_s = float(target_t - previous_t)
         if step_s > 0.0:
-            reference, stm = _dashboard_dep("propagate_cr3bp_reference_stm", propagate_cr3bp_reference_stm)(reference, stm, step_s, current_t)
+            reference, stm = _dashboard_dep("propagate_cr3bp_reference_stm", propagate_cr3bp_reference_stm)(reference, stm, step_s, current_t, **options)
             current_t += step_s
         deputy_linear = reference + stm @ delta0
         rows.append(_cr3bp_state_to_moon_ric_rect(deputy_linear, reference))
@@ -277,7 +288,9 @@ def _linearized_cr3bp_moon_ric_stm_table(
     target_state: np.ndarray,
     times: np.ndarray,
     current_t_s: float,
+    numeric_backend: str = "rust",
 ) -> tuple[np.ndarray, np.ndarray]:
+    options = _prediction_backend_options(numeric_backend)
     reference = np.array(target_state, dtype=float).reshape(6)
     stm = np.eye(6, dtype=float)
     references: list[np.ndarray] = []
@@ -287,7 +300,7 @@ def _linearized_cr3bp_moon_ric_stm_table(
     for target_t in np.array(times, dtype=float).reshape(-1):
         step_s = float(target_t - previous_t)
         if step_s > 0.0:
-            reference, stm = _dashboard_dep("propagate_cr3bp_reference_stm", propagate_cr3bp_reference_stm)(reference, stm, step_s, current_t)
+            reference, stm = _dashboard_dep("propagate_cr3bp_reference_stm", propagate_cr3bp_reference_stm)(reference, stm, step_s, current_t, **options)
             current_t += step_s
         references.append(reference.copy())
         stms.append(stm.copy())
@@ -327,6 +340,7 @@ def _elliptic_linear_coast_states(
     chief_state_eci: np.ndarray,
     *,
     mu_km3_s2: float = EARTH_MU_KM3_S2,
+    numeric_backend: str = "rust",
 ) -> np.ndarray:
     """Propagate linearized RIC relative motion along a two-body elliptic chief.
 
@@ -347,6 +361,12 @@ def _elliptic_linear_coast_states(
     current_t = 0.0
     max_step_s = max(float(np.max(np.diff(sorted_times))) if sorted_times.size > 1 else 0.0, 1.0)
     max_step_s = min(max(max_step_s, 1.0), 60.0)
+    if _prediction_backend_options(numeric_backend)["numeric_backend"] == "rust":
+        from sim.flight_software.rust_game_backend import extension
+
+        native_rows = extension().preview_th_history(rel, chief, sorted_times.tolist(), max_step_s, float(mu_km3_s2))
+        rows[order] = np.asarray(native_rows, dtype=float).reshape(-1, 6)
+        return rows
     for sorted_idx, target_t in enumerate(sorted_times):
         target = float(max(target_t, current_t))
         while current_t < target:
@@ -363,9 +383,11 @@ def _elliptic_ya_coast_states(
     chief_state_eci: np.ndarray,
     *,
     mu_km3_s2: float = EARTH_MU_KM3_S2,
+    numeric_backend: str = "rust",
 ) -> np.ndarray:
     """Propagate elliptic-chief RIC relative motion with the closed-form YA STM."""
 
+    options = _prediction_backend_options(numeric_backend)
     rel = np.array(rel0_ric, dtype=float).reshape(6)
     chief0 = np.array(chief_state_eci, dtype=float).reshape(6)
     times = np.array(times_s, dtype=float).reshape(-1)
@@ -380,9 +402,9 @@ def _elliptic_ya_coast_states(
         target = float(max(float(target_t), current_t))
         duration_s = target - current_t
         if duration_s > 0.0:
-            chief = _two_body_coast_state(chief, duration_s, mu_km3_s2=float(mu_km3_s2))
+            chief = _two_body_coast_state(chief, duration_s, mu_km3_s2=float(mu_km3_s2), **options)
             current_t = target
-        phi = _dashboard_dep("ya_closed_form_transition_matrix", ya_closed_form_transition_matrix)(target, chief0, chief, mu_km3_s2=float(mu_km3_s2))
+        phi = _dashboard_dep("ya_closed_form_transition_matrix", ya_closed_form_transition_matrix)(target, chief0, chief, mu_km3_s2=float(mu_km3_s2), **options)
         rows[order[sorted_idx]] = phi @ rel
     return rows
 
@@ -392,7 +414,9 @@ def _elliptic_reference_cache_valid(
     current_reference_eci: Any,
     *,
     elapsed_s: float,
+    numeric_backend: str = "rust",
 ) -> bool:
+    options = _prediction_backend_options(numeric_backend)
     if cached_reference_eci is None or current_reference_eci is None:
         return cached_reference_eci is None and current_reference_eci is None
     try:
@@ -405,7 +429,7 @@ def _elliptic_reference_cache_valid(
     if float(elapsed_s) <= 0.0:
         expected = cached
     else:
-        expected = _two_body_coast_state(cached, float(elapsed_s))
+        expected = _two_body_coast_state(cached, float(elapsed_s), **options)
     pos_error_km = float(np.linalg.norm(current[:3] - expected[:3]))
     vel_error_km_s = float(np.linalg.norm(current[3:6] - expected[3:6]))
     return bool(
@@ -414,7 +438,14 @@ def _elliptic_reference_cache_valid(
     )
 
 
-def _cr3bp_reference_cache_valid(cached_reference: Any, current_reference: Any, *, elapsed_s: float = 0.0) -> bool:
+def _cr3bp_reference_cache_valid(
+    cached_reference: Any,
+    current_reference: Any,
+    *,
+    elapsed_s: float = 0.0,
+    numeric_backend: str = "rust",
+) -> bool:
+    options = _prediction_backend_options(numeric_backend)
     if cached_reference is None or current_reference is None:
         return cached_reference is None and current_reference is None
     try:
@@ -427,7 +458,12 @@ def _cr3bp_reference_cache_valid(cached_reference: Any, current_reference: Any, 
     expected = cached
     if float(elapsed_s) > 0.0:
         try:
-            expected = _dashboard_dep("propagate_cr3bp_state", propagate_cr3bp_state)(cached, float(elapsed_s), 0.0)
+            expected = _dashboard_dep("propagate_cr3bp_state", propagate_cr3bp_state)(
+                cached,
+                float(elapsed_s),
+                0.0,
+                **options,
+            )
         except Exception:
             expected = cached
     pos_error_km = float(np.linalg.norm(current[:3] - expected[:3]))
@@ -459,11 +495,17 @@ def _two_body_coast_state(
     duration_s: float,
     *,
     mu_km3_s2: float = EARTH_MU_KM3_S2,
+    numeric_backend: str = "rust",
 ) -> np.ndarray:
+    options = _prediction_backend_options(numeric_backend)
     state = np.array(state_eci, dtype=float).reshape(6)
     duration = float(max(duration_s, 0.0))
     if duration <= 0.0:
         return state.copy()
+    if options["numeric_backend"] == "rust":
+        from sim.flight_software.rust_game_backend import extension
+
+        return np.asarray(extension().preview_two_body(state, duration, float(mu_km3_s2)), dtype=float)
     current_t = 0.0
     step_s = min(max(duration / 4.0, 1.0), 10.0)
     out = state.astype(float)

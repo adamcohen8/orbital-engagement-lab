@@ -155,6 +155,12 @@ next internal step and exposes accepted/rejected step counts through
 Both `propagate_cr3bp_state` and `propagate_cr3bp_reference_stm` in
 `sim.dynamics.orbit.cr3bp` accept `integrator`, `adaptive_atol`, `adaptive_rtol`,
 `h_init`, and `return_info`. Defaults preserve existing return shapes.
+They also accept `numeric_backend="rust"` with the CR3BP-enabled
+`oel_rust_orbit` wheel (0.6.0 or newer); Rust is the default. Scenarios
+select it with `simulator.dynamics.orbit.numeric_backend: rust` alongside
+`model: cr3bp`. The native backend preserves rotating barycentric units and
+the configured system parameters, and evaluates the reference Jacobian/STM
+in Rust without Python stage callbacks. Older wheels are rejected explicitly.
 With `return_info=True`, state propagation returns `(state, info)` and STM
 propagation returns `(reference, stm, info)`; RK4's info is `None`.
 The augmented 42-component reference/STM system uses shared adaptive steps.
@@ -170,6 +176,9 @@ The research example selects RKF78; Trainer configurations remain unchanged.
 NRHO tolerance convergence against independent DOP853 integration, driven-state
 accuracy, and STM finite differences. This is numerical verification within
 ideal CR3BP, not ephemeris or observational validation.
+`sim/tests/test_rust_cr3bp_backend.py` additionally checks native/Python state
+and STM parity, DOP853 integration, Jacobi conservation, invalid inputs,
+runtime selection and adaptive restart evidence.
 
 ## Maneuver-responsive zero-velocity animations
 

@@ -5,6 +5,7 @@ from typing import Protocol
 
 import numpy as np
 
+from sim.numeric_backend import normalize_numeric_backend
 from sim.presets.rockets import RocketStackPreset
 from sim.rocket.aero import RocketAeroConfig
 
@@ -45,6 +46,7 @@ class RocketSimConfig:
     tvc_max_gimbal_deg: float = 6.0
     tvc_rate_limit_deg_s: float = 20.0
     tvc_pivot_offset_body_m: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    numeric_backend: str = "rust"
 
     def __post_init__(self) -> None:
         if self.dt_s <= 0.0:
@@ -74,6 +76,8 @@ class RocketSimConfig:
         mode = str(self.attitude_mode).strip().lower()
         if mode not in ("dynamic", "cheater"):
             raise ValueError("attitude_mode must be 'dynamic' or 'cheater'.")
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="numeric_backend must be 'python' or 'rust'.")
+        object.__setattr__(self, "numeric_backend", backend)
 
 
 @dataclass(frozen=True)

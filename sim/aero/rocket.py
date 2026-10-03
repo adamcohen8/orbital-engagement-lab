@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from sim.numeric_backend import normalize_numeric_backend
+
 
 @dataclass(frozen=True)
 class RocketAeroConfig:
@@ -58,7 +60,32 @@ def compute_aero_state(
     v_rel_body_m_s: np.ndarray,
     alpha_limit_deg: float,
     beta_limit_deg: float,
+    numeric_backend: str = "rust",
 ) -> RocketAeroState:
+    backend = normalize_numeric_backend(numeric_backend, error_message="numeric_backend must be python or rust")
+    if backend == "rust":
+        from sim.rust_vehicle_backend import rocket_aero_state
+
+        row = rocket_aero_state(
+            rho_kg_m3=rho_kg_m3,
+            pressure_pa=pressure_pa,
+            temperature_k=temperature_k,
+            sound_speed_m_s=sound_speed_m_s,
+            v_rel_body_m_s=v_rel_body_m_s,
+            alpha_limit_deg=alpha_limit_deg,
+            beta_limit_deg=beta_limit_deg,
+        )
+        return RocketAeroState(
+            rho_kg_m3=float(row[0]),
+            pressure_pa=float(row[1]),
+            temperature_k=float(row[2]),
+            sound_speed_m_s=float(row[3]),
+            dynamic_pressure_pa=float(row[4]),
+            speed_m_s=float(row[5]),
+            mach=float(row[6]),
+            alpha_rad=float(row[7]),
+            beta_rad=float(row[8]),
+        )
     v = np.array(v_rel_body_m_s, dtype=float).reshape(3)
     speed = float(np.linalg.norm(v))
     q = 0.5 * float(rho_kg_m3) * speed * speed
@@ -101,7 +128,49 @@ def compute_aero_loads(
     v_rel_body_m_s: np.ndarray,
     atmos: RocketAeroState,
     cfg: RocketAeroConfig,
+    numeric_backend: str = "rust",
 ) -> RocketAeroLoads:
+    backend = normalize_numeric_backend(numeric_backend, error_message="numeric_backend must be python or rust")
+    if backend == "rust":
+        from sim.rust_vehicle_backend import rocket_aero_loads
+
+        force, moment, coeff_force, coeff_moment, cd = rocket_aero_loads(
+            v_rel_body_m_s=v_rel_body_m_s,
+            atmosphere=(
+                atmos.rho_kg_m3,
+                atmos.pressure_pa,
+                atmos.temperature_k,
+                atmos.sound_speed_m_s,
+                atmos.dynamic_pressure_pa,
+                atmos.speed_m_s,
+                atmos.mach,
+                atmos.alpha_rad,
+                atmos.beta_rad,
+            ),
+            enabled=bool(cfg.enabled),
+            reference_area_m2=float(cfg.reference_area_m2),
+            reference_length_m=float(cfg.reference_length_m),
+            cp_offset_body_m=np.asarray(cfg.cp_offset_body_m, dtype=float).reshape(3),
+            cd_base=float(cfg.cd_base),
+            cd_alpha2=float(cfg.cd_alpha2),
+            cd_supersonic=float(cfg.cd_supersonic),
+            transonic_peak_cd=float(cfg.transonic_peak_cd),
+            transonic_mach=float(cfg.transonic_mach),
+            transonic_width=float(cfg.transonic_width),
+            cl_alpha_per_rad=float(cfg.cl_alpha_per_rad),
+            cy_beta_per_rad=float(cfg.cy_beta_per_rad),
+            cm_alpha_per_rad=float(cfg.cm_alpha_per_rad),
+            cn_beta_per_rad=float(cfg.cn_beta_per_rad),
+            cl_roll_per_rad=float(cfg.cl_roll_per_rad),
+        )
+        return RocketAeroLoads(
+            force_body_n=force,
+            moment_body_nm=moment,
+            coeff_force_body=coeff_force,
+            coeff_moment_body=coeff_moment,
+            drag_coefficient=float(cd),
+            state=atmos,
+        )
     q = atmos.dynamic_pressure_pa
     if q <= 0.0 or not cfg.enabled:
         z3 = np.zeros(3)

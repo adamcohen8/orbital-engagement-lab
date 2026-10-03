@@ -76,6 +76,11 @@ def _validate_plugin_modules(cfg: Any, policy: SealedModePolicy) -> list[str]:
     if policy.allow_untrusted_plugin_imports:
         return []
     errors: list[str] = []
+    for index, pointer in enumerate(getattr(getattr(cfg, "simulator", None), "system_force_models", []) or []):
+        pointer_path = f"simulator.system_force_models[{index}]"
+        errors.extend(_validate_plugin_module(pointer, pointer_path, policy))
+        for nested_path, nested_pointer in iter_nested_plugin_specs(pointer, pointer_path):
+            errors.extend(_validate_plugin_module(nested_pointer, nested_path, policy))
     for object_id, agent in configured_objects(cfg).items():
         if not getattr(agent, "enabled", False):
             continue

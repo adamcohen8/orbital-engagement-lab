@@ -10,6 +10,7 @@ from sim.dynamics.orbit.atmosphere import atmosphere_state_from_model
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2, EARTH_RADIUS_KM
 from sim.dynamics.orbit.frames import frame_context_from_environment, transform_position, transform_state
 from sim.dynamics.orbit.propagator import OrbitPropagator, drag_plugin, j2_plugin, j3_plugin, j4_plugin, srp_plugin
+from sim.numeric_backend import normalize_numeric_backend
 from sim.rocket.aero import RocketAeroConfig, compute_aero_loads, compute_aero_state
 from sim.rocket.models import (
     GuidanceCommand,
@@ -19,7 +20,7 @@ from sim.rocket.models import (
     RocketState,
     RocketVehicleConfig,
 )
-from sim.rocket.navigation import rocket_air_relative_state_eci_m_s
+from sim.rocket.navigation import _clip_scalar, _cross3, _norm3, rocket_air_relative_state_eci_m_s
 from sim.utils.geodesy import ecef_to_geodetic_deg_km, geodetic_to_ecef_km
 from sim.utils.quaternion import normalize_quaternion, quaternion_to_dcm_bn
 
@@ -28,7 +29,7 @@ P0_SEA_LEVEL_PA = 101325.0
 
 
 def _unit(v: np.ndarray, eps: float = 1e-12) -> np.ndarray:
-    n = float(np.linalg.norm(v))
+    n = float(_norm3(v))
     if n <= eps:
         return np.zeros_like(v)
     return v / n
@@ -68,7 +69,7 @@ def _geodetic_state_from_eci(
 ) -> tuple[float, float, float]:
     frame_context = frame_context or frame_context_from_environment({"jd_utc_start": jd_utc_start})
     r_ecef = transform_position(
-        np.array(r_eci_km, dtype=float).reshape(3),
+        np.asarray(r_eci_km, dtype=float).reshape(3),
         "eci",
         "ecef",
         t_s=t_s,
@@ -78,21 +79,21 @@ def _geodetic_state_from_eci(
 
 
 def _vector_angle_deg(a: np.ndarray, b: np.ndarray) -> float:
-    ua = _unit(np.array(a, dtype=float).reshape(3))
-    ub = _unit(np.array(b, dtype=float).reshape(3))
-    if np.linalg.norm(ua) <= 0.0 or np.linalg.norm(ub) <= 0.0:
+    ua = _unit(np.asarray(a, dtype=float).reshape(3))
+    ub = _unit(np.asarray(b, dtype=float).reshape(3))
+    if _norm3(ua) <= 0.0 or _norm3(ub) <= 0.0:
         return 0.0
-    return float(np.rad2deg(np.arccos(np.clip(float(np.dot(ua, ub)), -1.0, 1.0))))
+    return float(np.rad2deg(np.arccos(_clip_scalar(float(np.dot(ua, ub)), -1.0, 1.0))))
 
 
 def _limit_vector_cone(v: np.ndarray, axis: np.ndarray, max_angle_rad: float) -> np.ndarray:
     u = _unit(v)
     a = _unit(axis)
-    if np.linalg.norm(u) <= 0.0:
+    if _norm3(u) <= 0.0:
         return a
     if max_angle_rad <= 0.0:
         return a
-    angle = float(np.arccos(np.clip(float(np.dot(u, a)), -1.0, 1.0)))
+    angle = float(np.arccos(_clip_scalar(float(np.dot(u, a)), -1.0, 1.0)))
     if angle <= max_angle_rad:
         return u
     lateral = u - float(np.dot(u, a)) * a
@@ -115,21 +116,32 @@ def _step_tvc_vector(
     if sim_cfg.tvc_rate_limit_deg_s <= 0.0:
         return blended
     max_step = float(np.deg2rad(sim_cfg.tvc_rate_limit_deg_s) * dt_s)
-    step_angle = float(np.arccos(np.clip(float(np.dot(current, blended)), -1.0, 1.0)))
+    step_angle = float(np.arccos(_clip_scalar(float(np.dot(current, blended)), -1.0, 1.0)))
     if step_angle <= max_step or step_angle <= 1e-12:
         return blended
     beta = max_step / step_angle
     return _unit((1.0 - beta) * current + beta * blended)
 
 
-def _stage_engine_perf(stage, pressure_pa: float) -> tuple[float, float]:
-    p = float(np.clip(pressure_pa, 0.0, P0_SEA_LEVEL_PA))
-    sea_w = p / P0_SEA_LEVEL_PA
-    vac_w = 1.0 - sea_w
+def _stage_engine_perf(stage, pressure_pa: float, numeric_backend: str = "rust") -> tuple[float, float]:
+    backend = normalize_numeric_backend(numeric_backend, error_message='numeric_backend must be python or rust')
     thrust_sl = float(stage.sea_level_thrust_n if stage.sea_level_thrust_n is not None else stage.max_thrust_n)
     thrust_vac = float(stage.vacuum_thrust_n if stage.vacuum_thrust_n is not None else stage.max_thrust_n)
     isp_sl = float(stage.sea_level_isp_s if stage.sea_level_isp_s is not None else stage.isp_s)
     isp_vac = float(stage.vacuum_isp_s if stage.vacuum_isp_s is not None else stage.isp_s)
+    if backend == "rust":
+        from sim.rust_vehicle_backend import rocket_stage_engine_perf
+
+        return rocket_stage_engine_perf(
+            pressure_pa=pressure_pa,
+            sea_level_thrust_n=thrust_sl,
+            vacuum_thrust_n=thrust_vac,
+            sea_level_isp_s=isp_sl,
+            vacuum_isp_s=isp_vac,
+        )
+    p = float(_clip_scalar(pressure_pa, 0.0, P0_SEA_LEVEL_PA))
+    sea_w = p / P0_SEA_LEVEL_PA
+    vac_w = 1.0 - sea_w
     thrust_n = sea_w * thrust_sl + vac_w * thrust_vac
     isp_s = sea_w * isp_sl + vac_w * isp_vac
     return float(max(thrust_n, 0.0)), float(max(isp_s, 1e-9))
@@ -138,19 +150,19 @@ def _stage_engine_perf(stage, pressure_pa: float) -> tuple[float, float]:
 def _initial_attitude_quaternion(r_eci_km: np.ndarray, azimuth_deg: float) -> np.ndarray:
     r_hat = _unit(r_eci_km)
     k = np.array([0.0, 0.0, 1.0], dtype=float)
-    east = _unit(np.cross(k, r_hat))
-    if np.linalg.norm(east) <= 0.0:
+    east = _unit(_cross3(k, r_hat))
+    if _norm3(east) <= 0.0:
         east = np.array([0.0, 1.0, 0.0])
-    north = _unit(np.cross(r_hat, east))
+    north = _unit(_cross3(r_hat, east))
     az = np.deg2rad(azimuth_deg)
     # body +X along launch axis, initially near radial with azimuth yaw bias.
     x_b = _unit(
         np.cos(np.deg2rad(1.0)) * r_hat + np.sin(np.deg2rad(1.0)) * (_unit(np.cos(az) * north + np.sin(az) * east))
     )
-    y_b = _unit(np.cross(k, x_b))
-    if np.linalg.norm(y_b) <= 0.0:
-        y_b = _unit(np.cross(np.array([0.0, 1.0, 0.0]), x_b))
-    z_b = _unit(np.cross(x_b, y_b))
+    y_b = _unit(_cross3(k, x_b))
+    if _norm3(y_b) <= 0.0:
+        y_b = _unit(_cross3(np.array([0.0, 1.0, 0.0]), x_b))
+    z_b = _unit(_cross3(x_b, y_b))
     c_bn = np.vstack((x_b, y_b, z_b))
     from sim.utils.quaternion import dcm_to_quaternion_bn
 
@@ -158,7 +170,7 @@ def _initial_attitude_quaternion(r_eci_km: np.ndarray, azimuth_deg: float) -> np
 
 
 def _orbital_elements_basic(r_km: np.ndarray, v_km_s: np.ndarray, mu_km3_s2: float) -> tuple[float, float]:
-    r = float(np.linalg.norm(r_km))
+    r = float(_norm3(r_km))
     v2 = float(np.dot(v_km_s, v_km_s))
     if r <= 0.0:
         return np.inf, np.inf
@@ -167,9 +179,9 @@ def _orbital_elements_basic(r_km: np.ndarray, v_km_s: np.ndarray, mu_km3_s2: flo
         a = np.inf
     else:
         a = -mu_km3_s2 / (2.0 * eps)
-    h = np.cross(r_km, v_km_s)
-    e_vec = np.cross(v_km_s, h) / mu_km3_s2 - r_km / r
-    e = float(np.linalg.norm(e_vec))
+    h = _cross3(r_km, v_km_s)
+    e_vec = _cross3(v_km_s, h) / mu_km3_s2 - r_km / r
+    e = float(_norm3(e_vec))
     return float(a), e
 
 
@@ -209,13 +221,17 @@ class RocketAscentSimulator:
             plugins.append(drag_plugin)
         if self.sim_cfg.enable_srp:
             plugins.append(srp_plugin)
-        self._propagator = OrbitPropagator(integrator="rk4", plugins=plugins)
+        self._propagator = OrbitPropagator(
+            integrator="rk4",
+            plugins=plugins,
+            numeric_backend=self.sim_cfg.numeric_backend,
+        )
 
     def _resolve_aero_config_for_stage(self, stage_i: int) -> RocketAeroConfig:
         cfg = self.sim_cfg.aero
         if not cfg.enabled:
             return cfg
-        idx = int(np.clip(stage_i, 0, len(self._stage_ref_length_m) - 1))
+        idx = int(_clip_scalar(stage_i, 0, len(self._stage_ref_length_m) - 1))
 
         # Optional global override keeps area fixed regardless of stage.
         area_m2 = (
@@ -251,7 +267,7 @@ class RocketAscentSimulator:
             active_stage_index=0,
             stage_prop_remaining_kg=self._stage_prop0.copy(),
             payload_attached=True,
-            thrust_vector_body=_unit(np.array(self.vehicle_cfg.thrust_axis_body, dtype=float)),
+            thrust_vector_body=_unit(np.asarray(self.vehicle_cfg.thrust_axis_body, dtype=float)),
         )
 
     def hold_on_launch_pad(self, state: RocketState, *, t_s: float) -> RocketState:
@@ -323,7 +339,7 @@ class RocketAscentSimulator:
             alt[idx] = float(
                 alt_now
                 if self.sim_cfg.use_wgs84_geodesy
-                else np.linalg.norm(sample_state.position_eci_km) - EARTH_RADIUS_KM
+                else _norm3(sample_state.position_eci_km) - EARTH_RADIUS_KM
             )
             lat_deg[idx] = float(lat_now)
             lon_deg[idx] = float(lon_now)
@@ -356,8 +372,17 @@ class RocketAscentSimulator:
             aero_moment_nm[sample_idx] = float(getattr(state, "_last_step_aero_moment_nm", 0.0))
 
             if self.sim_cfg.terminate_on_earth_impact:
-                impact = float(np.linalg.norm(state.position_eci_km)) <= float(self.sim_cfg.earth_impact_radius_km)
-                if self.sim_cfg.use_wgs84_geodesy:
+                impact_radius_km = float(self.sim_cfg.earth_impact_radius_km)
+                impact = float(_norm3(state.position_eci_km)) <= impact_radius_km
+                # EARTH_RADIUS_KM is the WGS-84 equatorial semi-major axis and
+                # remains the default selector for the ellipsoidal physical
+                # surface. A non-default radius is an explicit spherical
+                # impact-radius override, even when WGS-84 geodesy is used for
+                # navigation and altitude reporting.
+                use_wgs84_surface = (
+                    self.sim_cfg.use_wgs84_geodesy and impact_radius_km == EARTH_RADIUS_KM
+                )
+                if use_wgs84_surface:
                     _, _, alt_check = _geodetic_state_from_eci(
                         state.position_eci_km,
                         state.t_s,
@@ -407,7 +432,7 @@ class RocketAscentSimulator:
                 jd_utc_start=self.sim_cfg.atmosphere_env.get("jd_utc_start"),
             )
             alt_compare = float(
-                alt_ins if self.sim_cfg.use_wgs84_geodesy else np.linalg.norm(state.position_eci_km) - EARTH_RADIUS_KM
+                alt_ins if self.sim_cfg.use_wgs84_geodesy else _norm3(state.position_eci_km) - EARTH_RADIUS_KM
             )
             near_alt = abs(alt_compare - self.sim_cfg.target_altitude_km) <= self.sim_cfg.target_altitude_tolerance_km
             _, e_now = _orbital_elements_basic(state.position_eci_km, state.velocity_eci_km_s, EARTH_MU_KM3_S2)
@@ -514,14 +539,44 @@ class RocketAscentSimulator:
             prop_left = float(s.stage_prop_remaining_kg[stage_i])
             if prop_left > 0.0 and throttle > 0.0:
                 stage = self.vehicle_cfg.stack.stages[stage_i]
-                stage_thrust_n, stage_isp_s = _stage_engine_perf(stage, ambient_pressure_pa)
-                full_step_thrust_n = float(throttle * stage_thrust_n)
-                mdot = full_step_thrust_n / max(stage_isp_s * G0_M_S2, 1e-9)
-                full_step_dm_prop = mdot * dt_s
-                dm_prop = min(prop_left, full_step_dm_prop)
-                burn_fraction = 0.0 if full_step_dm_prop <= 0.0 else float(dm_prop / full_step_dm_prop)
-                thrust_n = full_step_thrust_n * burn_fraction
-                mass_for_thrust_kg = max(mass_start_kg - 0.5 * dm_prop, 1e-9)
+                if str(self.sim_cfg.numeric_backend).strip().lower() == "rust":
+                    from sim.rust_vehicle_backend import rocket_propellant_step
+
+                    propellant_step = rocket_propellant_step(
+                        propellant_left_kg=prop_left,
+                        throttle=throttle,
+                        pressure_pa=ambient_pressure_pa,
+                        dt_s=dt_s,
+                        mass_start_kg=mass_start_kg,
+                        sea_level_thrust_n=float(
+                            stage.sea_level_thrust_n
+                            if stage.sea_level_thrust_n is not None
+                            else stage.max_thrust_n
+                        ),
+                        vacuum_thrust_n=float(
+                            stage.vacuum_thrust_n
+                            if stage.vacuum_thrust_n is not None
+                            else stage.max_thrust_n
+                        ),
+                        sea_level_isp_s=float(
+                            stage.sea_level_isp_s if stage.sea_level_isp_s is not None else stage.isp_s
+                        ),
+                        vacuum_isp_s=float(
+                            stage.vacuum_isp_s if stage.vacuum_isp_s is not None else stage.isp_s
+                        ),
+                    )
+                    thrust_n = float(propellant_step[0])
+                    dm_prop = float(propellant_step[2])
+                    mass_for_thrust_kg = float(propellant_step[4])
+                else:
+                    stage_thrust_n, stage_isp_s = _stage_engine_perf(stage, ambient_pressure_pa, numeric_backend=self.sim_cfg.numeric_backend)
+                    full_step_thrust_n = float(throttle * stage_thrust_n)
+                    mdot = full_step_thrust_n / max(stage_isp_s * G0_M_S2, 1e-9)
+                    full_step_dm_prop = mdot * dt_s
+                    dm_prop = min(prop_left, full_step_dm_prop)
+                    burn_fraction = 0.0 if full_step_dm_prop <= 0.0 else float(dm_prop / full_step_dm_prop)
+                    thrust_n = full_step_thrust_n * burn_fraction
+                    mass_for_thrust_kg = max(mass_start_kg - 0.5 * dm_prop, 1e-9)
                 s.stage_prop_remaining_kg[stage_i] = prop_left - dm_prop
                 s.mass_kg = max(0.0, s.mass_kg - dm_prop)
 
@@ -532,11 +587,11 @@ class RocketAscentSimulator:
             if s.stage_prop_remaining_kg[stage_i] <= 1e-9:
                 pending_stage_separation = True
 
-        nominal_thrust_axis_body = _unit(np.array(self.vehicle_cfg.thrust_axis_body, dtype=float))
+        nominal_thrust_axis_body = _unit(np.asarray(self.vehicle_cfg.thrust_axis_body, dtype=float))
         tvc_target_body = (
             nominal_thrust_axis_body
             if cmd.thrust_vector_body_cmd is None
-            else _unit(np.array(cmd.thrust_vector_body_cmd, dtype=float))
+            else _unit(np.asarray(cmd.thrust_vector_body_cmd, dtype=float))
         )
         s.thrust_vector_body = _step_tvc_vector(
             current_body=s.thrust_vector_body,
@@ -549,15 +604,15 @@ class RocketAscentSimulator:
         mode = str(self.sim_cfg.attitude_mode).strip().lower()
         if mode == "cheater" and cmd.attitude_quat_bn_cmd is not None:
             s.attitude_quat_bn = normalize_quaternion(
-                np.array(cmd.attitude_quat_bn_cmd, dtype=float)
+                np.asarray(cmd.attitude_quat_bn_cmd, dtype=float)
             )
         c_bn = quaternion_to_dcm_bn(s.attitude_quat_bn)
         thrust_axis_eci = c_bn.T @ s.thrust_vector_body
         accel_thrust_eci_km_s2 = (thrust_n / mass_for_thrust_kg) * thrust_axis_eci / 1e3
         torque_aero_body_nm = np.zeros(3)
         accel_aero_eci_km_s2 = np.zeros(3)
-        torque_tvc_body_nm = np.cross(
-            np.array(self.sim_cfg.tvc_pivot_offset_body_m, dtype=float).reshape(3),
+        torque_tvc_body_nm = _cross3(
+            np.asarray(self.sim_cfg.tvc_pivot_offset_body_m, dtype=float).reshape(3),
             thrust_n * s.thrust_vector_body,
         )
         last_q_dyn = 0.0
@@ -578,7 +633,7 @@ class RocketAscentSimulator:
         )
         v_rel_body_m_s = c_bn @ v_rel_eci_m_s
         if self.sim_cfg.enable_drag or self.sim_cfg.aero.enabled:
-            speed_m_s = float(np.linalg.norm(v_rel_eci_m_s))
+            speed_m_s = float(_norm3(v_rel_eci_m_s))
             last_q_dyn = 0.5 * float(atmos["density_kg_m3"]) * speed_m_s * speed_m_s
             sound_speed_m_s = float(max(float(atmos.get("sound_speed_m_s", 0.0)), 1e-9))
             last_mach = speed_m_s / sound_speed_m_s
@@ -592,9 +647,15 @@ class RocketAscentSimulator:
                 v_rel_body_m_s=v_rel_body_m_s,
                 alpha_limit_deg=float(self.sim_cfg.aero.alpha_limit_deg),
                 beta_limit_deg=float(self.sim_cfg.aero.beta_limit_deg),
+                numeric_backend=self.sim_cfg.numeric_backend,
             )
             aero_cfg = self._resolve_aero_config_for_stage(stage_i=stage_i)
-            loads = compute_aero_loads(v_rel_body_m_s=v_rel_body_m_s, atmos=aero_state, cfg=aero_cfg)
+            loads = compute_aero_loads(
+                v_rel_body_m_s=v_rel_body_m_s,
+                atmos=aero_state,
+                cfg=aero_cfg,
+                numeric_backend=self.sim_cfg.numeric_backend,
+            )
             f_aero_eci_n = c_bn.T @ loads.force_body_n
             accel_aero_eci_km_s2 = f_aero_eci_n / max(mass_for_forces_kg, 1e-9) / 1e3
             torque_aero_body_nm = loads.moment_body_nm
@@ -604,10 +665,12 @@ class RocketAscentSimulator:
             last_alpha_deg = float(np.rad2deg(loads.state.alpha_rad))
             last_beta_deg = float(np.rad2deg(loads.state.beta_rad))
             last_cd = float(loads.drag_coefficient)
-            last_aero_force_n = float(np.linalg.norm(loads.force_body_n))
-            last_aero_moment_nm = float(np.linalg.norm(loads.moment_body_nm))
+            last_aero_force_n = float(_norm3(loads.force_body_n))
+            last_aero_moment_nm = float(_norm3(loads.moment_body_nm))
 
-        x_orbit = np.hstack((s.position_eci_km, s.velocity_eci_km_s))
+        x_orbit = np.empty(6, dtype=float)
+        x_orbit[:3] = s.position_eci_km
+        x_orbit[3:] = s.velocity_eci_km_s
         ctx = OrbitContext(
             mu_km3_s2=EARTH_MU_KM3_S2,
             mass_kg=mass_for_forces_kg,
@@ -626,7 +689,7 @@ class RocketAscentSimulator:
 
         if mode == "cheater":
             if cmd.attitude_quat_bn_cmd is not None:
-                qn = normalize_quaternion(np.array(cmd.attitude_quat_bn_cmd, dtype=float))
+                qn = normalize_quaternion(np.asarray(cmd.attitude_quat_bn_cmd, dtype=float))
             else:
                 qn = s.attitude_quat_bn.copy()
             wn = np.zeros(3, dtype=float)
@@ -647,6 +710,7 @@ class RocketAscentSimulator:
                     inertia_kg_m2=self.sim_cfg.inertia_kg_m2,
                     torque_body_nm=torque_cmd,
                     dt_s=h,
+                    numeric_backend=self.sim_cfg.numeric_backend,
                 )
                 rem -= h
 

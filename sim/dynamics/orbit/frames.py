@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -89,6 +90,7 @@ class FrameContext:
     def at(self, t_s: float) -> FrameContext:
         if self.jd_utc_start is None or self.model != FRAME_MODEL_IAU76_80_EOP or not self.eop_path:
             return self
+        _validate_eop_elapsed_interval(self.jd_utc_start, t_s, self.eop_path)
         jd_utc = float(self.jd_utc_start) + float(t_s) / _DAYSEC
         xp_arcsec, yp_arcsec, dut1_s, dat_s = _interp_eop(
             jd_utc - _MJD0,
@@ -117,7 +119,7 @@ class FrameContext:
         data["legacy_frame_model"] = sampled.legacy_frame_model
         data["sample_t_s"] = float(sample_t_s)
         data["polar_motion_applied"] = sampled.eop_rotation_available
-        if sampled.eop_path:
+        if sampled.eop_rotation_available and sampled.eop_path:
             data["eop_table_sha256"] = _eop_table_sha256(sampled.eop_path)
         data["nutation_corrections_applied"] = bool(
             sampled.eop_rotation_available and (float(sampled.ddpsi_rad) != 0.0 or float(sampled.ddeps_rad) != 0.0)
@@ -125,14 +127,25 @@ class FrameContext:
         return data
 
 
+def _eop_file_signature(path_value: str) -> tuple[int, int, int, int]:
+    """Return metadata that changes when an EOP file is replaced or rewritten."""
+    stat = Path(path_value).expanduser().resolve().stat()
+    return (int(stat.st_ino), int(stat.st_size), int(stat.st_mtime_ns), int(stat.st_ctime_ns))
+
+
 @lru_cache(maxsize=16)
-def _eop_table_sha256(path_value: str) -> str:
+def _eop_table_sha256_cached(path_value: str, signature: tuple[int, int, int, int]) -> str:
     digest = hashlib.sha256()
     for array in _load_eop_table(path_value):
         normalized = np.ascontiguousarray(np.asarray(array, dtype="<f8"))
         digest.update(normalized.dtype.str.encode("ascii"))
         digest.update(normalized.tobytes(order="C"))
     return digest.hexdigest()
+
+
+def _eop_table_sha256(path_value: str) -> str:
+    resolved = str(Path(path_value).expanduser().resolve())
+    return _eop_table_sha256_cached(resolved, _eop_file_signature(resolved))
 
 
 def normalize_frame_model(model: Any) -> str:
@@ -175,7 +188,18 @@ def frame_context_from_mapping(
         time_scale_model=str(
             data.get(
                 "time_scale_model",
-                "eop_utc_ut1_tt" if model == FRAME_MODEL_IAU76_80_EOP and eop_path else "utc_only",
+                "eop_utc_ut1_tt"
+                if model == FRAME_MODEL_IAU76_80_EOP
+                and (
+                    eop_path
+                    or any(
+                        data.get(key) is not None
+                        for key in ("dut1_s", "xp_arcsec", "yp_arcsec", "dat_s")
+                    )
+                    or float(data.get("ddpsi_rad", 0.0) or 0.0) != 0.0
+                    or float(data.get("ddeps_rad", 0.0) or 0.0) != 0.0
+                )
+                else "utc_only",
             )
         ),
         tt_minus_utc_s=tt_minus_utc_s,
@@ -259,7 +283,10 @@ def _rz(angle_rad: float) -> np.ndarray:
 
 
 @lru_cache(maxsize=4)
-def _load_eop_table(eop_path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _load_eop_table_cached(
+    eop_path: str,
+    signature: tuple[int, int, int, int],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     mjd = []
     xp_arcsec = []
     yp_arcsec = []
@@ -298,14 +325,64 @@ def _load_eop_table(eop_path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, 
     )
 
 
+def _load_eop_table(eop_path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    resolved = str(Path(eop_path).expanduser().resolve())
+    return _load_eop_table_cached(resolved, _eop_file_signature(resolved))
+
+
+@lru_cache(maxsize=16)
+def _eop_dat_change_intervals_cached(
+    eop_path: str,
+    signature: tuple[int, int, int, int],
+) -> tuple[tuple[float, float], ...]:
+    """Return EOP intervals over which DAT changes between records."""
+
+    mjd, _xp_arcsec, _yp_arcsec, _dut1_s, dat_s = _load_eop_table(eop_path)
+    if mjd.size < 2:
+        return ()
+    changes = np.flatnonzero(
+        np.isfinite(dat_s[:-1])
+        & np.isfinite(dat_s[1:])
+        & (np.abs(np.diff(dat_s)) > 1.0e-9)
+    )
+    return tuple((float(mjd[index]), float(mjd[index + 1])) for index in changes)
+
+
+def _eop_dat_change_intervals(eop_path: str) -> tuple[tuple[float, float], ...]:
+    resolved = str(Path(eop_path).expanduser().resolve())
+    return _eop_dat_change_intervals_cached(resolved, _eop_file_signature(resolved))
+
+
+def _validate_eop_elapsed_interval(jd_utc_start: float, t_s: float, eop_path: str) -> None:
+    """Reject EOP-backed elapsed-time requests that cross a DAT step."""
+
+    elapsed = float(t_s)
+    if elapsed == 0.0:
+        return
+    start_mjd = float(jd_utc_start) - _MJD0
+    end_mjd = start_mjd + elapsed / _DAYSEC
+    lower, upper = sorted((start_mjd, end_mjd))
+    for _left, right in _eop_dat_change_intervals(eop_path):
+        # Include the right endpoint: 86400 SI seconds from the start of a
+        # positive leap-second day still lands one second before the next
+        # UTC midnight, so mapping it to the DAT transition is unsafe.
+        if lower < right <= upper:
+            raise ValueError(
+                "EOP-backed UTC elapsed time crosses a DAT leap-second boundary "
+                f"near MJD {right:.9f}; the current fixed-86400-second UTC "
+                "conversion is not leap-second aware."
+            )
+
+
 @lru_cache(maxsize=8192)
-def _interp_eop(
+def _interp_eop_cached(
     mjd_utc: float,
     eop_path: str,
+    signature: tuple[int, int, int, int],
     *,
     extrapolation: str = "error",
 ) -> tuple[float, float, float, float]:
-    mjd, xp_arcsec, yp_arcsec, dut1_s, dat_s = _load_eop_table(eop_path)
+    mjd, xp_arcsec, yp_arcsec, dut1_s, dat_s = _load_eop_table_cached(eop_path, signature)
     x = float(mjd_utc)
     policy = str(extrapolation or "error").strip().lower()
     if policy not in {"error", "hold"}:
@@ -316,11 +393,33 @@ def _interp_eop(
             f"[{float(mjd[0]):.9f}, {float(mjd[-1]):.9f}] for {eop_path}. "
             "Set eop_extrapolation='hold' only when endpoint holding is intentional."
         )
+    for left, right in _eop_dat_change_intervals_cached(eop_path, signature):
+        if left < x < right:
+            raise ValueError(
+                "EOP DAT changes within the requested interpolation bracket "
+                f"[{left:.9f}, {right:.9f}]; linear DAT interpolation is "
+                "unsafe across a leap-second boundary."
+            )
     xp = float(np.interp(x, mjd, xp_arcsec))
     yp = float(np.interp(x, mjd, yp_arcsec))
     dut1 = float(np.interp(x, mjd, dut1_s))
     dat = float(np.interp(x, mjd, dat_s))
     return xp, yp, dut1, dat
+
+
+def _interp_eop(
+    mjd_utc: float,
+    eop_path: str,
+    *,
+    extrapolation: str = "error",
+) -> tuple[float, float, float, float]:
+    resolved = str(Path(eop_path).expanduser().resolve())
+    return _interp_eop_cached(
+        float(mjd_utc),
+        resolved,
+        _eop_file_signature(resolved),
+        extrapolation=extrapolation,
+    )
 
 
 def _precession_iau1976_matrix(jd_tt: float) -> np.ndarray:
@@ -500,6 +599,10 @@ def _precession_nutation_matrix_iau76_80(
     )
     precession = _precession_iau1976_matrix(jd_tt)
     nutation = _rx(-true_eps) @ _rz(-dpsi) @ _rx(mean_eps)
+    # This explicit Vallado rotation is the transpose of the matrix returned
+    # by ``_nutation_iau1980_vallado_matrix`` (which is documented as TOD ->
+    # MOD).  It therefore maps MOD -> TOD; compose it with J2000 -> MOD
+    # precession to obtain the J2000 -> TOD celestial factor.
     return nutation @ precession, dpsi, true_eps
 
 
@@ -574,6 +677,7 @@ def precession_nutation_rotation_hpop_like(
 ) -> np.ndarray:
     if jd_utc_start is None or not eop_path:
         return np.eye(3, dtype=float)
+    _validate_eop_elapsed_interval(jd_utc_start, t_s, eop_path)
     jd_utc = float(jd_utc_start) + float(t_s) / _DAYSEC
     mjd_utc = jd_utc - _MJD0
     _xp_arcsec, _yp_arcsec, _dut1_s, dat_s = _interp_eop(
@@ -607,12 +711,15 @@ def _eci_to_ecef_rotation_hpop_like_uncached(
     ddpsi_rad: float = 0.0,
     ddeps_rad: float = 0.0,
     eop_extrapolation: str = "error",
+    eop_file_signature: tuple[int, int, int, int] | None = None,
 ) -> np.ndarray:
     has_manual_eop = any(value is not None for value in (dut1_s, xp_arcsec, yp_arcsec, dat_s)) or (
         float(ddpsi_rad) != 0.0 or float(ddeps_rad) != 0.0
     )
     if jd_utc_start is None and (eop_path or has_manual_eop):
         raise ValueError("IAU76/80 EOP frame transforms require jd_utc_start when EOP data is configured.")
+    if jd_utc_start is not None and eop_path:
+        _validate_eop_elapsed_interval(jd_utc_start, t_s, eop_path)
     if jd_utc_start is None or (not eop_path and not has_manual_eop):
         return eci_to_ecef_rotation(t_s, jd_utc_start=jd_utc_start)
 
@@ -657,6 +764,7 @@ def _cached_eci_to_ecef_rotation_hpop_like(
     ddpsi_rad: float,
     ddeps_rad: float,
     eop_extrapolation: str,
+    eop_file_signature: tuple[int, int, int, int] | None = None,
 ) -> tuple[float, float, float, float, float, float, float, float, float]:
     rotation = _eci_to_ecef_rotation_hpop_like_uncached(
         t_s,
@@ -670,6 +778,7 @@ def _cached_eci_to_ecef_rotation_hpop_like(
         ddpsi_rad=ddpsi_rad,
         ddeps_rad=ddeps_rad,
         eop_extrapolation=eop_extrapolation,
+        eop_file_signature=eop_file_signature,
     )
     flattened = rotation.ravel()
     return (
@@ -713,6 +822,9 @@ def eci_to_ecef_rotation_hpop_like(
         float(ddpsi_rad),
         float(ddeps_rad),
         str(eop_extrapolation),
+        eop_file_signature=None
+        if eop_path is None
+        else _eop_file_signature(str(eop_path)),
     )
     return np.array(values, dtype=float).reshape(3, 3)
 
@@ -798,6 +910,12 @@ def transform_state(
 
 
 def _eci_to_ecef_rotation_derivative_context(t_s: float, context: FrameContext) -> np.ndarray:
+    return _rotation_derivative_from_evaluator(
+        float(t_s), lambda sample_t: eci_to_ecef_rotation_context(sample_t, context)
+    )
+
+
+def _rotation_derivative_from_evaluator(t_s: float, rotation) -> np.ndarray:
     # Julian dates near the present epoch have a floating-point spacing of
     # roughly tens of microseconds.  A 0.01 s two-point difference therefore
     # amplified epoch quantization into mm/s-to-m/s station-velocity errors.
@@ -806,8 +924,6 @@ def _eci_to_ecef_rotation_derivative_context(t_s: float, context: FrameContext) 
     # precession/nutation/EOP terms.
     step_s = 30.0
     t = float(t_s)
-    def rotation(sample_t: float) -> np.ndarray:
-        return eci_to_ecef_rotation_context(sample_t, context)
     try:
         return (
             -rotation(t + 2.0 * step_s)
@@ -838,6 +954,121 @@ def _eci_to_ecef_rotation_derivative_context(t_s: float, context: FrameContext) 
                 ) / (12.0 * step_s)
             except ValueError as backward_error:
                 raise centered_error from backward_error
+
+
+def _eop_cache_path(eop_path: str) -> str:
+    # A lexical absolute path is sufficient for a signature-bound cache.
+    # stat and the reader follow symlinks, so retargeting still invalidates it.
+    # Resolving every parent directory at every force stage is unnecessary.
+    expanded = os.path.expanduser(eop_path)
+    # Preserve '..' after a symlink: lexical normalization would change which
+    # file the OS opens. Relative paths still bind to the current directory.
+    return expanded if os.path.isabs(expanded) else os.path.join(os.getcwd(), expanded)
+
+def _validate_eop_elapsed_intervals(jd_utc_start: float, t_s: float, intervals: tuple) -> None:
+    """Apply the elapsed-time policy to an already signature-bound table."""
+
+    elapsed = float(t_s)
+    if elapsed == 0.0:
+        return
+    start_mjd = float(jd_utc_start) - _MJD0
+    end_mjd = start_mjd + elapsed / _DAYSEC
+    lower, upper = sorted((start_mjd, end_mjd))
+    for _left, right in intervals:
+        # Include the right endpoint: 86400 SI seconds from the start of a
+        # positive leap-second day still lands one second before the next
+        # UTC midnight, so mapping it to the DAT transition is unsafe.
+        if lower < right <= upper:
+            raise ValueError(
+                "EOP-backed UTC elapsed time crosses a DAT leap-second boundary "
+                f"near MJD {right:.9f}; the current fixed-86400-second UTC "
+                "conversion is not leap-second aware."
+            )
+
+
+class PreparedFrameEvaluator:
+    """Exact frame arithmetic over one validated resource snapshot per stage.
+
+    Call ``refresh`` at every integration stage before reading rotations. A
+    rewritten, replaced, or missing EOP file invalidates all cached rows. The
+    same interpolation, leap-second and derivative-stencil policies as the
+    ordinary frame API apply; only time-dependent values are retained.
+    """
+
+    def __init__(self, context: FrameContext, native_context=None):
+        self.context = context
+        self.native_rotation = getattr(native_context, "rotation_iau76_80", None)
+        active_eop_path = context.eop_path if context.eop_rotation_available else None
+        self.path = None if not active_eop_path else _eop_cache_path(active_eop_path)
+        self._relative_eop_path = bool(
+            active_eop_path and not os.path.isabs(os.path.expanduser(active_eop_path))
+        )
+        self.signature = None
+        self.intervals = ()
+        self.rotations = {}
+        self.derivatives = {}
+        self.refresh()
+
+    def refresh(self) -> None:
+        if self.path is None:
+            return
+        # The direct frame API binds relative paths to the current directory
+        # on each call. Absolute scenario paths retain their prepared route.
+        path = _eop_cache_path(self.context.eop_path) if self._relative_eop_path else self.path
+        signature = _eop_file_signature(path)
+        if path != self.path or signature != self.signature:
+            self.intervals = _eop_dat_change_intervals_cached(path, signature)
+            self.path = path
+            self.signature = signature
+            self.rotations.clear()
+            self.derivatives.clear()
+
+    @staticmethod
+    def _remember(cache: dict, key: float, value: np.ndarray) -> np.ndarray:
+        cache[key] = value
+        if len(cache) > 512:
+            cache.pop(next(iter(cache)))
+        return value
+
+    def rotation(self, t_s: float) -> np.ndarray:
+        t = float(t_s)
+        cached = self.rotations.get(t)
+        if cached is not None:
+            return cached
+        ctx = self.context
+        if ctx.model != FRAME_MODEL_IAU76_80_EOP or not ctx.eop_rotation_available:
+            # Keep the reference API's missing-epoch checks and its simple
+            # fallback when no EOP inputs are configured.
+            rotation = eci_to_ecef_rotation_context(t, ctx)
+        elif not callable(self.native_rotation):
+            rotation = eci_to_ecef_rotation_context(t, ctx)
+        else:
+            jd_start = float(ctx.jd_utc_start)
+            if self.path is not None:
+                _validate_eop_elapsed_intervals(jd_start, t, self.intervals)
+                xp, yp, dut1, dat = _interp_eop_cached(
+                    jd_start + t / _DAYSEC - _MJD0,
+                    self.path, self.signature, extrapolation=ctx.eop_extrapolation,
+                )
+            else:
+                xp = 0.0 if ctx.xp_arcsec is None else float(ctx.xp_arcsec)
+                yp = 0.0 if ctx.yp_arcsec is None else float(ctx.yp_arcsec)
+                dut1 = 0.0 if ctx.dut1_s is None else float(ctx.dut1_s)
+                dat = ctx.tt_minus_utc_s - 32.184 if ctx.dat_s is None else float(ctx.dat_s)
+            rotation = np.asarray(
+                self.native_rotation(t, jd_start, xp, yp, dut1, dat, ctx.ddpsi_rad, ctx.ddeps_rad),
+                dtype=float,
+            ).reshape(3, 3)
+        return self._remember(self.rotations, t, rotation)
+
+    def derivative(self, t_s: float) -> np.ndarray:
+        t = float(t_s)
+        cached = self.derivatives.get(t)
+        if cached is not None:
+            return cached
+        return self._remember(
+            self.derivatives, t, _rotation_derivative_from_evaluator(t, self.rotation)
+        )
 
 
 def eci_to_ecef_rotation_derivative_context(

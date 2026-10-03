@@ -95,3 +95,18 @@ coefficient calibration, uncertainty and Monte Carlo, long or large campaigns,
 constellation trades, customer models/data, dashboards, operational-scale
 performance, compliance packages, and qualification evidence. Neither edition
 turns this v1 result into operational authority.
+
+## Optional Rust propagation
+
+Top-level `numeric_backend: "rust"` selects a prepared native ONP RK4 force/stage
+context, reused within each lifetime propagator. Wheel 0.17.0 or newer is
+recommended. The admitted scope is constant or exponential atmosphere, drag
+on/off, and optional J2. Other lifetime atmospheres retain their OEL stage callbacks through the native
+integrator when they cannot prepare a fused force context.
+Python still decides every threshold, interior radial minimum, refinement,
+domain limit, termination, sample, and drag-work interval; no steps are batched
+past a decision. Rust is the default; explicit Python selects the reference implementation.
+Both selections persist into normalized problems, comparisons, and replay;
+lifetime implementation identity includes the native source and adapter files.
+Numerical parity and fixed-state external comparisons are bounded evidence,
+not independent propagated-lifetime qualification.

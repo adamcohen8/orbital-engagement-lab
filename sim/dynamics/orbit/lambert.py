@@ -4,7 +4,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from sim import rust_control_backend as _rust_control_backend
 from sim.dynamics.orbit.environment import EARTH_MU_KM3_S2
+from sim.numeric_backend import normalize_numeric_backend
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,7 @@ def solve_lambert_universal_variable(
     revolutions: int = 0,
     max_iterations: int = 100,
     tolerance_s: float = 1.0e-7,
+    backend: str = "rust",
 ) -> LambertSolution:
     """Solve the single-revolution two-body Lambert boundary-value problem.
 
@@ -41,11 +44,32 @@ def solve_lambert_universal_variable(
     if int(revolutions) != 0:
         raise ValueError("Only zero-revolution Lambert transfers are currently supported.")
     tof = float(time_of_flight_s)
-    if tof <= 0.0:
-        raise ValueError("Lambert time_of_flight_s must be positive.")
+    if not np.isfinite(tof) or tof <= 0.0:
+        raise ValueError("Lambert time_of_flight_s must be finite and positive.")
     mu = float(mu_km3_s2)
-    if mu <= 0.0:
-        raise ValueError("Lambert mu_km3_s2 must be positive.")
+    if not np.isfinite(mu) or mu <= 0.0:
+        raise ValueError("Lambert mu_km3_s2 must be finite and positive.")
+    selected_backend = normalize_numeric_backend(backend, error_message="Lambert backend must be python or rust.")
+    if selected_backend == "rust":
+        v1, v2, residual, iterations, converged = _rust_control_backend.lambert(
+            r1_km,
+            r2_km,
+            float(time_of_flight_s),
+            mu_km3_s2=float(mu_km3_s2),
+            short_way=bool(short_way),
+            max_iterations=int(max_iterations),
+            tolerance_s=float(tolerance_s),
+        )
+        return LambertSolution(
+            v1_km_s=v1,
+            v2_km_s=v2,
+            time_of_flight_s=float(time_of_flight_s),
+            short_way=bool(short_way),
+            revolutions=0,
+            converged=bool(converged),
+            iterations=int(iterations),
+            residual_s=float(residual),
+        )
 
     r1 = np.asarray(r1_km, dtype=float).reshape(3)
     r2 = np.asarray(r2_km, dtype=float).reshape(3)
@@ -78,12 +102,23 @@ def solve_lambert_universal_variable(
         return float(dt), float(y), c, s
 
     lower = -4.0 * np.pi * np.pi
-    upper = 4.0 * np.pi * np.pi
+    # Zero-revolution transfers live below the first positive Stumpff pole.
+    # Expand toward that pole by shrinking the angular gap; doubling z can
+    # cross the pole and make bisection converge to a later-revolution root.
+    upper = 0.0
     dt_upper, _, _, _ = time_for_z(float(upper))
+    pole_gap_rad = float(np.pi)
     expand_count = 0
-    while (not np.isfinite(dt_upper) or dt_upper < tof) and expand_count < 25:
-        upper *= 2.0
-        dt_upper, _, _, _ = time_for_z(float(upper))
+    while (not np.isfinite(dt_upper) or dt_upper < tof) and expand_count < 64:
+        candidate_upper = (2.0 * float(np.pi) - pole_gap_rad) ** 2
+        if candidate_upper <= upper:
+            break
+        candidate_dt, _, _, _ = time_for_z(float(candidate_upper))
+        if not np.isfinite(candidate_dt):
+            break
+        upper = float(candidate_upper)
+        dt_upper = float(candidate_dt)
+        pole_gap_rad *= 0.5
         expand_count += 1
     if not np.isfinite(dt_upper) or dt_upper < tof:
         raise ValueError("Lambert solver could not bracket the requested time of flight.")
@@ -130,6 +165,90 @@ def solve_lambert_universal_variable(
         iterations=int(iterations),
         residual_s=float(residual),
     )
+
+
+def solve_lambert_universal_variable_batch(
+    r1_km: np.ndarray,
+    r2_km: np.ndarray,
+    time_of_flight_s: np.ndarray,
+    *,
+    mu_km3_s2: float = EARTH_MU_KM3_S2,
+    short_way: bool = True,
+    revolutions: int = 0,
+    max_iterations: int = 100,
+    tolerance_s: float = 1.0e-7,
+    backend: str = "rust",
+) -> tuple[tuple[LambertSolution | None, ...], tuple[tuple[int, str], ...]]:
+    """Evaluate independent Lambert candidates with one native crossing.
+
+    The Python backend intentionally reuses the scalar reference solver.  The
+    Rust backend returns one slot per candidate and a sparse error list so a
+    singular candidate cannot corrupt the remaining sweep.
+    """
+
+    if int(revolutions) != 0:
+        raise ValueError("Only zero-revolution Lambert transfers are currently supported.")
+    first = np.asarray(r1_km, dtype=float).reshape(-1, 3)
+    second = np.asarray(r2_km, dtype=float).reshape(-1, 3)
+    times = np.asarray(time_of_flight_s, dtype=float).reshape(-1)
+    if first.shape != second.shape or first.shape[0] != times.size:
+        raise ValueError("Lambert batch arrays have inconsistent shapes")
+    selected_backend = normalize_numeric_backend("python" if backend is None else backend, error_message="Lambert backend must be python or rust.")
+    if selected_backend == "python":
+        values: list[LambertSolution | None] = []
+        errors: list[tuple[int, str]] = []
+        for index, (left, right, tof) in enumerate(zip(first, second, times, strict=True)):
+            try:
+                values.append(
+                    solve_lambert_universal_variable(
+                        left,
+                        right,
+                        float(tof),
+                        mu_km3_s2=mu_km3_s2,
+                        short_way=short_way,
+                        revolutions=0,
+                        max_iterations=max_iterations,
+                        tolerance_s=tolerance_s,
+                        backend="python",
+                    )
+                )
+            except (ValueError, FloatingPointError) as exc:
+                values.append(None)
+                errors.append((index, str(exc)))
+        return tuple(values), tuple(errors)
+    rows, raw_errors = _rust_control_backend.lambert_batch(
+        first,
+        second,
+        times,
+        mu_km3_s2=float(mu_km3_s2),
+        short_way=bool(short_way),
+        max_iterations=int(max_iterations),
+        tolerance_s=float(tolerance_s),
+    )
+    error_by_index = {int(index): str(message) for index, message in raw_errors}
+    values = []
+    for index, tof in enumerate(times):
+        if index in error_by_index:
+            values.append(None)
+            continue
+        row = rows[index]
+        encoded_iterations = float(row[7])
+        # Successful native rows encode a positive integer plus zero or 0.5.
+        iterations = int(encoded_iterations)
+        converged = abs(encoded_iterations - iterations) < 0.25
+        values.append(
+            LambertSolution(
+                v1_km_s=row[0:3].copy(),
+                v2_km_s=row[3:6].copy(),
+                time_of_flight_s=float(tof),
+                short_way=bool(short_way),
+                revolutions=0,
+                converged=converged,
+                iterations=iterations,
+                residual_s=float(row[6]),
+            )
+        )
+    return tuple(values), tuple(raw_errors)
 
 
 def _stumpff_c(z: float) -> float:

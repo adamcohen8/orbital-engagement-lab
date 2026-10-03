@@ -5,6 +5,7 @@ from typing import Any
 from sim.config.scenario.models import (
     SimulatorSection,
 )
+from sim.config.scenario.objects import _parse_algorithm_pointer
 from sim.config.scenario.primitives import (
     _REENTRY_TERMINATION_LIMIT_FIELDS,
     _SIMULATOR_UNSUPPORTED_ALIASES,
@@ -16,6 +17,7 @@ from sim.config.scenario.primitives import (
     _reject_unsupported_aliases,
     _validate_sim_timing,
 )
+from sim.numeric_backend import normalize_numeric_backend
 
 __all__ = [
     '_normalize_reentry_termination_block',
@@ -287,9 +289,14 @@ def _normalize_reentry_section(dynamics: dict[str, Any]) -> dict[str, Any]:
             "heat_rate_coefficient",
             "atmosphere_model",
             "termination",
+            "numeric_backend",
         },
     )
     normalized = dict(raw)
+    if "numeric_backend" in normalized:
+        normalized["numeric_backend"] = _normalize_numeric_backend(
+            normalized["numeric_backend"], "simulator.dynamics.reentry.numeric_backend",
+        )
     normalized["enabled"] = _parse_bool(
         normalized.get("enabled", False),
         "simulator.dynamics.reentry.enabled",
@@ -414,6 +421,8 @@ def _parse_simulator_section(value: Any) -> SimulatorSection:
             "environment",
             "plugin_validation",
             "termination",
+            "system_force_models",
+            "collisions",
         },
     )
     plugin_validation = {"strict": True}
@@ -447,6 +456,26 @@ def _parse_simulator_section(value: Any) -> SimulatorSection:
             )
         termination["by_object"] = by_object
     dynamics = _normalize_dynamics_section(dict(d.get("dynamics", {}) or {}))
+    system_force_models = d.get("system_force_models", [])
+    if not isinstance(system_force_models, list) or any(item is None for item in system_force_models):
+        raise ValueError("simulator.system_force_models must be a list without null entries.")
+    collisions = _as_dict(d.get("collisions"), "simulator.collisions")
+    _reject_unknown_fields(collisions, "simulator.collisions", {"enabled", "radii_m", "numeric_backend"})
+    collision_backend = _normalize_numeric_backend(
+        collisions.get("numeric_backend", "rust"), "simulator.collisions.numeric_backend",
+    )
+    collision_enabled = _parse_bool(collisions.get("enabled", False), "simulator.collisions.enabled")
+    radii_raw = collisions.get("radii_m", {}) or {}
+    if not isinstance(radii_raw, dict):
+        raise ValueError("simulator.collisions.radii_m must be a mapping of object IDs to radii.")
+    radii_m = {
+        str(object_id): _parse_float(radius, f"simulator.collisions.radii_m.{object_id}")
+        for object_id, radius in radii_raw.items()
+    }
+    if any(not object_id or radius <= 0.0 for object_id, radius in radii_m.items()):
+        raise ValueError("simulator.collisions.radii_m requires non-empty object IDs and positive radii.")
+    if collision_enabled and len(radii_m) != 2:
+        raise ValueError("simulator.collisions requires radii_m for exactly two objects.")
     out = SimulatorSection(
         duration_s=_parse_float(d.get("duration_s", 3600.0), "simulator.duration_s"),
         dt_s=_parse_float(d.get("dt_s", 1.0), "simulator.dt_s"),
@@ -459,6 +488,13 @@ def _parse_simulator_section(value: Any) -> SimulatorSection:
         environment=_normalize_environment_section(d.get("environment")),
         plugin_validation=plugin_validation,
         termination=termination,
+        system_force_models=[_parse_algorithm_pointer(item) for item in system_force_models],
+        collisions=(
+            {"enabled": True, "radii_m": radii_m, **(
+                {"numeric_backend": collision_backend} if "numeric_backend" in collisions else {}
+            )}
+            if collision_enabled else {}
+        ),
     )
     if str(out.frames.model).strip().lower() in {"iau76_80_eop", "iau76_fk5_iau80_eop", "hpop_like", "hpop"}:
         has_manual_eop = any(out.frames.get(key) is not None for key in ("dut1_s", "xp_arcsec", "yp_arcsec", "dat_s"))
@@ -469,6 +505,10 @@ def _parse_simulator_section(value: Any) -> SimulatorSection:
             raise ValueError("simulator.frames EOP settings require simulator.initial_jd_utc for frame rotation.")
     _validate_sim_timing(out)
     return out
+
+
+def _normalize_numeric_backend(value: Any, field_name: str) -> str:
+    return normalize_numeric_backend(value, field_name=field_name)
 
 
 def _normalize_dynamics_section(value: dict[str, Any]) -> dict[str, Any]:
@@ -483,6 +523,7 @@ def _normalize_dynamics_section(value: dict[str, Any]) -> dict[str, Any]:
             "cr3bp_system",
             "propagation_method",
             "integrator",
+            "numeric_backend",
             "adaptive_atol",
             "adaptive_rtol",
             "orbit_substep_s",
@@ -559,6 +600,12 @@ def _normalize_dynamics_section(value: dict[str, Any]) -> dict[str, Any]:
         orbit["solid_earth_tides"] = tides
     if "spherical_harmonics" in orbit:
         orbit["spherical_harmonics"] = _normalize_spherical_harmonics_section(orbit.get("spherical_harmonics"))
+    backend = _normalize_numeric_backend(orbit.get("numeric_backend", "rust"),
+                                         "simulator.dynamics.orbit.numeric_backend")
+    if backend not in {"python", "rust"}:
+        raise ValueError("simulator.dynamics.orbit.numeric_backend must be python or rust.")
+    if "numeric_backend" in orbit:
+        orbit["numeric_backend"] = backend
     for key in ("adaptive_atol", "adaptive_rtol"):
         if orbit.get(key) is not None:
             orbit[key] = _parse_float(orbit[key], f"simulator.dynamics.orbit.{key}")
@@ -583,8 +630,19 @@ def _normalize_dynamics_section(value: dict[str, Any]) -> dict[str, Any]:
     _reject_unknown_fields(
         attitude,
         "simulator.dynamics.attitude",
-        {"enabled", "attitude_substep_s", "disturbance_torques", "guardrail_policy"},
+        {"enabled", "attitude_substep_s", "disturbance_torques", "guardrail_policy", "numeric_backend"},
     )
+    if "numeric_backend" in attitude:
+        attitude["numeric_backend"] = _normalize_numeric_backend(
+            attitude["numeric_backend"], "simulator.dynamics.attitude.numeric_backend",
+        )
+    if "rocket" in dynamics:
+        rocket = _as_dict(dynamics["rocket"], "simulator.dynamics.rocket")
+        if "numeric_backend" in rocket:
+            rocket["numeric_backend"] = _normalize_numeric_backend(
+                rocket["numeric_backend"], "simulator.dynamics.rocket.numeric_backend",
+            )
+        dynamics["rocket"] = rocket
     guardrail_policy = str(attitude.get("guardrail_policy", "error") or "error").strip().lower()
     if guardrail_policy not in {"sanitize", "error"}:
         raise ValueError("simulator.dynamics.attitude.guardrail_policy must be one of: sanitize, error.")

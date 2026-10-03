@@ -280,6 +280,54 @@ class SimulationResult:
     config: SimulationConfig
     payload: dict[str, Any]
 
+    def _snapshot_time_s(self) -> np.ndarray:
+        return np.array(self.payload.get("time_s", []), dtype=float).reshape(-1)
+
+    def _snapshot_history(self, payload_key: str) -> Mapping[str, Any]:
+        """Return a live payload mapping without copying full histories.
+
+        ``SimulationResult.payload`` is public and mutable. Snapshot access
+        therefore converts only the requested row so caller edits are visible
+        to subsequent reads.
+        """
+
+        value = self.payload.get(payload_key, {})
+        return value if isinstance(value, Mapping) else {}
+
+    def _snapshot_time_count(self) -> int:
+        value = self.payload.get("time_s", [])
+        try:
+            if len(value) and np.asarray(value[0]).ndim != 0:
+                return int(np.asarray(value, dtype=float).size)
+            return int(len(value))
+        except TypeError:
+            return int(np.array(value, dtype=float).reshape(-1).size)
+
+    def _snapshot_time_at(self, step_index: int) -> float:
+        value = self.payload.get("time_s", [])
+        try:
+            item = value[step_index]
+            if np.asarray(item).ndim != 0:
+                item = np.asarray(value, dtype=float).reshape(-1)[step_index]
+        except (IndexError, KeyError, TypeError):
+            item = np.array(value, dtype=float).reshape(-1)[step_index]
+        return float(np.asarray(item, dtype=float))
+
+    def _snapshot_rows(self, payload_key: str, step_index: int) -> dict[str, np.ndarray]:
+        rows: dict[str, np.ndarray] = {}
+        for object_id, history in self._snapshot_history(payload_key).items():
+            try:
+                if len(history) <= step_index:
+                    continue
+                row = history[step_index]
+            except (IndexError, KeyError, TypeError):
+                continue
+            try:
+                rows[str(object_id)] = np.array(row, dtype=float)
+            except (TypeError, ValueError):
+                continue
+        return rows
+
     @property
     def analysis(self) -> dict[str, Any]:
         return dict(self.payload.get("analysis", {}) or {})
@@ -481,49 +529,35 @@ class SimulationResult:
     def snapshot(self, step_index: int) -> SimulationSnapshot:
         if self.is_batch_analysis:
             raise RuntimeError("Snapshots are only available for single-run results.")
-        if step_index < 0 or step_index >= self.num_steps:
-            raise IndexError(f"step_index {step_index} is out of range for {self.num_steps} samples.")
+        sample_count = self._snapshot_time_count()
+        if step_index < 0 or step_index >= sample_count:
+            raise IndexError(f"step_index {step_index} is out of range for {sample_count} samples.")
 
-        truth = {
-            oid: np.array(hist[step_index], dtype=float)
-            for oid, hist in self.truth.items()
-            if hist.shape[0] > step_index
-        }
-        belief = {
-            oid: np.array(hist[step_index], dtype=float)
-            for oid, hist in self.belief.items()
-            if hist.shape[0] > step_index
-        }
-        thrust = {
-            oid: np.array(hist[step_index], dtype=float)
-            for oid, hist in self.applied_thrust.items()
-            if hist.shape[0] > step_index
-        }
-        torque = {
-            oid: np.array(hist[step_index], dtype=float)
-            for oid, hist in self.applied_torque.items()
-            if hist.shape[0] > step_index
-        }
+        time_s = self._snapshot_time_at(step_index)
+        truth = self._snapshot_rows("truth_by_object", step_index)
+        belief = self._snapshot_rows("belief_by_object", step_index)
+        thrust = self._snapshot_rows("applied_thrust_by_object", step_index)
+        torque = self._snapshot_rows("applied_torque_by_object", step_index)
+        from sim.spacecraft_resources.artifacts import resource_snapshot
+
         return SimulationSnapshot(
             step_index=int(step_index),
-            time_s=float(self.time_s[step_index]),
+            time_s=time_s,
             truth=truth,
             belief=belief,
             applied_thrust=thrust,
             applied_torque=torque,
             ground_segment=deepcopy(
                 next(
-                    (r for r in self.payload.get("ground_segment", [])
-                     if abs(r["time_s"] - float(self.time_s[step_index])) < 1e-9),
+                    (
+                        row
+                        for row in self.payload.get("ground_segment", [])
+                        if abs(row["time_s"] - time_s) < 1e-9
+                    ),
                     {},
                 )
             ),
-            spacecraft_resources={
-                oid: dict(row)
-                for oid, rows in self.payload.get("spacecraft_resources", {}).items()
-                for row in rows
-                if abs(row["time_s"] - float(self.time_s[step_index])) < 1e-9
-            },
+            spacecraft_resources=resource_snapshot(self.payload.get("spacecraft_resources", {}), time_s),
         )
 
     def state_history(self, object_id: str) -> np.ndarray:
@@ -535,8 +569,19 @@ class SimulationResult:
             raise KeyError(f"Unknown object_id {oid!r}. Available objects: {sorted(histories.keys())}")
         return _as_2d_state_history(histories[oid], width=6)
 
+    def _state_history_for_query(self, object_id: str) -> np.ndarray:
+        """Return a validated live history without converting every object."""
+
+        oid = str(object_id)
+        if oid == "target_reference":
+            return _as_2d_state_history(self.target_reference_orbit, width=6)
+        histories = self._snapshot_history("truth_by_object")
+        if oid not in histories:
+            raise KeyError(f"Unknown object_id {oid!r}. Available objects: {sorted(histories.keys())}")
+        return _as_2d_state_history(histories[oid], width=6)
+
     def time_window_mask(self, start_s: float | None = None, end_s: float | None = None) -> np.ndarray:
-        t_s = self.time_s
+        t_s = self._snapshot_time_s()
         mask = np.ones(t_s.shape, dtype=bool)
         if start_s is not None:
             mask &= t_s >= float(start_s)
@@ -553,33 +598,38 @@ class SimulationResult:
         start_s: float | None = None,
         end_s: float | None = None,
     ) -> np.ndarray:
-        dep = self.state_history(deputy)
-        ref = self.state_history(chief)
-        t_s = self.time_s
+        dep = self._state_history_for_query(deputy)
+        ref = self._state_history_for_query(chief)
+        t_s = self._snapshot_time_s()
         n = int(min(dep.shape[0], ref.shape[0], t_s.size))
         if n <= 0:
             return np.empty((0, 6), dtype=float)
         dep = dep[:n, :6]
         ref = ref[:n, :6]
         mask = self.time_window_mask(start_s=start_s, end_s=end_s)[:n]
+        indices = np.flatnonzero(mask)
         frame_key = str(frame or "ric_rect").strip().lower()
         if frame_key in {"eci", "inertial"}:
-            rel = dep - ref
+            rel = dep[indices] - ref[indices]
         elif frame_key in {"ric", "ric_rect", "rect", "rectangular"}:
             from sim.utils.frames import eci_relative_to_ric_rect
 
-            rel = np.vstack([eci_relative_to_ric_rect(dep[k, :6], ref[k, :6]) for k in range(n)])
+            rel = (
+                np.vstack([eci_relative_to_ric_rect(dep[k, :6], ref[k, :6]) for k in indices])
+                if indices.size
+                else np.empty((0, 6), dtype=float)
+            )
         elif frame_key in {"ric_curv", "curv", "curvilinear"}:
             from sim.utils.frames import eci_relative_to_ric_rect, ric_rect_to_curv
 
             rows = []
-            for k in range(n):
+            for k in indices:
                 rect = eci_relative_to_ric_rect(dep[k, :6], ref[k, :6])
                 rows.append(ric_rect_to_curv(rect, r0_km=float(np.linalg.norm(ref[k, :3]))))
-            rel = np.vstack(rows)
+            rel = np.vstack(rows) if rows else np.empty((0, 6), dtype=float)
         else:
             raise ValueError("frame must be one of 'eci', 'ric_rect', or 'ric_curv'.")
-        return np.array(rel[mask], dtype=float)
+        return np.array(rel, dtype=float)
 
     def range_between(
         self,

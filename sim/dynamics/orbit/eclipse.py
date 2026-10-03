@@ -53,6 +53,47 @@ def resolve_srp_geometry(r_sc_eci_km: np.ndarray, t_s: float, env: dict) -> dict
     }
 
 
+def _finite_disc_illumination(alpha: float, beta: float, gamma: float) -> float:
+    """Return the visible fraction of the solar disc after circular overlap."""
+
+    if beta <= 0.0:
+        return 1.0
+    if gamma >= alpha + beta:
+        return 1.0
+    if alpha > beta and gamma <= alpha - beta:
+        return 0.0
+    if beta > alpha and gamma <= beta - alpha:
+        return float(max(0.0, 1.0 - (alpha * alpha) / (beta * beta)))
+    if gamma <= 0.0:
+        return 0.0 if alpha >= beta else float(max(0.0, 1.0 - (alpha * alpha) / (beta * beta)))
+
+    # The penumbra is the complement of the overlap of the apparent Earth
+    # and Sun discs. The two circular-segment terms minus the shared triangle
+    # give the overlap area; divide by the full solar-disc area for illumination.
+    denominator_earth = 2.0 * gamma * alpha
+    denominator_sun = 2.0 * gamma * beta
+    earth_angle = float(
+        np.arccos(np.clip((gamma * gamma + alpha * alpha - beta * beta) / denominator_earth, -1.0, 1.0))
+    )
+    sun_angle = float(
+        np.arccos(np.clip((gamma * gamma + beta * beta - alpha * alpha) / denominator_sun, -1.0, 1.0))
+    )
+    radicand = max(
+        0.0,
+        (-gamma + alpha + beta)
+        * (gamma + alpha - beta)
+        * (gamma - alpha + beta)
+        * (gamma + alpha + beta),
+    )
+    overlap = (
+        alpha * alpha * earth_angle
+        + beta * beta * sun_angle
+        - 0.5 * float(np.sqrt(radicand))
+    )
+    illumination = 1.0 - overlap / (float(np.pi) * beta * beta)
+    return float(np.clip(illumination, 0.0, 1.0))
+
+
 def srp_shadow_factor(
     r_sc_eci_km: np.ndarray,
     t_s: float,
@@ -120,12 +161,4 @@ def srp_shadow_factor(
         min_illum = max(0.0, 1.0 - (alpha * alpha) / (beta * beta))
         return float(min_illum)
 
-    lo = abs(alpha - beta)
-    hi = alpha + beta
-    if hi <= lo:
-        return 1.0
-    f = (gamma - lo) / (hi - lo)
-    f = float(np.clip(f, 0.0, 1.0))
-    if beta > alpha:
-        return float(np.clip(min_illum + (1.0 - min_illum) * f, 0.0, 1.0))
-    return f
+    return _finite_disc_illumination(alpha, beta, gamma)

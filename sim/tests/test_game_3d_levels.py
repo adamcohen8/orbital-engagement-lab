@@ -7,11 +7,21 @@ import numpy as np
 import pytest
 
 from sim.api import SimulationConfig
+from sim.game.dashboard_3d import SandboxCamera
 from sim.game.runner_config import _game_3d_enabled
 from sim.game.training import RPOTrainingConfig
 
 CONFIGS = Path(__file__).resolve().parents[1] / "game/configs"
 EXCLUDED = {"game_training_rpo_bonus_cislunar_rendezvous.yaml", "game_training_rpo_bonus_drag_racing.yaml"}
+
+
+def test_space_force_3d_in_track_basis_mirrors_positive_i():
+    camera = SandboxCamera()
+    oel_positive_i_x = float(np.array([0.0, 1.0, 0.0]) @ camera.basis()[0])
+    camera.in_track_sign = -1
+    space_force_positive_i_x = float(np.array([0.0, 1.0, 0.0]) @ camera.basis()[0])
+    assert oel_positive_i_x > 0
+    assert space_force_positive_i_x == pytest.approx(-oel_positive_i_x)
 
 
 @pytest.mark.parametrize("path", sorted(CONFIGS.glob("*.yaml")), ids=lambda path: path.stem)

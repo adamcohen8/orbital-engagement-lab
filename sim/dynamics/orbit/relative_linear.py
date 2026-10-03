@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any
 
 import numpy as np
 
 from sim.dynamics.orbit.elements import rv_to_coe_eci
 from sim.dynamics.orbit.environment import EARTH_J2, EARTH_MU_KM3_S2, EARTH_RADIUS_KM
+from sim.numeric_backend import normalize_numeric_backend
 
 RELATIVE_LINEAR_MODELS = {"hcw", "ss_j2"}
 
@@ -115,24 +117,27 @@ class RelativeLinearDynamics:
     earth_radius_km: float = EARTH_RADIUS_KM
     reference_eccentricity: float | None = None
     maximum_supported_eccentricity: float = 0.01
+    numeric_backend: str = "rust"
 
     def __post_init__(self) -> None:
         model = normalize_relative_linear_model(self.model)
         object.__setattr__(self, "model", model)
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="numeric_backend must be 'python' or 'rust'.")
+        object.__setattr__(self, "numeric_backend", backend)
         for name in ("mean_motion_rad_s", "mu_km3_s2", "earth_radius_km"):
             value = float(getattr(self, name))
-            if not np.isfinite(value) or value <= 0.0:
+            if not isfinite(value) or value <= 0.0:
                 raise ValueError(f"{name} must be finite and positive.")
             object.__setattr__(self, name, value)
-        if not np.isfinite(self.j2) or self.j2 < 0.0:
+        if not isfinite(self.j2) or self.j2 < 0.0:
             raise ValueError("j2 must be finite and nonnegative.")
-        if not np.isfinite(self.maximum_supported_eccentricity) or not (
+        if not isfinite(self.maximum_supported_eccentricity) or not (
             0.0 <= self.maximum_supported_eccentricity < 1.0
         ):
             raise ValueError("maximum_supported_eccentricity must be finite and in [0, 1).")
         if self.reference_eccentricity is not None:
             eccentricity = float(self.reference_eccentricity)
-            if not np.isfinite(eccentricity) or eccentricity < 0.0:
+            if not isfinite(eccentricity) or eccentricity < 0.0:
                 raise ValueError("reference_eccentricity must be finite and nonnegative.")
             if model == "ss_j2" and eccentricity > self.maximum_supported_eccentricity:
                 raise ValueError(
@@ -145,9 +150,9 @@ class RelativeLinearDynamics:
                 raise ValueError("ss_j2 requires reference_radius_km and reference_inclination_rad.")
             radius = float(self.reference_radius_km)
             inclination = float(self.reference_inclination_rad)
-            if not np.isfinite(radius) or radius <= self.earth_radius_km:
+            if not isfinite(radius) or radius <= self.earth_radius_km:
                 raise ValueError("ss_j2 reference_radius_km must be above the Earth reference radius.")
-            if not np.isfinite(inclination) or not 0.0 <= inclination <= np.pi:
+            if not isfinite(inclination) or not 0.0 <= inclination <= np.pi:
                 raise ValueError("ss_j2 reference_inclination_rad must be in [0, pi].")
             object.__setattr__(self, "reference_radius_km", radius)
             object.__setattr__(self, "reference_inclination_rad", inclination)
@@ -155,8 +160,17 @@ class RelativeLinearDynamics:
                 raise ValueError("ss_j2 parameters produce a non-real mean-motion correction.")
 
     @classmethod
-    def hcw(cls, mean_motion_rad_s: float) -> RelativeLinearDynamics:
-        return cls(model="hcw", mean_motion_rad_s=float(mean_motion_rad_s))
+    def hcw(
+        cls,
+        mean_motion_rad_s: float,
+        *,
+        numeric_backend: str = "rust",
+    ) -> RelativeLinearDynamics:
+        return cls(
+            model="hcw",
+            mean_motion_rad_s=float(mean_motion_rad_s),
+            numeric_backend=numeric_backend,
+        )
 
     @classmethod
     def ss_j2_from_chief_state(
@@ -167,6 +181,7 @@ class RelativeLinearDynamics:
         j2: float = EARTH_J2,
         earth_radius_km: float = EARTH_RADIUS_KM,
         maximum_supported_eccentricity: float = 0.01,
+        numeric_backend: str = "rust",
     ) -> RelativeLinearDynamics:
         state = np.asarray(chief_state_eci_km_s, dtype=float).reshape(6)
         elements = rv_to_coe_eci(state[:3], state[3:], mu_km3_s2=float(mu_km3_s2))
@@ -181,6 +196,7 @@ class RelativeLinearDynamics:
             earth_radius_km=float(earth_radius_km),
             reference_eccentricity=float(elements.ecc),
             maximum_supported_eccentricity=float(maximum_supported_eccentricity),
+            numeric_backend=numeric_backend,
         )
 
     @property
@@ -227,8 +243,24 @@ class RelativeLinearDynamics:
 
     def state_transition_matrix(self, dt_s: float) -> np.ndarray:
         dt = float(dt_s)
-        if not np.isfinite(dt) or dt < 0.0:
+        if not isfinite(dt) or dt < 0.0:
             raise ValueError("dt_s must be finite and nonnegative.")
+        if self.numeric_backend == "rust":
+            from sim.rust_relative_backend import (
+                hcw_state_transition_matrix,
+                ss_j2_state_transition_matrix,
+            )
+
+            if self.model == "hcw" or self.j2 == 0.0:
+                return hcw_state_transition_matrix(self.mean_motion_rad_s, dt)
+            return ss_j2_state_transition_matrix(
+                self.mean_motion_rad_s,
+                float(self.reference_radius_km),
+                float(self.reference_inclination_rad),
+                j2=self.j2,
+                earth_radius_km=self.earth_radius_km,
+                dt_s=dt,
+            )
         if self.model == "hcw":
             return _hcw_state_transition_matrix(self.mean_motion_rad_s, dt)
         from scipy.linalg import expm
@@ -239,7 +271,7 @@ class RelativeLinearDynamics:
         from scipy.linalg import expm
 
         dt = float(dt_s)
-        if not np.isfinite(dt) or dt <= 0.0:
+        if not isfinite(dt) or dt <= 0.0:
             raise ValueError("dt_s must be finite and positive.")
         augmented = np.zeros((9, 9), dtype=float)
         augmented[:6, :6] = self.system_matrix()
@@ -259,6 +291,8 @@ class RelativeLinearDynamics:
             "mean_motion_rad_s": float(self.mean_motion_rad_s),
             "constant_coefficient": True,
         }
+        if self.numeric_backend == "rust":
+            payload["numeric_backend"] = "rust"
         if self.model == "ss_j2":
             payload.update(
                 {

@@ -379,13 +379,15 @@ def _stage_derivative(
                 alt_km = max(alt_km, 0.0)
                 if alt_km < 300.0:
                     return np.zeros(6, dtype=np.float64), False
-                hour_angle = (
-                    atmosphere_inputs[stage_index, 4]
-                    + math.radians(lon_deg)
-                    - atmosphere_inputs[stage_index, 5]
-                    + math.pi
-                ) % (2.0 * math.pi) - math.pi
-                lst_hr = (12.0 + hour_angle * 12.0 / math.pi) % 24.0
+                # Columns 4/5 hold the Sun's density-frame longitude and an
+                # optional explicit solar time (NaN means derive it). Both
+                # longitudes use the same rotation, including precession.
+                lst_hr = atmosphere_inputs[stage_index, 5]
+                if math.isnan(lst_hr):
+                    hour_angle = (
+                        math.radians(lon_deg) - atmosphere_inputs[stage_index, 4] + math.pi
+                    ) % (2.0 * math.pi) - math.pi
+                    lst_hr = (12.0 + hour_angle * 12.0 / math.pi) % 24.0
                 density = quiet_thermosphere_density_kernel(
                     int(atmosphere_inputs[stage_index, 0]),
                     atmosphere_inputs[stage_index, 1],

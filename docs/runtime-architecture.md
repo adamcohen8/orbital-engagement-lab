@@ -21,7 +21,12 @@ Its focused collaborators are:
 - `sim.execution.runtime_profile`: runtime timing and profile payloads
 - `sim.execution.object_workers`: persistent process-worker transport
 - `sim.execution.object_step_coordinator`: serial/parallel planning and executor selection
+- `sim.execution.system_forces`: opt-in serial adapter for synchronized pair stepping;
+  `sim.dynamics.orbit.system_force` owns the shared-stage RK4 derivative
 - `sim.execution.single_run_history`: history growth, retention, and compaction
+- `sim.execution.passive_history`: bounded native RK4 two-body/J2 histories for
+  eligible attitude-disabled passive objects; ordinary sample, event, knowledge,
+  and termination processing still consumes each row in order
 - `sim.reporting.run_payload_assembly`: reporting views, payload construction, and artifact dispatch
 
 Public-core single-scenario execution uses deterministic serial object

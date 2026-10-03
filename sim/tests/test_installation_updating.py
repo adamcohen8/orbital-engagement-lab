@@ -118,15 +118,15 @@ def _release(
     source = release / f"source-{version}"
     source.mkdir(parents=True)
     (source / "pyproject.toml").write_text(
-        f'[project]\nname = "orbital-engagement-lab"\nversion = "{version}"\n',
+        f'[project]\nname = "orbital-engineering-lab"\nversion = "{version}"\n',
         encoding="utf-8",
     )
     (source / "run_simulation.py").write_text("print('fixture')\n", encoding="utf-8")
     (source / "sim").mkdir()
     (source / "sim" / "__init__.py").write_text("", encoding="utf-8")
-    archive = release / f"orbital-engagement-lab-{version}-{edition}.tar.gz"
+    archive = release / f"orbital-engineering-lab-{version}-{edition}.tar.gz"
     with tarfile.open(archive, "w:gz") as bundle:
-        bundle.add(source, arcname=f"orbital-engagement-lab-{version}")
+        bundle.add(source, arcname=f"orbital-engineering-lab-{version}")
     artifact = {
         "name": archive.name,
         "kind": "source",
@@ -242,6 +242,24 @@ def test_release_contract_rejects_unknown_fields(signing_keys: tuple[object, dic
         validate_release_manifest(sign_payload(payload, private))  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("product", ["orbital-engagement-lab", "orbital-engineering-lab"])
+def test_release_contract_accepts_both_product_identities(product: str) -> None:
+    manifest = {
+        "schema_version": RELEASE_MANIFEST_SCHEMA,
+        "product": product,
+        "edition": "public",
+        "version": "0.28.0",
+        "channel": "stable",
+        "published_at": "2026-08-15T00:00:00Z",
+        "artifacts": [{"name": "source.tar.gz", "kind": "source", "path": "source.tar.gz", "bytes": 0, "sha256": "0" * 64}],
+        "platforms": [platform.system()],
+        "python": {"requires": ">=3.10,<3.15"},
+        "profiles": ["core"],
+        "contracts": {"workspace": "oel.workspace.v1", "scenario": SCENARIO_SCHEMA_VERSION},
+    }
+    assert validate_release_manifest(manifest)["product"] == product
+
+
 def test_signature_tamper_expiry_and_revocation(signing_keys: tuple[object, dict[str, RSAPublicKey]]) -> None:
     private, keys = signing_keys
     signed = sign_payload({"value": 1}, private)  # type: ignore[arg-type]
@@ -330,6 +348,17 @@ def test_workspace_audit_preserves_user_source_and_does_not_import_candidates(tm
     assert {path: path.read_bytes() for path in before} == before
 
 
+def test_workspace_manifest_symlink_is_rejected_before_resolution(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    init_workspace(target, engine_version="0.25.0")
+    alias = tmp_path / "alias" / "oel-workspace.yaml"
+    alias.parent.mkdir()
+    alias.symlink_to(target / "oel-workspace.yaml")
+
+    with pytest.raises(ContractError, match="manifest may not be a symbolic link"):
+        load_workspace(alias)
+
+
 def test_migration_is_explicit_recoverable_and_idempotent(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     init_workspace(workspace_root, engine_version="0.25.0")
@@ -383,7 +412,7 @@ def test_side_by_side_install_activation_rollback_integrity_and_uninstall(
 def test_managed_runtime_selection_preserves_virtualenv_python_symlink(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     root = paths.version_root("0.26.0")
-    source = root / "source" / "orbital-engagement-lab-0.26.0"
+    source = root / "source" / "orbital-engineering-lab-0.26.0"
     source.mkdir(parents=True)
     runtime_python = root / "runtime" / "bin" / "python"
     runtime_python.parent.mkdir(parents=True)
@@ -728,7 +757,7 @@ def test_release_build_is_reproducible_signed_and_contains_evidence(
     source = tmp_path / "public-source"
     source.mkdir()
     (source / "pyproject.toml").write_text(
-        '[project]\nname = "orbital-engagement-lab"\nversion = "0.25.0"\n',
+        '[project]\nname = "orbital-engineering-lab"\nversion = "0.25.0"\n',
         encoding="utf-8",
     )
     (source / "README.md").write_text("public fixture\n", encoding="utf-8")
@@ -910,7 +939,7 @@ def test_developer_unsigned_build_does_not_require_trusted_keys(
     source = tmp_path / "public-source"
     source.mkdir()
     (source / "pyproject.toml").write_text(
-        '[project]\nname = "orbital-engagement-lab"\nversion = "0.27.0"\n',
+        '[project]\nname = "orbital-engineering-lab"\nversion = "0.27.0"\n',
         encoding="utf-8",
     )
     (source / "README.md").write_text("public fixture\n", encoding="utf-8")

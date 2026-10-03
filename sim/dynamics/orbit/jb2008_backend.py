@@ -154,6 +154,69 @@ def _xlocal(z_km: float, tc: np.ndarray) -> float:
     return float((((-9.8204695e-6 * dz - 7.3039742e-4) * dz * dz + 1.0) * dz * tc[1]) + tc[0])
 
 
+def _integrate_lower_atmosphere_python(
+    zht: float, tc: tuple[float, float, float, float],
+) -> tuple[float, float, float, float, float, float, float, float, float]:
+    """Authoritative JB2006/JB2008 90–105 km quadrature, unchanged ordering."""
+    tc0, tc1, tc2, tc3 = tc
+    xambar_c0, xambar_c1, xambar_c2, xambar_c3, xambar_c4, xambar_c5, xambar_c6 = _XAMBAR_COEFFICIENTS
+    r1 = 0.010
+    wt, wt_tail, atan = _JB_WT, _JB_WT_TAIL, math.atan
+    z1 = 90.0
+    z2 = min(zht, 105.0)
+    al = math.log(z2 / z1)
+    n = int(math.floor(al / r1) + 1)
+    zr = math.exp(al / n)
+    ambar1 = _xambar(z1)
+    tloc1 = _xlocal(z1, tc)
+    zend = z1
+    sum2 = 0.0
+    ain = ambar1 * _xgrav(z1) / tloc1
+    ambar2 = ambar1
+    tloc2 = tloc1
+    gravl = _xgrav(z1)
+    for _ in range(n):
+        z = zend
+        zend = zr * z
+        dz = 0.25 * (zend - z)
+        sum1 = wt[0] * ain
+        for weight in wt_tail:
+            z = z + dz
+            z_minus_100 = z - 100.0
+            ambar2 = z_minus_100 * xambar_c6 + xambar_c5
+            ambar2 = z_minus_100 * ambar2 + xambar_c4
+            ambar2 = z_minus_100 * ambar2 + xambar_c3
+            ambar2 = z_minus_100 * ambar2 + xambar_c2
+            ambar2 = z_minus_100 * ambar2 + xambar_c1
+            ambar2 = z_minus_100 * ambar2 + xambar_c0
+            z_minus_125 = z - 125.0
+            if z_minus_125 > 0.0:
+                tloc2 = tc0 + tc2 * atan(tc3 * z_minus_125 * (1.0 + 4.5e-6 * z_minus_125**2.5))
+            else:
+                tloc2 = (
+                    (((-9.8204695e-6 * z_minus_125 - 7.3039742e-4) * z_minus_125 * z_minus_125 + 1.0)
+                    * z_minus_125
+                    * tc1)
+                    + tc0
+                )
+            gravl = 9.80665 / (1.0 + z / 6356.766) ** 2
+            ain = ambar2 * gravl / tloc2
+            sum1 += weight * ain
+        sum2 += dz * sum1
+
+    return zend, z, tloc1, tloc2, ambar1, ambar2, gravl, ain, sum2
+
+
+def _integrate_lower_atmosphere(zht: float, tc: tuple, env: dict) -> tuple:
+    if env.get("_rust_numeric_backend") == "rust" and zht >= 90.0:
+        from sim.rust_environment_backend import try_jb_lower_atmosphere
+
+        native = try_jb_lower_atmosphere(zht, tc)
+        if native is not None:
+            return native
+    return _integrate_lower_atmosphere_python(zht, tc)
+
+
 def _integrate_upper_atmosphere_python(
     zend: float,
     z_current: float,
@@ -258,7 +321,14 @@ def _integrate_upper_atmosphere(
     r_step: float,
     ain: float,
     tc: tuple[float, float, float, float],
+    env: dict,
 ) -> tuple[float, float, float, float, float, float]:
+    if env.get("_rust_numeric_backend") == "rust":
+        from sim.rust_environment_backend import try_jb_upper_atmosphere
+
+        native = try_jb_upper_atmosphere(zend, z_current, z_target, r_step, ain, tc)
+        if native is not None:
+            return native
     if acceleration_enabled_from_mode():
         result = _compiled_integrate_upper_atmosphere()(zend, z_current, z_target, r_step, ain, tc)
         return tuple(float(value) for value in result)
@@ -701,11 +771,8 @@ def jb2006_density(alt_km: float, lat_deg: float, lon_deg: float, dt_utc: dateti
     piov2 = _PIOV2
     frac = _JB_FRAC
     rstar = _RSTAR
-    r1, r2, r3 = 0.010, 0.025, 0.075
-    wt = _JB_WT
-    wt_tail = _JB_WT_TAIL
+    r2, r3 = 0.025, 0.075
     cht = _JB_CHT
-    atan = math.atan
 
     tsubc = 379.0 + 3.353 * f10b + 0.358 * (f10 - f10b) + 2.094 * (s10 - s10b) + 0.343 * (xm10 - xm10b)
 
@@ -727,50 +794,8 @@ def jb2006_density(alt_km: float, lat_deg: float, lon_deg: float, dt_utc: dateti
     gsubx = 0.054285714 * (tsubx - 183.0)
     tc2 = (tinf - tsubx) / piov2
     tc = (tsubx, gsubx, tc2, gsubx / tc2)
-    tc0, tc1, tc2, tc3 = tc
-    xambar_c0, xambar_c1, xambar_c2, xambar_c3, xambar_c4, xambar_c5, xambar_c6 = _XAMBAR_COEFFICIENTS
 
-    z1 = 90.0
-    z2 = min(zht, 105.0)
-    al = math.log(z2 / z1)
-    n = int(math.floor(al / r1) + 1)
-    zr = math.exp(al / n)
-    ambar1 = _xambar(z1)
-    tloc1 = _xlocal(z1, tc)
-    zend = z1
-    sum2 = 0.0
-    ain = ambar1 * _xgrav(z1) / tloc1
-    ambar2 = ambar1
-    tloc2 = tloc1
-    gravl = _xgrav(z1)
-    for _ in range(n):
-        z = zend
-        zend = zr * z
-        dz = 0.25 * (zend - z)
-        sum1 = wt[0] * ain
-        for weight in wt_tail:
-            z = z + dz
-            z_minus_100 = z - 100.0
-            ambar2 = z_minus_100 * xambar_c6 + xambar_c5
-            ambar2 = z_minus_100 * ambar2 + xambar_c4
-            ambar2 = z_minus_100 * ambar2 + xambar_c3
-            ambar2 = z_minus_100 * ambar2 + xambar_c2
-            ambar2 = z_minus_100 * ambar2 + xambar_c1
-            ambar2 = z_minus_100 * ambar2 + xambar_c0
-            z_minus_125 = z - 125.0
-            if z_minus_125 > 0.0:
-                tloc2 = tc0 + tc2 * atan(tc3 * z_minus_125 * (1.0 + 4.5e-6 * z_minus_125**2.5))
-            else:
-                tloc2 = (
-                    (((-9.8204695e-6 * z_minus_125 - 7.3039742e-4) * z_minus_125 * z_minus_125 + 1.0)
-                    * z_minus_125
-                    * tc1)
-                    + tc0
-                )
-            gravl = 9.80665 / (1.0 + z / 6356.766) ** 2
-            ain = ambar2 * gravl / tloc2
-            sum1 += weight * ain
-        sum2 += dz * sum1
+    zend, z, tloc1, tloc2, ambar1, ambar2, gravl, ain, sum2 = _integrate_lower_atmosphere(zht, tc, env)
 
     fact1 = 1000.0 / rstar
     rho = 3.46e-6 * ambar2 * tloc1 * math.exp(-fact1 * sum2) / ambar1 / tloc2
@@ -830,11 +855,11 @@ def jb2006_density(alt_km: float, lat_deg: float, lon_deg: float, dt_utc: dateti
 
     z3 = min(zht, 500.0)
     ain = gravl / tloc2
-    zend, z, tloc3, gravl, ain, sum2b = _integrate_upper_atmosphere(zend, z, z3, r2, ain, tc)
+    zend, z, tloc3, gravl, ain, sum2b = _integrate_upper_atmosphere(zend, z, z3, r2, ain, tc, env)
 
     z4 = max(zht, 500.0)
     r_step = r3 if zht > 500.0 else r2
-    zend, z, tloc4, gravl, ain, sum3 = _integrate_upper_atmosphere(zend, z, z4, r_step, ain, tc)
+    zend, z, tloc4, gravl, ain, sum3 = _integrate_upper_atmosphere(zend, z, z4, r_step, ain, tc, env)
 
     if zht > 500.0:
         temp2 = tloc4
@@ -901,11 +926,8 @@ def jb2008_density(alt_km: float, lat_deg: float, lon_deg: float, dt_utc: dateti
     piov2 = _PIOV2
     frac = _JB_FRAC
     rstar = _RSTAR
-    r1, r2, r3 = 0.010, 0.025, 0.075
-    wt = _JB_WT
-    wt_tail = _JB_WT_TAIL
+    r2, r3 = 0.025, 0.075
     cht = _JB_CHT
-    atan = math.atan
 
     fn = min((f10b / 240.0) ** 0.25, 1.0)
     fsb = f10b * fn + s10b * (1.0 - fn)
@@ -935,50 +957,8 @@ def jb2008_density(alt_km: float, lat_deg: float, lon_deg: float, dt_utc: dateti
     gsubx = 0.054285714 * (tsubx - 183.0)
     tc2 = (tinf - tsubx) / piov2
     tc = (tsubx, gsubx, tc2, gsubx / tc2)
-    tc0, tc1, tc2, tc3 = tc
-    xambar_c0, xambar_c1, xambar_c2, xambar_c3, xambar_c4, xambar_c5, xambar_c6 = _XAMBAR_COEFFICIENTS
 
-    z1 = 90.0
-    z2 = min(zht, 105.0)
-    al = math.log(z2 / z1)
-    n = int(math.floor(al / r1) + 1)
-    zr = math.exp(al / n)
-    ambar1 = _xambar(z1)
-    tloc1 = _xlocal(z1, tc)
-    zend = z1
-    sum2 = 0.0
-    ain = ambar1 * _xgrav(z1) / tloc1
-    ambar2 = ambar1
-    tloc2 = tloc1
-    gravl = _xgrav(z1)
-    for _ in range(n):
-        z = zend
-        zend = zr * z
-        dz = 0.25 * (zend - z)
-        sum1 = wt[0] * ain
-        for weight in wt_tail:
-            z = z + dz
-            z_minus_100 = z - 100.0
-            ambar2 = z_minus_100 * xambar_c6 + xambar_c5
-            ambar2 = z_minus_100 * ambar2 + xambar_c4
-            ambar2 = z_minus_100 * ambar2 + xambar_c3
-            ambar2 = z_minus_100 * ambar2 + xambar_c2
-            ambar2 = z_minus_100 * ambar2 + xambar_c1
-            ambar2 = z_minus_100 * ambar2 + xambar_c0
-            z_minus_125 = z - 125.0
-            if z_minus_125 > 0.0:
-                tloc2 = tc0 + tc2 * atan(tc3 * z_minus_125 * (1.0 + 4.5e-6 * z_minus_125**2.5))
-            else:
-                tloc2 = (
-                    (((-9.8204695e-6 * z_minus_125 - 7.3039742e-4) * z_minus_125 * z_minus_125 + 1.0)
-                    * z_minus_125
-                    * tc1)
-                    + tc0
-                )
-            gravl = 9.80665 / (1.0 + z / 6356.766) ** 2
-            ain = ambar2 * gravl / tloc2
-            sum1 += weight * ain
-        sum2 += dz * sum1
+    zend, z, tloc1, tloc2, ambar1, ambar2, gravl, ain, sum2 = _integrate_lower_atmosphere(zht, tc, env)
 
     fact1 = 1000.0 / rstar
     rho = 3.46e-6 * ambar2 * tloc1 * math.exp(-fact1 * sum2) / ambar1 / tloc2
@@ -1036,11 +1016,11 @@ def jb2008_density(alt_km: float, lat_deg: float, lon_deg: float, dt_utc: dateti
 
     z3 = min(zht, 500.0)
     ain = gravl / tloc2
-    zend, z, tloc3, gravl, ain, sum2b = _integrate_upper_atmosphere(zend, z, z3, r2, ain, tc)
+    zend, z, tloc3, gravl, ain, sum2b = _integrate_upper_atmosphere(zend, z, z3, r2, ain, tc, env)
 
     z4 = max(zht, 500.0)
     r_step = r3 if zht > 500.0 else r2
-    zend, z, tloc4, gravl, ain, sum3 = _integrate_upper_atmosphere(zend, z, z4, r_step, ain, tc)
+    zend, z, tloc4, gravl, ain, sum3 = _integrate_upper_atmosphere(zend, z, z4, r_step, ain, tc, env)
 
     if zht > 500.0:
         temp2 = tloc4

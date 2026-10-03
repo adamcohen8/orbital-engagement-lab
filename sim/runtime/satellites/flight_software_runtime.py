@@ -32,6 +32,8 @@ from sim.actuators.physical import (
 from sim.core.models import StateTruth
 from sim.dynamics.orbit.epoch import sun_position_eci_km_enhanced
 from sim.flight_software.contracts import (
+    CONTRACT_VERSION,
+    OUTPUT_SCHEMA,
     ActuatorCommandReceipt,
     ActuatorTelemetryPayload,
     AerodynamicEffectorPositionCommand,
@@ -228,6 +230,20 @@ class SatelliteFlightSoftwareRuntime:
         from sim.flight_software.reference_stacks import ReferenceStackBase
 
         self._builtin_reference_stack_base = ReferenceStackBase if isinstance(stack, ReferenceStackBase) else None
+        self._native_evidence_encoder = None
+        self._validate_boundary = assert_truth_free
+        self._quaternion_to_dcm_bn = quaternion_to_dcm_bn
+        self._relative_ric_state = eci_relative_to_ric_rect
+        if getattr(stack, "numeric_backend", "rust") == "rust":
+            from sim.flight_software.rust_game_frames import quaternion_to_dcm_bn as native_dcm
+            from sim.flight_software.rust_game_frames import relative_ric_state
+            from sim.flight_software.rust_game_packets import boundary_validator, trusted_evidence_encoder
+
+            self._native_evidence_encoder = getattr(stack, "_native_packet_encoder", None) or trusted_evidence_encoder()
+            self._validate_boundary = (getattr(stack, "_native_packet_validator", None) or boundary_validator()).check
+            if not getattr(stack, "_native_actuator_pipeline", False):
+                self._quaternion_to_dcm_bn = native_dcm
+                self._relative_ric_state = relative_ric_state
         self.inertial_frame = inertial_frame
         self.body_frame = body_frame
         self.task_period_ns = int(task_period_ns)
@@ -255,6 +271,12 @@ class SatelliteFlightSoftwareRuntime:
         )
         self.command_bus = ActuatorCommandBus(devices)
         self.hardware = dict(hardware)
+        if getattr(stack, "_native_actuator_pipeline", False):
+            from sim.actuators.rust_physical import enable_hardware
+            self.command_bus._native_evidence_encoder = self._native_evidence_encoder
+            self.command_bus._native_boundary_validator = self._validate_boundary.__self__
+            for model in self.hardware.values():
+                enable_hardware(model)
         self.inputs = InputDeliveryQueue()
         self.evidence = FlightSoftwareRuntimeEvidence()
         checkpoint_snapshot, checkpoint_state = self._decode_initial_checkpoint(initial_checkpoint)
@@ -455,7 +477,7 @@ class SatelliteFlightSoftwareRuntime:
         if self.max_delta_v_m_s is not None and end_time_ns > start_time_ns:
             dt_s = (end_time_ns - start_time_ns) / 1.0e9
             mass_kg = max(float(truth.mass_kg), 1.0e-12)
-            dcm_bn = quaternion_to_dcm_bn(np.asarray(truth.attitude_quat_bn, dtype=float))
+            dcm_bn = self._quaternion_to_dcm_bn(np.asarray(truth.attitude_quat_bn, dtype=float))
             requested_delta_v = float(np.linalg.norm(force + dcm_bn.T @ force_body)) / mass_kg * dt_s
             remaining = max(float(self.max_delta_v_m_s) - self.used_delta_v_m_s, 0.0)
             scale = 1.0 if requested_delta_v <= remaining or requested_delta_v <= 0.0 else remaining / requested_delta_v
@@ -477,7 +499,7 @@ class SatelliteFlightSoftwareRuntime:
         if self.max_delta_v_m_s is not None and end_time_ns > start_time_ns:
             dt_s = (end_time_ns - start_time_ns) / 1.0e9
             mass_kg = max(float(truth.mass_kg), 1.0e-12)
-            dcm_bn = quaternion_to_dcm_bn(np.asarray(truth.attitude_quat_bn, dtype=float))
+            dcm_bn = self._quaternion_to_dcm_bn(np.asarray(truth.attitude_quat_bn, dtype=float))
             self.used_delta_v_m_s += float(np.linalg.norm(force + dcm_bn.T @ force_body)) / mass_kg * dt_s
         _synchronize_stateful_realizations(realization_records)
         realizations = [item for _, item in realization_records]
@@ -581,22 +603,48 @@ class SatelliteFlightSoftwareRuntime:
         # assembled here from explicit observable values.  Anything entering
         # through a publisher, public enqueue, or restored queue is checked
         # recursively immediately before the stack sees it.
-        for event in events:
-            if id(event) not in self._runtime_owned_input_ids:
-                assert_truth_free(event)
+        untrusted = tuple(event for event in events if id(event) not in self._runtime_owned_input_ids)
+        validator = getattr(self._validate_boundary, "__self__", None)
+        check_many = getattr(validator, "check_many", None)
+        if check_many is not None:
+            check_many(untrusted)
+        else:
+            for event in untrusted:
+                self._validate_boundary(event)
         self._runtime_owned_input_ids.difference_update(id(event) for event in events)
         execution_started_ns = perf_counter_ns()
-        if self._builtin_reference_stack_base is None:
-            output = self.stack.step(batch)
-        else:
-            output = self._builtin_reference_stack_base._step_after_boundary_validation(
-                self.stack,
-                batch,
-            )
+        try:
+            if self._builtin_reference_stack_base is None:
+                output = self.stack.step(batch)
+            else:
+                output = self._builtin_reference_stack_base._step_after_boundary_validation(
+                    self.stack,
+                    batch,
+                )
+        except Exception as exc:
+            # Preserve the adapter's packet-digest trail across the failed
+            # run boundary.  The CLI writes this partial evidence separately;
+            # a failed exchange cannot reach completed payload assembly.
+            if type(exc).__name__ == "CfsBridgeFailure":
+                transport_evidence = getattr(self.stack, "transport_evidence", None)
+                if callable(transport_evidence):
+                    exc.bridge_failure_evidence = {
+                        "satellite_id": self.satellite_id,
+                        "bridge_transport": to_primitive(transport_evidence()),
+                    }
+            raise
         host_execution_duration_ns = max(0, perf_counter_ns() - execution_started_ns)
         # Keep one adapter-owned egress check for every stack.  Built-ins avoid
         # only the duplicate traversal formerly repeated inside the stack base.
-        assert_truth_free(output)
+        self._validate_boundary(output)
+        if output.schema != OUTPUT_SCHEMA:
+            raise ValueError(
+                f"flight-software output schema {output.schema!r} is not supported"
+            )
+        if output.contract_version != CONTRACT_VERSION:
+            raise ValueError(
+                f"flight-software output contract_version {output.contract_version!r} is not supported"
+            )
         if output.satellite_id != self.satellite_id:
             raise ValueError(
                 f"flight-software output satellite_id {output.satellite_id!r} does not match "
@@ -619,6 +667,18 @@ class SatelliteFlightSoftwareRuntime:
         identity = self.stack.identity
         if callable(identity):
             identity = identity()
+        if self._native_evidence_encoder is None:
+            input_packet_ids = [_to_primitive_trusted(event.packet_id) for event in events]
+            command_ids = [_to_primitive_trusted(command.command_id) for command in output.commands]
+            requested_invocations = [_to_primitive_trusted(request) for request in output.requested_next_invocations]
+        else:
+            # One crossing for the three identifier groups, after the same
+            # ingress/egress checks and command contract validation as Python.
+            input_packet_ids, command_ids, requested_invocations = self._native_evidence_encoder.convert_many((
+                tuple(event.packet_id for event in events),
+                tuple(command.command_id for command in output.commands),
+                output.requested_next_invocations,
+            ))
         self.evidence.invocations.append(
             {
                 "satellite_id": self.satellite_id,
@@ -628,14 +688,12 @@ class SatelliteFlightSoftwareRuntime:
                 "stack_version": identity.stack_version,
                 "profile_id": self.profile_id,
                 "profile_params": dict(self.profile_params),
-                "input_packet_ids": [_to_primitive_trusted(event.packet_id) for event in events],
-                "command_ids": [_to_primitive_trusted(command.command_id) for command in output.commands],
+                "input_packet_ids": input_packet_ids,
+                "command_ids": command_ids,
                 "telemetry_count": len(output.telemetry),
                 "missed_task_releases": self._missed_task_releases,
                 "missed_sensor_releases": self._missed_sensor_releases,
-                "requested_next_invocations": [
-                    _to_primitive_trusted(request) for request in output.requested_next_invocations
-                ],
+                "requested_next_invocations": requested_invocations,
                 "task_releases": [
                     {
                         "task_id": "stack.step",
@@ -707,6 +765,8 @@ class SatelliteFlightSoftwareRuntime:
         if not identity.checkpointable:
             return
         snapshot = self.stack.snapshot()
+        if self._native_evidence_encoder is not None:
+            self._validate_boundary(snapshot)
         runtime_state_bytes = json.dumps(
             self._runtime_state(run_time_ns=run_time_ns),
             allow_nan=False,
@@ -727,7 +787,8 @@ class SatelliteFlightSoftwareRuntime:
                 "run_time_ns": int(run_time_ns),
                 "checkpoint_time_ns": self._clock_offset_ns + int(run_time_ns),
                 "implementation_hash": identity.implementation_hash,
-                "fsw_snapshot": to_primitive(snapshot),
+                "fsw_snapshot": (to_primitive(snapshot) if self._native_evidence_encoder is None
+                                 else self._native_evidence_encoder.convert(snapshot)),
                 "runtime_state_bytes_base64": base64.b64encode(runtime_state_bytes).decode("ascii"),
                 "runtime_state_hash_sha256": sha256(runtime_state_bytes).hexdigest(),
                 "checkpoint_schema": "oel.satellite_runtime_checkpoint.v1",
@@ -866,16 +927,21 @@ class SatelliteFlightSoftwareRuntime:
     def review_evidence(self) -> dict[str, object]:
         """Return JSON-safe typed boundary evidence for reporting owners."""
 
-        evidence = {
-            "invocations": _to_primitive_trusted(self.evidence.invocations),
-            "input_events": _to_primitive_trusted(self.evidence.input_events),
-            "outputs": _to_primitive_trusted(self.evidence.outputs),
-            "receipts": _to_primitive_trusted(self.evidence.receipts),
-            "realizations": _to_primitive_trusted(self.evidence.realizations),
-            "snapshots": _to_primitive_trusted(self.evidence.snapshots),
-        }
+        records = [
+            ("invocations", self.evidence.invocations),
+            ("input_events", self.evidence.input_events),
+            ("outputs", self.evidence.outputs),
+            ("receipts", self.evidence.receipts),
+            ("realizations", self.evidence.realizations),
+            ("snapshots", self.evidence.snapshots),
+        ]
         if self.evidence.sensor_access:
-            evidence["sensor_access"] = _to_primitive_trusted(self.evidence.sensor_access)
+            records.append(("sensor_access", self.evidence.sensor_access))
+        if self._native_evidence_encoder is None:
+            evidence = {name: _to_primitive_trusted(value) for name, value in records}
+        else:
+            values = self._native_evidence_encoder.convert_many(tuple(value for _name, value in records))
+            evidence = dict(zip((name for name, _value in records), values, strict=True))
         transport_evidence = getattr(self.stack, "transport_evidence", None)
         if callable(transport_evidence):
             # Bridge evidence is supplied by an external transport owner and
@@ -889,10 +955,16 @@ class SatelliteFlightSoftwareRuntime:
         unavailable = None if measured is None else np.full(measured.shape, np.nan)
         if not self.evidence.outputs:
             return unavailable
-        fields = {}
-        for record in self.evidence.outputs[-1].telemetry:
-            if record.topic == "oel.navigation_state.v1":
-                fields = {item.name: item.value for item in record.fields}
+        fields = None
+        for output in reversed(self.evidence.outputs):
+            for record in output.telemetry:
+                if record.topic == "oel.navigation_state.v1":
+                    # An invocation may publish diagnostics without a new
+                    # navigation packet. Hold the latest published packet.
+                    fields = {item.name: item.value for item in record.fields}
+                    break
+            if fields is not None:
+                break
         if (
             not fields
             or fields.get("frame_id") != self.inertial_frame.name
@@ -1014,14 +1086,14 @@ class SatelliteFlightSoftwareRuntime:
             observer_position = observer.position_eci_km
             observer_velocity = observer.velocity_eci_km_s
         else:
-            # The access gate and measurement share the sensor phase center,
-            # including velocity from body rotation about the spacecraft COM.
+            # The access gate and the measurement must use the same sensor
+            # phase center, including its rotational velocity about the COM.
             observer_position, observer_velocity, _ = self._target_access._sensor_state_eci(observer)
         observer_state = np.hstack((observer_position, observer_velocity))
         # Canonical RPO convention: the controlled satellite is the deputy and
         # the tracked/reference object is the chief.  State is therefore
         # deputy relative to chief, expressed in the chief's RIC frame.
-        relative = eci_relative_to_ric_rect(observer_state, target_state)
+        relative = self._relative_ric_state(observer_state, target_state)
         position_m = np.asarray(relative[:3], dtype=float) * 1.0e3
         velocity_m_s = np.asarray(relative[3:6], dtype=float) * 1.0e3
         position_m += self._sensor_rng.normal(
@@ -1078,7 +1150,7 @@ class SatelliteFlightSoftwareRuntime:
                 truth.position_eci_km, dtype=float
             )
         sun_eci /= max(float(np.linalg.norm(sun_eci)), 1.0e-15)
-        sun_body = quaternion_to_dcm_bn(np.asarray(truth.attitude_quat_bn, dtype=float)) @ sun_eci
+        sun_body = self._quaternion_to_dcm_bn(np.asarray(truth.attitude_quat_bn, dtype=float)) @ sun_eci
         payload = SunVectorMeasurement(tuple(float(value) for value in sun_body))
         measurement = MeasurementEvent("ideal_sun", payload.schema, now, self.body_frame, payload)
         return InputEvent(packet_id, InputKind.MEASUREMENT, now, now, Quality(), measurement)

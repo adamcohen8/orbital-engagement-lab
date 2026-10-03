@@ -110,3 +110,14 @@ def test_slice_rejects_manifest_scope_tampering(tmp_path: Path) -> None:
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError, match="Invalid review slice manifest"):
         query_review_slice(target, "SELECT COUNT(*) FROM object_state")
+
+
+def test_slice_accepts_current_optional_resource_table(tmp_path: Path) -> None:
+    run = _run(tmp_path)
+    with sqlite3.connect(run / "review" / "run.sqlite") as db:
+        db.execute("CREATE TABLE spacecraft_resources (object_id TEXT, time_s REAL)")
+        db.commit()
+    target = tmp_path / "slice-with-current-resource-schema"
+    manifest = create_review_slice(run, target, start_s=1, end_s=2)
+    assert manifest["partial"] is True
+    assert manifest["row_counts_before"]["spacecraft_resources"] == 0

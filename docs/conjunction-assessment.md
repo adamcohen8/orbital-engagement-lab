@@ -11,6 +11,16 @@ This is an inspectable research and education workflow. It is not an
 operational catalog-screening service, a maneuver recommendation, or a claim
 that OEL reproduces an originating agency's probability or disposition process.
 
+`collision_probability_2d(..., numeric_backend="rust")` selects a stateless
+native conditional-Gaussian integrand using SciPy's low-level callback ABI.
+SciPy still owns adaptive quadrature, both tolerance passes, convergence evidence
+and fail-closed acceptance. Rust is the default; native probability evidence
+records its backend. `assess_histories` and `assess_conjunction` accept an
+independent `probability_numeric_backend="rust"` selector, forwarding through
+baseline, avoidance and secondary assessments. Their existing `numeric_backend`
+continues to select geometry only. `assess_cdm_message(..., numeric_backend="rust")`
+selects native Pc. Missing callback support fails explicit selection.
+
 ## Quick Start
 
 Run the bundled synthetic crossing and retain the JSON evidence:

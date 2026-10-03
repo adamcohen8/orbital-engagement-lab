@@ -42,10 +42,17 @@ test("email verification helpers hash tokens and build public links", () => {
   assert.equal(hash, hashVerificationToken("abc123"));
   assert.notEqual(hash, hashVerificationToken("abc124"));
   assert.match(hash, /^[a-f0-9]{64}$/);
-  assert.equal(
-    verificationUrl({ headers: { host: "example.test", "x-forwarded-proto": "https" } }, "token with spaces"),
-    "https://example.test/api/verify-email?token=token%20with%20spaces",
-  );
+  const originalOrigin = process.env.OEL_ARCADE_PUBLIC_ORIGIN;
+  process.env.OEL_ARCADE_PUBLIC_ORIGIN = "https://example.test";
+  try {
+    assert.equal(
+      verificationUrl({ headers: { host: "attacker.invalid", "x-forwarded-proto": "http" } }, "token with spaces"),
+      "https://example.test/api/verify-email?token=token%20with%20spaces",
+    );
+  } finally {
+    if (originalOrigin === undefined) delete process.env.OEL_ARCADE_PUBLIC_ORIGIN;
+    else process.env.OEL_ARCADE_PUBLIC_ORIGIN = originalOrigin;
+  }
   assert.equal(verificationExpiryIso(new Date("2026-01-01T00:00:00.000Z")), "2026-01-08T00:00:00.000Z");
 });
 
@@ -67,7 +74,7 @@ test("username ownership decisions support verified email locking", () => {
   };
   assert.deepEqual(decideOwnership({ player: lockedPlayer, email: "ace@example.edu" }), {
     status: OWNERSHIP_STATUS.VERIFIED_OWNER,
-    leaderboard_allowed: true,
+    leaderboard_allowed: false,
     verification_allowed: true,
   });
   assert.deepEqual(decideOwnership({ player: lockedPlayer, email: "" }), {
@@ -81,7 +88,7 @@ test("username ownership decisions support verified email locking", () => {
     verification_allowed: false,
   });
   assert.equal(canVerifyUsernameForEmail({ player: {}, email: "ace@example.edu" }), true);
-  assert.equal(canVerifyUsernameForEmail({ player: lockedPlayer, email: "ACE@example.edu" }), true);
+  assert.equal(canVerifyUsernameForEmail({ player: lockedPlayer, email: "ACE@example.edu" }), false);
   assert.equal(canVerifyUsernameForEmail({ player: lockedPlayer, email: "other@example.edu" }), false);
 });
 

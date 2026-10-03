@@ -57,6 +57,7 @@ def test_hcw_state_transition_matches_closed_form_components() -> None:
 
 def test_hcw_prediction_reuses_only_the_latest_transition_matrix() -> None:
     estimator = _estimator()
+    estimator.numeric_backend = "python"
     belief = StateBelief(
         state=np.array([0.2, -0.4, 0.1, 0.0001, -0.0002, 0.00005], dtype=float),
         covariance=np.eye(6) * 1.0e-3,

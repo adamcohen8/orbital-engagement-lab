@@ -19,7 +19,7 @@ def relative_ric_state_from_arrays(target_truth: np.ndarray, chaser_truth: np.nd
     chaser = np.array(chaser_truth, dtype=float).reshape(-1)
     if target.size < 6 or chaser.size < 6:
         return np.full(6, np.nan, dtype=float)
-    return eci_relative_to_ric_rect(chaser[:6], target[:6])
+    return eci_relative_to_ric_rect(chaser[:6], target[:6], numeric_backend="python")
 
 
 def relative_moon_ric_state_from_arrays(target_truth: np.ndarray, chaser_truth: np.ndarray) -> np.ndarray:
@@ -28,7 +28,7 @@ def relative_moon_ric_state_from_arrays(target_truth: np.ndarray, chaser_truth: 
     if target.size < 6 or chaser.size < 6:
         return np.full(6, np.nan, dtype=float)
     moon = cr3bp_moon_state_km_s()
-    return eci_relative_to_ric_rect(chaser[:6] - moon, target[:6] - moon)
+    return eci_relative_to_ric_rect(chaser[:6] - moon, target[:6] - moon, numeric_backend="python")
 
 
 def relative_state_from_arrays(target_truth: np.ndarray, chaser_truth: np.ndarray, *, frame: str = "ric") -> np.ndarray:

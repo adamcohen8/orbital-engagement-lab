@@ -105,3 +105,24 @@ class TestRocketNavigation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_rocket_vector_norm_retains_numpy_dot_sqrt_bits():
+    from sim.rocket.navigation import _norm3
+
+    rng = np.random.default_rng(8246)
+    vectors = [rng.normal(size=3) for _ in range(128)]
+    vectors += [
+        np.zeros(3),
+        np.array([-0.0, 0.0, -0.0]),
+        np.array([np.inf, 1.0, 2.0]),
+        np.array([np.nan, 1.0, 2.0]),
+        np.array([1.0e-300, -2.0e-300, 3.0e-300]),
+        np.array([1.0e150, -2.0e150, 3.0e150]),
+        rng.normal(size=6)[::2],
+        np.array([1.0, 2.0, 3.0], dtype=np.float32),
+        np.array([1, 2, 3]),
+        np.array([1.0 + 2.0j, 3.0, 4.0]),
+    ]
+    for vector in vectors:
+        assert np.float64(_norm3(vector)).tobytes() == np.float64(np.linalg.norm(vector)).tobytes()

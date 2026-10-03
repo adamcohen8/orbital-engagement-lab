@@ -36,7 +36,7 @@ export function decideOwnership({ player, email }) {
   if (locked && storedEmail && providedEmail === storedEmail) {
     return {
       status: OWNERSHIP_STATUS.VERIFIED_OWNER,
-      leaderboard_allowed: true,
+      leaderboard_allowed: false,
       verification_allowed: true,
     };
   }
@@ -50,10 +50,8 @@ export function decideOwnership({ player, email }) {
 
 export function canVerifyUsernameForEmail({ player, email }) {
   const providedEmail = ownershipEmail(email);
-  const storedEmail = ownershipEmail(player?.email);
   if (!providedEmail) return false;
-  if (!usernameIsLocked(player)) return true;
-  return Boolean(storedEmail && providedEmail === storedEmail);
+  return !usernameIsLocked(player);
 }
 
 function ownershipEmail(email) {

@@ -22,22 +22,9 @@ from sim.analysis.mission_scheduling import (
     solve_mission_schedule,
     write_mission_scheduling_artifacts,
 )
-from sim.analysis.spacecraft_power import (
-    SpacecraftPowerProblem,
-    assess_spacecraft_power,
-    problem_with_mission_schedule,
-    verify_spacecraft_power_artifacts,
-    write_spacecraft_power_artifacts,
-)
-from sim.analysis.study_lifecycle import (
-    CAPABILITY_CONTRACTS,
-    STUDY_CLAIMS_SCHEMA,
-    STUDY_PLAN_SCHEMA,
-    STUDY_REQUEST_SCHEMA,
-    build_study_bundle,
-    inspect_study_bundle,
-    replay_study_bundle,
-)
+from sim.analysis.schedule_power_study import build_schedule_power_study
+from sim.analysis.spacecraft_power import SpacecraftPowerProblem, verify_spacecraft_power_artifacts
+from sim.analysis.study_lifecycle import replay_study_bundle
 from sim.analysis.trajectory_targeting import PropagationSettings
 from sim.dynamics.orbit.epoch import resolve_sun_moon_positions
 
@@ -82,80 +69,6 @@ def _orbit_history(problem: SpacecraftPowerProblem) -> AnalysisHistory:
     )
 
 
-def _study_records() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    capability = "spacecraft_power"
-    step_id = "spacecraft-power"
-    criterion_id = "power-feasible"
-    request = {
-        "schema_version": STUDY_REQUEST_SCHEMA,
-        "study_id": "spacecraft-power-schedule-canonical-v1",
-        "title": "Assess schedule-coupled spacecraft power feasibility",
-        "question": "Can SAT-A serve the selected synthetic schedule without violating its declared battery reserve?",
-        "capabilities": [capability],
-        "assumptions": [
-            "The public schedule and orbit are synthetic.",
-            "The selected ideal Sun-tracking orientation is an explicit modeling assumption.",
-        ],
-        "clarifications": [
-            {
-                "question": "Does lifecycle replay recompute the power analysis?",
-                "resolution": "No. Power replay is authoritative; lifecycle replay verifies retained identity.",
-            }
-        ],
-        "context": {
-            "epoch": "Julian UTC epoch declared by the power problem",
-            "time_system": "elapsed SI seconds from epoch",
-            "frame": "EME2000-compatible ECI",
-            "units": "kilometres, seconds, watts, and watt-hours",
-        },
-        "fidelity": {
-            "level": "bounded_public",
-            "description": "Two-body sampled orbit, analytic Sun, conical shadow, and deterministic lumped battery.",
-        },
-        "acceptance_criteria": [
-            {
-                "criterion_id": criterion_id,
-                "description": "The completed analysis reports feasible with zero unmet load.",
-            }
-        ],
-    }
-    plan = {
-        "schema_version": STUDY_PLAN_SCHEMA,
-        "study_id": request["study_id"],
-        "request_sha256": "auto",
-        "resource_profile": "laptop-safe",
-        "steps": [
-            {
-                "step_id": step_id,
-                "capability": capability,
-                "analysis_interface": CAPABILITY_CONTRACTS[capability]["analysis_interface"],
-                "expected_evidence_schema": CAPABILITY_CONTRACTS[capability]["evidence_schema"],
-                "depends_on": [],
-                "acceptance_criterion_ids": [criterion_id],
-            }
-        ],
-    }
-    claims = {
-        "schema_version": STUDY_CLAIMS_SCHEMA,
-        "study_id": request["study_id"],
-        "plan_sha256": "auto",
-        "claims": [
-            {
-                "claim_id": "claim-power-feasible",
-                "statement": "The declared synthetic schedule is power-feasible for this retained orbit and model.",
-                "validation_level": "VC-1",
-                "criterion_ids": [criterion_id],
-                "evidence": [{"step_id": step_id, "json_pointer": "/feasibility"}],
-            }
-        ],
-        "non_claims": [
-            "This result does not qualify hardware or establish operational power margin.",
-            "This result does not include thermal state, degradation, uncertainty, or self-shadowing.",
-        ],
-    }
-    return request, plan, claims
-
-
 def build_example(output_root: str | Path) -> dict[str, Any]:
     destination = Path(output_root).expanduser().resolve()
     if destination.exists():
@@ -171,37 +84,30 @@ def build_example(output_root: str | Path) -> dict[str, Any]:
     base_problem = SpacecraftPowerProblem.from_mapping(
         _read_json(ROOT / "examples/spacecraft_power/public_schedule_power_problem.json")
     )
-    problem = problem_with_mission_schedule(
-        base_problem,
-        schedule.output_dir,
-        activity_power_w={"observation": 180.0, "downlink": 120.0},
+    history = _orbit_history(base_problem)
+    integrated = build_schedule_power_study(
+        schedule_dir=schedule.output_dir,
+        problem=base_problem,
+        history=history,
+        observation_load_w=180.0,
+        downlink_load_w=120.0,
+        schedule_epoch_jd_utc=base_problem.epoch_jd_utc,
+        output_dir=destination / "schedule_power_study",
+        study_id="spacecraft-power-schedule-canonical-v1",
+        title="Assess schedule-coupled spacecraft power feasibility",
     )
-    history = _orbit_history(problem)
-    power = write_spacecraft_power_artifacts(
-        assess_spacecraft_power(problem, history), history, destination / "spacecraft_power"
-    )
-    power_replay = verify_spacecraft_power_artifacts(power.output_dir)
-
-    request, plan, claims = _study_records()
-    bundle = build_study_bundle(
-        request,
-        plan,
-        claims,
-        {"spacecraft-power": power.summary_json},
-        destination / "study",
-    )
-    inspection = inspect_study_bundle(bundle.output_dir)
-    lifecycle_replay = replay_study_bundle(bundle.output_dir)
+    power_replay = verify_spacecraft_power_artifacts(destination / "schedule_power_study" / "power")
+    lifecycle_replay = replay_study_bundle(destination / "schedule_power_study" / "study")
     result = {
         "schema_version": "oel.spacecraft_power_example.v1",
         "status": "verified",
-        "schedule_semantic_sha256": problem.activities[0].source_product_sha256,
-        "power_feasibility": power_replay["feasibility"],
+        "schedule_semantic_sha256": integrated["schedule_semantic_sha256"],
+        "power_feasibility": integrated["feasibility"],
         "power_replay_status": power_replay["status"],
-        "power_result_semantic_sha256": power_replay["result_semantic_sha256"],
-        "study_status": inspection["status"],
+        "power_result_semantic_sha256": integrated["power_result_semantic_sha256"],
+        "study_status": integrated["status"],
         "study_replay_status": lifecycle_replay["replay_status"],
-        "study_bundle_semantic_sha256": inspection["bundle_semantic_sha256"],
+        "study_bundle_semantic_sha256": integrated["study_bundle_semantic_sha256"],
     }
     (destination / "spacecraft_power_example_summary.json").write_text(
         json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",

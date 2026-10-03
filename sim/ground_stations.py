@@ -7,7 +7,6 @@ from typing import Any
 import numpy as np
 
 from sim.config import GroundStationSection
-from sim.dynamics.orbit.environment import EARTH_RADIUS_KM
 from sim.dynamics.orbit.frames import (
     FrameContext,
     eci_to_ecef_rotation_context,
@@ -17,7 +16,13 @@ from sim.dynamics.orbit.frames import (
     transform_state,
 )
 from sim.observations import ObservationPacket, ingest_observations
-from sim.utils.geodesy import ecef_to_enu_rotation, enu_to_ecef_rotation, geodetic_to_ecef_km
+from sim.utils.geodesy import (
+    WGS84_A_KM,
+    WGS84_B_KM,
+    ecef_to_enu_rotation,
+    enu_to_ecef_rotation,
+    geodetic_to_ecef_km,
+)
 
 
 def _json_float(value: float) -> float | None:
@@ -32,18 +37,21 @@ def _first_last_time(t_s: np.ndarray, mask: np.ndarray) -> tuple[float | None, f
     return float(t_s[int(idx[0])]), float(t_s[int(idx[-1])])
 
 
-def _line_of_sight_from_ground(station_eci_km: np.ndarray, target_eci_km: np.ndarray) -> bool:
-    station = np.array(station_eci_km, dtype=float).reshape(3)
-    target = np.array(target_eci_km, dtype=float).reshape(3)
-    segment = target - station
+def _line_of_sight_from_ground(station_ecef_km: np.ndarray, target_ecef_km: np.ndarray) -> bool:
+    """Return whether the segment stays outside the WGS-84 reference ellipsoid."""
+
+    station = np.array(station_ecef_km, dtype=float).reshape(3)
+    target = np.array(target_ecef_km, dtype=float).reshape(3)
+    scale = np.array([WGS84_A_KM, WGS84_A_KM, WGS84_B_KM])
+    station_scaled = station / scale
+    segment = (target - station) / scale
     denom = float(np.dot(segment, segment))
     if denom <= 0.0:
-        return True
-    tau = float(-np.dot(station, segment) / denom)
-    if tau <= 0.0 or tau >= 1.0:
-        return True
-    closest = station + tau * segment
-    return bool(np.linalg.norm(closest) > EARTH_RADIUS_KM)
+        return bool(np.dot(station_scaled, station_scaled) >= 1.0 - 1e-14)
+    tau = float(np.clip(-np.dot(station_scaled, segment) / denom, 0.0, 1.0))
+    closest = station_scaled + tau * segment
+    return bool(np.dot(closest, closest) >= 1.0 - 1e-14)
+
 
 
 def evaluate_ground_station_access(
@@ -122,7 +130,7 @@ def evaluate_ground_station_access(
                     enu = enu_rot @ rho_ecef
                     elevation_deg[k] = float(np.rad2deg(np.arcsin(np.clip(enu[2] / rng, -1.0, 1.0))))
 
-                los_ok[k] = bool(_line_of_sight_from_ground(station_eci, target_eci))
+                los_ok[k] = bool(_line_of_sight_from_ground(station_ecef, target_ecef))
                 if not los_ok[k]:
                     reason[k] = "line_of_sight"
                     continue
@@ -360,12 +368,36 @@ def ground_station_measurements_to_observation_packet(
         jd = row.get("jd_utc")
         if jd is None and jd_utc_start is not None:
             jd = float(jd_utc_start) + t / 86400.0
+        row_frame_ctx = frame_ctx
+        if frame_context is None and jd_utc_start is None and jd is not None:
+            # Measurement rows carry an absolute sample epoch.  Recover the
+            # run start before applying the row's relative time so the ECI
+            # conversion does not silently discard the absolute epoch or add
+            # the row time twice.
+            row_start_jd = float(jd) - t / 86400.0
+            row_frame_ctx = frame_context_from_mapping(
+                {},
+                jd_utc_start=row_start_jd,
+                source="ground_station_observation_packet",
+            )
         az = np.deg2rad(float(row["azimuth_deg"]))
         el = np.deg2rad(float(row["elevation_deg"]))
         rng = float(row["range_km"])
         enu = rng * np.array([np.cos(el) * np.sin(az), np.cos(el) * np.cos(az), np.sin(el)], dtype=float)
         target_ecef = station_ecef + enu_to_ecef @ enu
-        target_eci = transform_position(target_ecef, "ecef", "eci", t_s=t, context=frame_ctx)
+        row_frame_ctx = frame_ctx
+        if frame_context is None and jd_utc_start is None and jd is not None:
+            # Measurement rows carry an absolute sample epoch. Recover the
+            # run start before applying the row's relative time so the ECI
+            # conversion does not silently discard the absolute epoch or add
+            # the row time twice.
+            row_start_jd = float(jd) - t / 86400.0
+            row_frame_ctx = frame_context_from_mapping(
+                {},
+                jd_utc_start=row_start_jd,
+                source="ground_station_observation_packet",
+            )
+        target_eci = transform_position(target_ecef, "ecef", "eci", t_s=t, context=row_frame_ctx)
         sigma = _position_sigma_from_measurement(row)
         obs: dict[str, Any] = {
             "time_s": t,
@@ -445,7 +477,7 @@ def _ground_measurement_geometry(
         "range_rate_km_s": range_rate,
         "azimuth_deg": azimuth_deg,
         "elevation_deg": elevation_deg,
-        "line_of_sight": _line_of_sight_from_ground(station_eci, target_eci),
+        "line_of_sight": _line_of_sight_from_ground(station_ecef_km, target_ecef),
         "min_elevation_deg": float(station.min_elevation_deg),
     }
 

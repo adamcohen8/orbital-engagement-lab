@@ -7,6 +7,7 @@ import numpy as np
 
 from sim.core.interfaces import Actuator
 from sim.core.models import Command
+from sim.numeric_backend import normalize_numeric_backend
 from sim.utils.quaternion import quaternion_to_dcm_bn
 
 
@@ -109,6 +110,7 @@ class RcsClusterLimits:
     duty_cycle: float = 1.0
     force_weight: float = 1.0
     torque_weight: float = 1.0
+    numeric_backend: str = "rust"
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,7 @@ class OrbitalActuator(Actuator):
     _last_accel: np.ndarray = field(default_factory=lambda: np.zeros(3))
     _last_electric_accel: np.ndarray = field(default_factory=lambda: np.zeros(3))
     _gimbal_direction_body: np.ndarray | None = None
+    _rcs_staging_cache: tuple | None = field(default=None, init=False, repr=False)
 
     def apply(self, command: Command, limits: dict, dt_s: float) -> Command:
         lim: OrbitalActuatorLimits = limits["orbital"]
@@ -342,39 +345,63 @@ class OrbitalActuator(Actuator):
             target = np.hstack((desired_force_body_n, desired_torque_body_nm))
             rows = slice(0, 6)
 
-        force_dirs = []
-        torque_dirs = []
-        max_forces = []
-        min_impulses = []
-        isps = []
-        names = []
-        for thruster in thrusters:
-            force_dir = _unit(np.array(thruster.force_direction_body, dtype=float).reshape(3))
-            pos = np.array(thruster.position_body_m, dtype=float).reshape(3)
-            force_dirs.append(force_dir)
-            torque_dirs.append(np.cross(pos, force_dir))
-            max_forces.append(float(max(thruster.max_thrust_n, 0.0)))
-            min_impulses.append(float(max(thruster.min_impulse_bit_n_s, 0.0)))
-            isps.append(float(thruster.isp_s))
-            names.append(str(thruster.name))
-        allocation = np.vstack((np.column_stack(force_dirs), np.column_stack(torque_dirs)))[rows, :]
-        solve_allocation = np.asarray(allocation, dtype=float)
-        solve_target = np.array(target, dtype=float).reshape(-1)
-        if cluster.allocation_mode == "force_torque":
-            force_scale = max(float(np.sum(max_forces)), 1e-12)
-            torque_capacity = sum(
-                max_force * float(np.linalg.norm(torque_axis))
-                for max_force, torque_axis in zip(max_forces, torque_dirs, strict=True)
-            )
-            torque_scale = max(float(torque_capacity), 1e-12)
-            row_scale = np.hstack(
-                (
-                    np.full(3, float(max(cluster.force_weight, 0.0)) / force_scale),
-                    np.full(3, float(max(cluster.torque_weight, 0.0)) / torque_scale),
+        # Frozen device records may contain mutable arrays. Bind staging to
+        # their contents so edits still affect the very next command.
+        signature = (
+            cluster.allocation_mode, float(cluster.force_weight), float(cluster.torque_weight),
+            tuple((np.asarray(item.force_direction_body, dtype=float).tobytes(),
+                   np.asarray(item.position_body_m, dtype=float).tobytes(),
+                   float(item.max_thrust_n), float(item.min_impulse_bit_n_s),
+                   float(item.isp_s), str(item.name)) for item in thrusters),
+        )
+        cached = self._rcs_staging_cache
+        if cached is None or cached[0] != signature:
+            force_dirs = []
+            torque_dirs = []
+            max_forces = []
+            min_impulses = []
+            isps = []
+            names = []
+            for thruster in thrusters:
+                force_dir = _unit(np.array(thruster.force_direction_body, dtype=float).reshape(3))
+                pos = np.array(thruster.position_body_m, dtype=float).reshape(3)
+                force_dirs.append(force_dir)
+                torque_dirs.append(np.cross(pos, force_dir))
+                max_forces.append(float(max(thruster.max_thrust_n, 0.0)))
+                min_impulses.append(float(max(thruster.min_impulse_bit_n_s, 0.0)))
+                isps.append(float(thruster.isp_s))
+                names.append(str(thruster.name))
+            allocation = np.vstack((np.column_stack(force_dirs), np.column_stack(torque_dirs)))[rows, :]
+            solve_allocation = np.asarray(allocation, dtype=float)
+            row_scale = None
+            if cluster.allocation_mode == "force_torque":
+                force_scale = max(float(np.sum(max_forces)), 1e-12)
+                torque_capacity = sum(
+                    max_force * float(np.linalg.norm(torque_axis))
+                    for max_force, torque_axis in zip(max_forces, torque_dirs, strict=True)
                 )
-            )
-            solve_allocation = solve_allocation * row_scale[:, None]
+                torque_scale = max(float(torque_capacity), 1e-12)
+                row_scale = np.hstack(
+                    (
+                        np.full(3, float(max(cluster.force_weight, 0.0)) / force_scale),
+                        np.full(3, float(max(cluster.torque_weight, 0.0)) / torque_scale),
+                    )
+                )
+                solve_allocation = solve_allocation * row_scale[:, None]
+            force_matrix = np.array(force_dirs, dtype=float).T
+            torque_matrix = np.array(torque_dirs, dtype=float).T
+            cached = (signature, solve_allocation, row_scale, force_matrix, torque_matrix,
+                      max_forces, min_impulses, isps, names)
+            self._rcs_staging_cache = cached
+        _, solve_allocation, row_scale, force_matrix, torque_matrix, max_forces, min_impulses, isps, names = cached
+        solve_target = np.array(target, dtype=float).reshape(-1)
+        if row_scale is not None:
             solve_target = solve_target * row_scale
+        backend = normalize_numeric_backend(cluster.numeric_backend, error_message="RCS numeric_backend must be python or rust")
+        # Preserve SciPy's trust-region reflective solve and its diagnostics.
+        # A greedy active-set approximation changes redundant and rank-deficient
+        # RCS allocations, so this path intentionally remains Python even when
+        # the requested numeric backend is Rust.
         forces = _bounded_nonnegative_lstsq(solve_allocation, solve_target, np.array(max_forces))
         duty = float(np.clip(cluster.duty_cycle, 0.0, 1.0))
         forces *= duty
@@ -386,19 +413,31 @@ class OrbitalActuator(Actuator):
             for idx, min_impulse in enumerate(min_impulses):
                 if 0.0 < forces[idx] * dt_s < min_impulse:
                     forces[idx] = 0.0
-        force_body_n = np.sum(np.array(force_dirs).T * forces.reshape(1, -1), axis=1)
-        rcs_torque_body_nm = np.sum(np.array(torque_dirs).T * forces.reshape(1, -1), axis=1)
+        if backend == "rust":
+            # SciPy's bounded TRF solve, duty-cycle quantization, and minimum
+            # impulse policy remain authoritative.  Native matvecs cover the
+            # repeated achieved-force/torque products after that solve.
+            from sim.rust_control_backend import mat_vec
+
+            force_body_n = mat_vec(force_matrix, forces)
+            rcs_torque_body_nm = mat_vec(torque_matrix, forces)
+        else:
+            force_body_n = np.sum(force_matrix * forces.reshape(1, -1), axis=1)
+            rcs_torque_body_nm = np.sum(torque_matrix * forces.reshape(1, -1), axis=1)
         torque_body_nm = rcs_torque_body_nm
-        force_eci_n = c_bn.T @ force_body_n
+        if backend == "rust":
+            force_eci_n = mat_vec(c_bn.T, force_body_n)
+        else:
+            force_eci_n = c_bn.T @ force_body_n
         accel_eci_km_s2 = force_eci_n / current_mass_kg / 1e3
         g0_m_s2 = 9.80665
         mdot = 0.0
         for force_n, isp_s in zip(forces, isps):
             if force_n > 0.0 and isp_s > 0.0:
                 mdot += float(force_n / (isp_s * g0_m_s2))
-        mode_flags["rcs_thruster_names"] = names
+        mode_flags["rcs_thruster_names"] = list(names)
         mode_flags["rcs_thruster_forces_n"] = forces.tolist()
-        mode_flags["rcs_thruster_max_forces_n"] = max_forces
+        mode_flags["rcs_thruster_max_forces_n"] = list(max_forces)
         mode_flags["rcs_allocation_saturated"] = bool(
             any(
                 max_force > 0.0 and force >= max_force * duty - 1.0e-12
@@ -412,6 +451,9 @@ class OrbitalActuator(Actuator):
         mode_flags["rcs_torque_body_nm"] = rcs_torque_body_nm.tolist()
         mode_flags["rcs_force_residual_n"] = (desired_force_body_n - force_body_n).tolist()
         mode_flags["rcs_torque_residual_nm"] = (desired_torque_body_nm - rcs_torque_body_nm).tolist()
+        if backend == "rust":
+            mode_flags["rcs_numeric_backend"] = backend
+            mode_flags["rcs_numeric_path"] = "python_reference_trf_rust_matvec"
         mode_flags["delta_mass_kg"] = float(mdot * max(dt_s, 0.0))
         return Command(thrust_eci_km_s2=accel_eci_km_s2, torque_body_nm=torque_body_nm, mode_flags=mode_flags)
 

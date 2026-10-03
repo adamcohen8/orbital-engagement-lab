@@ -1,6 +1,6 @@
 # OEL Agent Evaluation Packet
 This packet helps a user evaluate whether an AI coding agent can use Orbital
-Engagement Lab responsibly. The target behavior is simple:
+Engineering Lab responsibly. The target behavior is simple:
 
 ```text
 request -> route -> scenario YAML or typed orbital-analysis problem -> validate

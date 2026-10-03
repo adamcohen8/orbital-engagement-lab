@@ -214,8 +214,8 @@ def _parse_tle_compact_exponential(text: str) -> float:
 
 
 def parse_tle_lines(line1: str, line2: str, *, require_checksum: bool = False) -> TLEElements:
-    l1 = str(line1 or "").rstrip("\n")
-    l2 = str(line2 or "").rstrip("\n")
+    l1 = str(line1 or "").rstrip("\r\n")
+    l2 = str(line2 or "").rstrip("\r\n")
     if not l1.startswith("1 ") or not l2.startswith("2 "):
         raise ValueError("TLE line1 must start with '1 ' and line2 must start with '2 '.")
     if len(l1) != 69 or len(l2) != 69:
@@ -377,6 +377,7 @@ def tle_to_rv_eci_ogp(
     *,
     target_jd_utc: float | None = None,
     frame_transform: str = "teme_to_eci_iau80",
+    numeric_backend: str = "rust",
 ) -> tuple[np.ndarray, np.ndarray]:
     transform = str(frame_transform or "teme_to_eci_iau80").strip().lower()
     if transform not in {"teme_as_eci", "teme_to_eci_iau80"}:
@@ -389,7 +390,7 @@ def tle_to_rv_eci_ogp(
     from sim.dynamics.orbit.ogp import ogp_propagate_teme
     from sim.dynamics.orbit.sgp4 import transform_teme_to_output_frame
 
-    state = ogp_propagate_teme(elements, tsince_min)
+    state = ogp_propagate_teme(elements, tsince_min, backend=numeric_backend)
     if state.error:
         raise ValueError(state.error)
     return transform_teme_to_output_frame(
@@ -402,7 +403,7 @@ def tle_to_rv_eci_ogp(
 
 
 def tle_block_to_rv_eci(
-    tle_block: dict[str, Any], *, target_jd_utc: float | None = None
+    tle_block: dict[str, Any], *, target_jd_utc: float | None = None, numeric_backend: str = "rust"
 ) -> tuple[np.ndarray, np.ndarray]:
     block = dict(tle_block or {})
     line1, line2 = _tle_lines_from_block(block)
@@ -418,6 +419,7 @@ def tle_block_to_rv_eci(
         frame_transform=str(
             block.get("initialization_frame_transform", "teme_to_eci_iau80") or "teme_to_eci_iau80"
         ),
+        numeric_backend=numeric_backend,
     )
 
 

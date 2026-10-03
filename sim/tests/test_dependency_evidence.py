@@ -24,7 +24,7 @@ def _pip_report(path: Path) -> Path:
                     },
                     {
                         "download_info": {"url": "file:///Users/example/Orbital%20Engagement%20Lab"},
-                        "metadata": {"name": "orbital-engagement-lab", "version": "0.22.2"},
+                        "metadata": {"name": "orbital-engineering-lab", "version": "0.22.2"},
                         "requested": True,
                     },
                 ],
@@ -64,7 +64,7 @@ def test_dependency_evidence_redacts_local_source_url_and_writes_json(tmp_path: 
     )
 
     saved = json.loads(output.read_text(encoding="utf-8"))
-    project = next(item for item in saved["packages"] if item["name"] == "orbital-engagement-lab")
+    project = next(item for item in saved["packages"] if item["name"] == "orbital-engineering-lab")
     assert project["source_url"] == "<local-source>"
 
 

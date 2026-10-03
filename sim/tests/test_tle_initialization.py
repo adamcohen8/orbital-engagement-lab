@@ -74,7 +74,7 @@ def test_general_provider_records_and_warns_on_tle_age_threshold() -> None:
             start_jd_utc=elements.epoch_jd_utc + 5.0,
             duration_s=86400.0,
             max_tle_age_days_warning=1.0,
-        )
+         numeric_backend="python")
 
     metadata = provider.metadata()
     assert metadata.tle_age_warning is True
@@ -110,6 +110,12 @@ def test_tle_parser_converts_mean_elements_to_eci_state() -> None:
     assert elements.revolution_number == 100
     assert np.linalg.norm(pos) > 6500.0
     assert 7.0 < np.linalg.norm(vel) < 8.0
+
+
+def test_tle_parser_accepts_crlf_terminated_standard_lines() -> None:
+    elements = parse_tle_lines(ISS_LINE1 + "\r\n", ISS_LINE2 + "\r\n", require_checksum=True)
+
+    assert elements.norad_number == "25544"
 
 
 def test_ogp_sgp4_exact_retrograde_equatorial_inclination_initializes() -> None:
@@ -195,11 +201,11 @@ def test_ogp_dispatches_near_earth_and_deep_space_regimes() -> None:
 
     assert ogp_regime_for_elements(near_earth) == "sgp4"
     assert ogp_propagator_name_for_elements(near_earth) == "OGP-SGP4"
-    assert ogp_propagate_teme(near_earth, 0.0).error is None
+    assert ogp_propagate_teme(near_earth, 0.0, backend="python").error is None
 
     assert ogp_regime_for_elements(deep_space) == "sdp4"
     assert ogp_propagator_name_for_elements(deep_space) == "OGP-SDP4"
-    deep_state = ogp_propagate_teme(deep_space, 0.0)
+    deep_state = ogp_propagate_teme(deep_space, 0.0, backend="python")
     assert deep_state.error is None
     assert np.linalg.norm(deep_state.position_teme_km) > 10000.0
 
@@ -221,10 +227,10 @@ def test_ogp_boundary_dispatch_uses_corrected_unkozai_period() -> None:
 
     assert sgp4_orbital_period_min(corrected_near) < 225.0
     assert ogp_regime_for_elements(corrected_near) == "sgp4"
-    assert ogp_propagate_teme(corrected_near, 0.0).error is None
+    assert ogp_propagate_teme(corrected_near, 0.0, backend="python").error is None
     assert sgp4_orbital_period_min(corrected_deep) >= 225.0
     assert ogp_regime_for_elements(corrected_deep) == "sdp4"
-    assert ogp_propagate_teme(corrected_deep, 0.0).error is None
+    assert ogp_propagate_teme(corrected_deep, 0.0, backend="python").error is None
 
     accelerated = sgp4_propagate_teme_batch_numba([corrected_near], [0.0])
     assert accelerated.errors[0, 0] == ""
@@ -244,8 +250,8 @@ def test_ogp_batch_reference_supports_mixed_sgp4_sdp4_regimes() -> None:
     assert np.all(batch.success)
     np.testing.assert_allclose(batch.tsince_min[0], offsets_min)
     np.testing.assert_allclose(batch.tsince_min[1], offsets_min)
-    near_scalar = ogp_propagate_teme(near_earth, 60.0)
-    deep_scalar = ogp_propagate_teme(deep_space, 60.0)
+    near_scalar = ogp_propagate_teme(near_earth, 60.0, backend="python")
+    deep_scalar = ogp_propagate_teme(deep_space, 60.0, backend="python")
     np.testing.assert_allclose(batch.position_teme_km[0, 1], near_scalar.position_teme_km, rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(batch.position_teme_km[1, 1], deep_scalar.position_teme_km, rtol=0.0, atol=1e-12)
 
@@ -414,7 +420,7 @@ def test_sgp4_provider_dispatches_deep_space_tle_to_ogp_sdp4() -> None:
         start_jd_utc=elements.epoch_jd_utc,
         duration_s=7200.0,
         output_frame="teme",
-    )
+     numeric_backend="python")
     metadata = provider.metadata()
 
     assert metadata.propagator_family == "OGP"
@@ -435,7 +441,7 @@ def test_sgp4_provider_compiled_backend_stays_within_rounding_bound() -> None:
         duration_s=86400.0,
         output_frame="teme",
         acceleration_mode="numba",
-    )
+     numeric_backend="python")
 
     for t_s in (0.0, 120.0, 3600.0, 43200.0, 86400.0):
         accelerated = provider.configured_state_at(t_s)
@@ -470,7 +476,7 @@ def test_sgp4_provider_compiled_backend_falls_back_to_scalar(monkeypatch) -> Non
         duration_s=120.0,
         output_frame="teme",
         acceleration_mode="numba",
-    )
+     numeric_backend="python")
 
     def fail_backend(*_args, **_kwargs):
         raise RuntimeError("compiled backend unavailable")
@@ -507,7 +513,7 @@ def test_sdp4_provider_initializes_one_context_and_preserves_scalar_outputs(monk
         start_jd_utc=elements.epoch_jd_utc,
         duration_s=86400.0,
         output_frame="teme",
-    )
+     numeric_backend="python")
 
     for t_s in (86400.0, 0.0, 3600.0, 43200.0):
         contextual = provider.configured_state_at(t_s)
@@ -592,7 +598,7 @@ def test_general_sgp4_object_samples_truth_history() -> None:
         mass_kg=420.0,
         start_jd_utc=elements.epoch_jd_utc,
         duration_s=1.0,
-    ).canonical_state_at(0.0)
+     numeric_backend="rust").canonical_state_at(0.0)
 
     np.testing.assert_allclose(truth0[0:3], expected0.position_eci_km, rtol=0.0, atol=1e-9)
     np.testing.assert_allclose(truth0[3:6], expected0.velocity_eci_km_s, rtol=0.0, atol=1e-12)
@@ -608,7 +614,7 @@ def test_sgp4_provider_uses_stable_relative_time_arithmetic() -> None:
         mass_kg=420.0,
         start_jd_utc=elements.epoch_jd_utc,
         duration_s=7200.0,
-    )
+     numeric_backend="python")
     state = provider.configured_state_at(120.0)
     direct = sgp4_propagate_teme(elements, 2.0)
 
@@ -625,7 +631,7 @@ def test_sgp4_provider_supports_explicit_native_teme_output() -> None:
         start_jd_utc=elements.epoch_jd_utc,
         duration_s=7200.0,
         output_frame="teme",
-    )
+     numeric_backend="python")
     state = provider.configured_state_at(120.0)
     direct = sgp4_propagate_teme(elements, 2.0)
     metadata = provider.metadata()
@@ -647,7 +653,7 @@ def test_sgp4_provider_state_at_preserves_legacy_state_truth_contract() -> None:
         start_jd_utc=elements.epoch_jd_utc,
         duration_s=7200.0,
         output_frame="teme",
-    )
+     numeric_backend="python")
     direct = sgp4_propagate_teme(elements, 2.0)
 
     with pytest.warns(DeprecationWarning, match="configured_state_at"):
@@ -686,7 +692,7 @@ def test_sgp4_provider_supports_vallado_iau80_eci_output() -> None:
         duration_s=7200.0,
         output_frame="eci",
         frame_transform="teme_to_eci_iau80",
-    )
+     numeric_backend="python")
     truth = provider.state_at(120.0)
     direct = sgp4_propagate_teme(elements, 2.0)
     metadata = provider.metadata()

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from copy import copy
+from dataclasses import dataclass, field, fields, replace
 from multiprocessing.context import BaseContext
 from time import monotonic
 from traceback import format_exc
@@ -94,6 +95,7 @@ class ObjectStepResult:
     belief_covariance: np.ndarray | None = None
     belief_last_update_t_s: float | None = None
     attitude_guardrail_count_deltas: dict[str, int] = field(default_factory=dict)
+    flight_software_evidence_offsets: dict[str, int] | None = None
 
 
 class ObjectStepExecutor(Protocol):
@@ -249,6 +251,8 @@ class ProcessPoolObjectStepExecutor:
                 f"Persistent object-worker transport failed: {type(exc).__name__}: {exc}"
             ) from exc
         indexed.sort(key=lambda row: row[0])
+        for _index, result in indexed:
+            _restore_flight_software_evidence(self.engine, result)
         return [result for _index, result in indexed]
 
     def sync_after_step(
@@ -374,6 +378,7 @@ def _run_object_step_worker(engine: _SingleRunEngine, message: ObjectStepMessage
     }
     belief = agent.belief
     updated_agent = replace(agent, knowledge_base=None)
+    evidence_offsets = _compact_flight_software_evidence(engine, updated_agent)
     return replace(
         result,
         updated_agent=updated_agent,
@@ -396,4 +401,55 @@ def _run_object_step_worker(engine: _SingleRunEngine, message: ObjectStepMessage
         belief_covariance=(None if belief is None else np.array(belief.covariance, dtype=float)),
         belief_last_update_t_s=(None if belief is None else float(belief.last_update_t_s)),
         attitude_guardrail_count_deltas=guardrail_count_deltas,
+        flight_software_evidence_offsets=evidence_offsets,
     )
+
+
+def _compact_flight_software_evidence(
+    engine: _SingleRunEngine, updated_agent: AgentRuntime,
+) -> dict[str, int] | None:
+    """Send append-only boundary evidence once while retaining full worker state.
+
+    Returning the complete runtime after every sample used to serialize all
+    past typed packets repeatedly. Only the reporting evidence lists are
+    compacted; stack state, inputs, hardware and scheduler remain ordinary
+    per-step runtime snapshots.
+    """
+    from sim.runtime.satellites.flight_software_runtime import SatelliteFlightSoftwareRuntime
+
+    runtime = updated_agent.flight_software_runtime
+    if type(runtime) is not SatelliteFlightSoftwareRuntime:
+        # Custom adapters may change historical evidence rather than append it.
+        return None
+    offsets = getattr(engine, "_object_worker_evidence_offsets", {})
+    evidence = runtime.evidence
+    names = tuple(item.name for item in fields(evidence))
+    compact = replace(evidence, **{
+        name: getattr(evidence, name)[int(offsets.get(name, 0)):]
+        for name in names
+    })
+    previous = {name: int(offsets.get(name, 0)) for name in names}
+    engine._object_worker_evidence_offsets = {
+        name: len(getattr(evidence, name)) for name in names
+    }
+    updated_agent.flight_software_runtime = copy(runtime)
+    updated_agent.flight_software_runtime.evidence = compact
+    return previous
+
+
+def _restore_flight_software_evidence(engine: _SingleRunEngine, result: ObjectStepResult) -> None:
+    offsets = getattr(result, "flight_software_evidence_offsets", None)
+    if offsets is None or result.updated_agent is None:
+        return
+    runtime = result.updated_agent.flight_software_runtime
+    previous_runtime = engine.agents[result.object_id].flight_software_runtime
+    for name, offset in offsets.items():
+        previous = getattr(previous_runtime.evidence, name)
+        if len(previous) < offset:
+            raise RuntimeError(f"Object worker evidence prefix is missing for {result.object_id!r}/{name}.")
+        # Parent-side boundary observation can append the next invocation.
+        # The next worker result is authoritative for that same boundary,
+        # matching the previous complete-runtime replacement semantics.
+        del previous[offset:]
+        previous.extend(getattr(runtime.evidence, name))
+        setattr(runtime.evidence, name, previous)

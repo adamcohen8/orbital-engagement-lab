@@ -276,17 +276,62 @@ class InspectionGateConfig:
             ok &= np.linalg.norm(rel[:, 3:6], axis=1) <= float(self.max_total_speed_km_s)
         return ok
 
-    def segment_satisfies_gate(self, start_relative_ric_state: np.ndarray, end_relative_ric_state: np.ndarray) -> bool:
+    def segment_gate_interval(
+        self,
+        start_relative_ric_state: np.ndarray,
+        end_relative_ric_state: np.ndarray,
+    ) -> tuple[float, float] | None:
+        """Return the segment interval inside the gate position box."""
+
         start = np.array(start_relative_ric_state, dtype=float).reshape(-1)
         end = np.array(end_relative_ric_state, dtype=float).reshape(-1)
         if start.size < 6 or end.size < 6:
             raise ValueError("relative_ric_state must contain RIC position and velocity.")
         center = np.array(self.center_ric_km, dtype=float).reshape(3)
         half_width = np.array(self.half_width_ric_km, dtype=float).reshape(3)
-        if not _position_segment_intersects_box(start[:3], end[:3], center=center, half_width=half_width):
+        if not (
+            np.all(np.isfinite(start[:3]))
+            and np.all(np.isfinite(end[:3]))
+            and np.all(np.isfinite(center))
+            and np.all(np.isfinite(half_width))
+            and np.all(half_width >= 0.0)
+        ):
+            return None
+        with np.errstate(over="ignore", invalid="ignore"):
+            lower = center - half_width
+            upper = center + half_width
+            delta = end[:3] - start[:3]
+        if not (
+            np.all(np.isfinite(lower))
+            and np.all(np.isfinite(upper))
+            and np.all(np.isfinite(delta))
+        ):
+            return None
+        entry = 0.0
+        exit = 1.0
+        for axis in range(3):
+            if abs(float(delta[axis])) <= 1.0e-12:
+                if start[axis] < lower[axis] or start[axis] > upper[axis]:
+                    return None
+                continue
+            t1 = float((lower[axis] - start[axis]) / delta[axis])
+            t2 = float((upper[axis] - start[axis]) / delta[axis])
+            entry = max(entry, min(t1, t2))
+            exit = min(exit, max(t1, t2))
+            if entry > exit:
+                return None
+        if exit < 0.0 or entry > 1.0:
+            return None
+        return max(entry, 0.0), min(exit, 1.0)
+
+    def segment_satisfies_gate(self, start_relative_ric_state: np.ndarray, end_relative_ric_state: np.ndarray) -> bool:
+        interval = self.segment_gate_interval(start_relative_ric_state, end_relative_ric_state)
+        if interval is None:
             return False
         if self.max_total_speed_km_s is None:
             return True
+        start = np.array(start_relative_ric_state, dtype=float).reshape(-1)
+        end = np.array(end_relative_ric_state, dtype=float).reshape(-1)
         endpoint_speed = max(float(np.linalg.norm(start[3:6])), float(np.linalg.norm(end[3:6])))
         return endpoint_speed <= float(self.max_total_speed_km_s)
 

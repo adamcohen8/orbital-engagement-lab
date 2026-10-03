@@ -369,6 +369,116 @@ def apply_oel_style_to_figure(fig: Any, *, style_name: str | None = None) -> Non
             text.set_color(palette["text"])
 
 
+@contextmanager
+def _cache_builtin_text_layouts(fig: Any) -> Iterator[None]:
+    """Reuse identical built-in text layouts within one Agg render only."""
+    if not hasattr(fig, "axes"):
+        yield
+        return
+    from matplotlib.axis import Axis, XAxis, YAxis
+    from matplotlib.backends.backend_agg import RendererAgg
+    from matplotlib.text import Text
+
+    patched = []
+    tick_factories = []
+    missing = object()
+
+    def patch_text(artist):
+        if type(artist) is not Text or artist.get_wrap():
+            return
+        previous = artist.__dict__.get("_get_layout", missing)
+        if previous is not missing:
+            return
+        original = artist._get_layout
+        if getattr(original, "__func__", None) is not Text._get_layout:
+            return
+        cache: dict[tuple[Any, ...], Any] = {}
+
+        def layout(renderer, *, text=artist, compute=original, values=cache):
+            if type(renderer) is not RendererAgg or text.get_wrap():
+                return compute(renderer)
+            props = text.get_fontproperties()
+            key = (
+                renderer, float(text.get_figure().dpi), text.get_text(),
+                tuple(props.get_family()), props.get_style(), props.get_variant(),
+                props.get_weight(), props.get_stretch(), props.get_size_in_points(),
+                props.get_file(), props.get_math_fontfamily(), text.get_usetex(),
+                text.get_parse_math(), text._linespacing, text._get_multialignment(),
+                text.get_rotation(), text.get_rotation_mode(),
+                text.get_horizontalalignment(), text.get_verticalalignment(),
+            )
+            result = values.get(key)
+            if result is None:
+                result = compute(renderer)
+                if len(values) >= 16:
+                    values.clear()
+                values[key] = result
+            return result
+
+        artist._get_layout = layout
+        patched.append((artist, previous))
+
+    # findobj traverses Axis.get_children(), which eagerly constructs ticks.
+    # Visit existing labels and hook ordinary built-in tick creation instead.
+    # Unrecognized nested/custom artists retain their ordinary text method.
+    try:
+        for artist in getattr(fig, "texts", ()):
+            patch_text(artist)
+        axes = list(getattr(fig, "axes", ()))
+        legends = list(getattr(fig, "legends", ()))
+        for ax in axes:
+            axes.extend(getattr(ax, "child_axes", ()))
+            for artist in (*getattr(ax, "texts", ()), getattr(ax, "title", None),
+                           getattr(ax, "_left_title", None), getattr(ax, "_right_title", None)):
+                patch_text(artist)
+            legend = ax.get_legend()
+            if legend is not None:
+                legends.append(legend)
+            for name in ("xaxis", "yaxis", "zaxis"):
+                axis = getattr(ax, name, None)
+                if axis is None:
+                    continue
+                patch_text(axis.label)
+                patch_text(axis.offsetText)
+                for ticks in (axis.__dict__.get("majorTicks", ()), axis.__dict__.get("minorTicks", ())):
+                    for tick in ticks:
+                        patch_text(tick.label1)
+                        patch_text(tick.label2)
+                factory = axis._get_tick
+                if type(axis) not in (XAxis, YAxis) or (
+                    getattr(factory, "__func__", None) is not Axis._get_tick
+                    or "_get_tick" in axis.__dict__
+                ):
+                    continue
+
+                def make_tick(*args, create=factory, **kwargs):
+                    tick = create(*args, **kwargs)
+                    patch_text(tick.label1)
+                    patch_text(tick.label2)
+                    return tick
+
+                axis._get_tick = make_tick
+                tick_factories.append(axis)
+        for legend in legends:
+            for artist in (*legend.get_texts(), legend.get_title()):
+                patch_text(artist)
+        yield
+    finally:
+        for axis in tick_factories:
+            axis.__dict__.pop("_get_tick", None)
+        for artist, previous in patched:
+            if previous is missing:
+                artist.__dict__.pop("_get_layout", None)
+            else:
+                artist._get_layout = previous
+
+
+def tight_layout_oel_figure(fig: Any, *args: Any, **kwargs: Any) -> None:
+    """Run the same layout with bounded reuse of repeated built-in text metrics."""
+    with _cache_builtin_text_layouts(fig):
+        return fig.tight_layout(*args, **kwargs)
+
+
 def save_oel_figure(
     fig: Any,
     path: str | Path,
@@ -383,7 +493,37 @@ def save_oel_figure(
     p.parent.mkdir(parents=True, exist_ok=True)
     apply_oel_style_to_figure(fig, style_name=style_name)
     add_artifact_footer(fig, metadata=metadata, artifact_id=artifact_id)
-    fig.savefig(p, dpi=int(dpi), **savefig_kwargs)
+    if str(savefig_kwargs.get("format", p.suffix.lstrip("."))).lower() == "png":
+        # Compression is lossless at every level. Preserve the rendered pixels,
+        # DPI and metadata while avoiding the default level-six CPU cost.
+        pil_kwargs = dict(savefig_kwargs.get("pil_kwargs") or {})
+        pil_kwargs.setdefault("compress_level", 1)
+        savefig_kwargs["pil_kwargs"] = pil_kwargs
+    # tight_layout() leaves Matplotlib's no-op placeholder engine installed.
+    # print_figure treats any non-None engine as requiring a preliminary draw,
+    # even though this placeholder cannot change layout. Temporarily remove
+    # exactly that inert engine; active/custom engines still own their draws.
+    import matplotlib
+    try:
+        from matplotlib.layout_engine import PlaceHolderLayoutEngine
+    except ImportError:
+        PlaceHolderLayoutEngine = None
+
+    get_layout_engine = getattr(fig, "get_layout_engine", None)
+    layout = get_layout_engine() if callable(get_layout_engine) else None
+    remove_placeholder = (
+        PlaceHolderLayoutEngine is not None and type(layout) is PlaceHolderLayoutEngine
+        and not matplotlib.rcParams["figure.autolayout"]
+        and not matplotlib.rcParams["figure.constrained_layout.use"]
+    )
+    if remove_placeholder:
+        fig.set_layout_engine(None)
+    try:
+        with _cache_builtin_text_layouts(fig):
+            fig.savefig(p, dpi=int(dpi), **savefig_kwargs)
+    finally:
+        if remove_placeholder:
+            fig.set_layout_engine(layout)
 
 
 def prepare_oel_animation_figure(

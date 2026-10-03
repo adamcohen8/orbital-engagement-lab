@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -63,6 +64,8 @@ class TaskOpportunity:
             object.__setattr__(self, field_name, value)
         if self.end_s <= self.start_s:
             raise ValueError("Opportunity end_s must be greater than start_s.")
+        if not math.isfinite(self.end_s - self.start_s):
+            raise ValueError("Opportunity duration must be finite.")
         if self.objective_value < 0.0:
             raise ValueError("objective_value must be nonnegative.")
         if self.energy_cost_wh < 0.0:
@@ -111,6 +114,8 @@ class TaskingConstraints:
             object.__setattr__(self, field_name, value)
         if self.horizon_end_s <= self.horizon_start_s:
             raise ValueError("Tasking horizon end must be after its start.")
+        if not math.isfinite(self.horizon_end_s - self.horizon_start_s):
+            raise ValueError("Tasking horizon duration must be finite.")
         if self.settling_time_s < 0.0:
             raise ValueError("settling_time_s must be nonnegative.")
         if not 0.0 <= self.maximum_payload_duty_cycle <= 1.0:
@@ -218,11 +223,27 @@ def _input_hash(config: CoverageTaskingConfig, opportunities: tuple[TaskOpportun
     ).hexdigest()
 
 
+def _finite_aggregate(values: Iterable[float], field_name: str) -> float:
+    try:
+        result = math.fsum(values)
+    except OverflowError as exc:
+        raise ValueError(f"{field_name} must have a finite aggregate.") from exc
+    if not math.isfinite(result):
+        raise ValueError(f"{field_name} must have a finite aggregate.")
+    return result
+
+
 def optimize_coverage_tasking(
     config: CoverageTaskingConfig,
     opportunities: Iterable[TaskOpportunity],
+    *,
+    numeric_backend: str = "rust",
 ) -> CoverageTaskingResult:
-    """Exactly maximize a bounded opportunity set under declared resources."""
+    """Exactly maximize a bounded opportunity set under declared resources.
+
+    ``numeric_backend="rust"`` selects the optional native search while Python
+    retains opportunity validation and the schedule/evidence contract.
+    """
 
     supplied = tuple(opportunities)
     if any(not isinstance(value, TaskOpportunity) for value in supplied):
@@ -254,11 +275,22 @@ def optimize_coverage_tasking(
         value.pointing_unit_eci is None for value in candidates
     ):
         raise ValueError("Slew-constrained tasking requires pointing vectors for every opportunity.")
+    if numeric_backend not in {"python", "rust"}:
+        raise ValueError("numeric_backend must be 'python' or 'rust'.")
 
+    # Objectives are nonnegative, so a finite sum over the complete candidate
+    # set bounds every suffix and every selectable subset. Validate it before
+    # either backend runs or any result/evidence is assembled.
+    _finite_aggregate(
+        (candidate.objective_value for candidate in candidates),
+        "Task objective values",
+    )
     suffix_value = np.zeros(len(candidates) + 1)
     for index in range(len(candidates) - 1, -1, -1):
         suffix_value[index] = suffix_value[index + 1] + candidates[index].objective_value
     horizon_duration = config.constraints.horizon_end_s - config.constraints.horizon_start_s
+    if not math.isfinite(horizon_duration):
+        raise ValueError("Tasking horizon duration must be finite.")
     best_value = -1.0
     best_selection: tuple[int, ...] = ()
     evaluated = 0
@@ -325,24 +357,57 @@ def optimize_coverage_tasking(
             next_observation_duration,
         )
 
-    visit(
-        0,
-        (),
-        0.0,
-        config.constraints.initial_storage_bytes,
-        0.0,
-        0.0,
-    )
+    native_result = None
+    if numeric_backend == "rust":
+        from sim.rust_coverage_backend import try_tasking_exact_search
+
+        rows = [
+            number
+            for candidate in candidates
+            for number in (
+                candidate.start_s, candidate.end_s, candidate.objective_value,
+                candidate.storage_delta_bytes, candidate.energy_cost_wh,
+                candidate.end_s - candidate.start_s if candidate.kind == "observation" else 0.0,
+            )
+        ]
+        transitions = [
+            _transition_required_s(previous, candidate, config.constraints)
+            for previous in candidates for candidate in candidates
+        ]
+        native_result = try_tasking_exact_search(
+            ids, rows, suffix_value, transitions,
+            config.constraints.initial_storage_bytes,
+            config.constraints.storage_capacity_bytes,
+            config.constraints.energy_budget_wh,
+            config.constraints.maximum_payload_duty_cycle,
+            horizon_duration,
+        )
+    if native_result is None:
+        visit(
+            0,
+            (),
+            0.0,
+            config.constraints.initial_storage_bytes,
+            0.0,
+            0.0,
+        )
+    else:
+        best_selection, best_value, evaluated = native_result
+    if not math.isfinite(best_value):
+        raise ValueError("Selected task objective must have a finite aggregate.")
     selected = tuple(candidates[index] for index in best_selection)
     scheduled: list[ScheduledTask] = []
     storage = config.constraints.initial_storage_bytes
     energy = 0.0
     observation_duration = 0.0
     for sequence, candidate in enumerate(selected):
+        duration = candidate.end_s - candidate.start_s
         storage += candidate.storage_delta_bytes
         energy += candidate.energy_cost_wh
         if candidate.kind == "observation":
-            observation_duration += candidate.end_s - candidate.start_s
+            observation_duration += duration
+        if not all(math.isfinite(value) for value in (duration, storage, energy, observation_duration)):
+            raise ValueError("Selected task resource and duration aggregates must be finite.")
         scheduled.append(
             ScheduledTask(
                 sequence=sequence,
@@ -351,7 +416,7 @@ def optimize_coverage_tasking(
                 kind=candidate.kind,
                 start_s=candidate.start_s,
                 end_s=candidate.end_s,
-                duration_s=candidate.end_s - candidate.start_s,
+                duration_s=duration,
                 objective_value=candidate.objective_value,
                 storage_after_bytes=storage,
                 cumulative_energy_wh=energy,
@@ -375,9 +440,12 @@ def optimize_coverage_tasking(
             },
             sort_keys=True,
             separators=(",", ":"),
+            allow_nan=False,
         ).encode()
     ).hexdigest()
     duty = observation_duration / horizon_duration
+    if not math.isfinite(duty):
+        raise ValueError("Selected payload duty cycle must be finite.")
     summary = {
         "contract_version": COVERAGE_TASKING_CONTRACT_VERSION,
         "analysis_id": config.analysis_id,

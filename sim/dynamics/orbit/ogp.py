@@ -28,9 +28,19 @@ def ogp_propagator_name_for_elements(elements: TLEElements) -> str:
     return "OGP-SDP4" if regime == "sdp4" else "OGP-SGP4"
 
 
-def ogp_propagate_teme(elements: TLEElements, tsince_min: float) -> SGP4State:
+def ogp_propagate_teme(elements: TLEElements, tsince_min: float, *, backend: str = "rust") -> SGP4State:
     """Dispatch OGP propagation to the supported near/deep-space regime path."""
 
+    if backend == "rust":
+        from sim.rust_ogp_backend import RustOGPContext
+
+        try:
+            position, velocity = RustOGPContext(elements).propagate(tsince_min)
+        except (RuntimeError, ValueError) as exc:
+            return SGP4State(np.zeros(3), np.zeros(3), str(exc))
+        return SGP4State(position, velocity)
+    if backend != "python":
+        raise ValueError("OGP backend must be python or rust.")
     if ogp_regime_for_elements(elements) == "sdp4":
         return sdp4_propagate_teme(elements, tsince_min)
     return sgp4_propagate_teme(elements, tsince_min)
@@ -86,6 +96,8 @@ def ogp_propagate_teme_batch_reference(
 def ogp_propagate_teme_batch_accelerated(
     elements: list[TLEElements] | tuple[TLEElements, ...],
     tsince_min: np.ndarray | list[float] | tuple[float, ...],
+    *,
+    backend: str = "auto",
 ) -> SGP4BatchResult:
     """Propagate a mixed OGP batch with safe available acceleration.
 
@@ -95,6 +107,10 @@ def ogp_propagate_teme_batch_accelerated(
     branch while still removing repeated SDP4 setup from batch workloads.
     """
 
+    if backend == "rust":
+        return ogp_propagate_teme_batch_rust(elements, tsince_min)
+    if backend != "auto":
+        raise ValueError("Accelerated OGP backend must be auto or rust.")
     element_list = list(elements)
     object_count = len(element_list)
     if object_count <= 0:
@@ -106,7 +122,8 @@ def ogp_propagate_teme_batch_accelerated(
     errors = np.full((object_count, sample_count), "", dtype=object)
 
     sgp4_indices = [idx for idx, element in enumerate(element_list) if ogp_regime_for_elements(element) == "sgp4"]
-    sdp4_indices = [idx for idx in range(object_count) if idx not in set(sgp4_indices)]
+    sgp4_index_set = set(sgp4_indices)
+    sdp4_indices = [idx for idx in range(object_count) if idx not in sgp4_index_set]
 
     sgp4_backend = ""
     if sgp4_indices:
@@ -141,6 +158,28 @@ def ogp_propagate_teme_batch_accelerated(
         backend_parts.append("sdp4_context")
     return SGP4BatchResult(
         backend="+".join(backend_parts),
+        tsince_min=time_grid,
+        position_teme_km=positions,
+        velocity_teme_km_s=velocities,
+        errors=errors,
+    )
+
+
+def ogp_propagate_teme_batch_rust(
+    elements: list[TLEElements] | tuple[TLEElements, ...],
+    tsince_min: np.ndarray | list[float] | tuple[float, ...],
+) -> SGP4BatchResult:
+    """Propagate mixed OGP regimes with one Rust initialization per object."""
+
+    from sim.rust_ogp_backend import propagate_batch
+
+    element_list = list(elements)
+    if not element_list:
+        raise ValueError("Batched OGP propagation requires at least one element set.")
+    time_grid = _coerce_ogp_batch_times(tsince_min, object_count=len(element_list))
+    positions, velocities, errors = propagate_batch(element_list, time_grid)
+    return SGP4BatchResult(
+        backend="ogp_rust",
         tsince_min=time_grid,
         position_teme_km=positions,
         velocity_teme_km_s=velocities,

@@ -79,6 +79,7 @@
       ],
       "properties": {
         "schema_version": {"const": "oel.spacecraft_power_problem.v1"},
+        "numeric_backend": {"enum": ["python", "rust"]},
         "analysis_id": {"$ref": "#/$defs/nonempty"},
         "asset_id": {"$ref": "#/$defs/nonempty"},
         "epoch_jd_utc": {"type": "number"},

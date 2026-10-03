@@ -8,6 +8,7 @@ import numpy as np
 from sim.core.interfaces import Controller
 from sim.core.models import Command, StateBelief
 from sim.dynamics.orbit.two_body import propagate_two_body_rk4
+from sim.numeric_backend import normalize_numeric_backend
 from sim.utils.frames import eci_relative_to_ric_rect, ric_curv_to_rect, ric_dcm_ir_from_rv, ric_rect_state_to_eci
 
 
@@ -44,6 +45,7 @@ class RelativeOrbitMPCController(Controller):
     line_search_min_alpha: float = 1e-3
     min_cost_improvement: float = 1e-6
     trust_region_step_km_s2: float = 1e-5
+    numeric_backend: str = "rust"
 
     _u_guess_eci: np.ndarray = field(init=False, repr=False)
     _u_prev_eci: np.ndarray = field(init=False, repr=False)
@@ -88,6 +90,8 @@ class RelativeOrbitMPCController(Controller):
             raise ValueError("min_cost_improvement must be positive.")
         if self.trust_region_step_km_s2 <= 0.0:
             raise ValueError("trust_region_step_km_s2 must be positive.")
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="numeric_backend must be python or rust")
+        self.numeric_backend = backend
 
         signs = self._vector(self.state_signs, n=6)
         signs[signs == 0.0] = 1.0
@@ -171,22 +175,25 @@ class RelativeOrbitMPCController(Controller):
         self._u_guess_eci = self._shift_sequence(u_opt)
 
         a_cmd_ric = c_ir.T @ u0
+        mode_flags = {
+            "mode": "relative_orbit_mpc",
+            "ric_curv_state_slice": [i0, i1],
+            "chief_eci_state_slice": [j0, j1],
+            "state_signs": self.state_signs.tolist(),
+            "horizon_steps": int(self.horizon_steps),
+            "step_dt_s": float(self.step_dt_s),
+            "gradient_method": self.gradient_method,
+            "accel_ric_km_s2": a_cmd_ric.tolist(),
+            "seed_accel_ric_km_s2": (c_ir.T @ a_seed_eci).tolist(),
+            "solve_time_ms": float(solve_ms),
+            **info,
+        }
+        if self.numeric_backend == "rust":
+            mode_flags["control_numeric_backend"] = self.numeric_backend
         return Command(
             thrust_eci_km_s2=u0,
             torque_body_nm=np.zeros(3),
-            mode_flags={
-                "mode": "relative_orbit_mpc",
-                "ric_curv_state_slice": [i0, i1],
-                "chief_eci_state_slice": [j0, j1],
-                "state_signs": self.state_signs.tolist(),
-                "horizon_steps": int(self.horizon_steps),
-                "step_dt_s": float(self.step_dt_s),
-                "gradient_method": self.gradient_method,
-                "accel_ric_km_s2": a_cmd_ric.tolist(),
-                "seed_accel_ric_km_s2": (c_ir.T @ a_seed_eci).tolist(),
-                "solve_time_ms": float(solve_ms),
-                **info,
-            },
+            mode_flags=mode_flags,
         )
 
     def _solve_mpc(
@@ -244,8 +251,13 @@ class RelativeOrbitMPCController(Controller):
                     delta = self._rng.choice(np.array([-1.0, 1.0], dtype=float), size=u.shape)
                     up = self._project_sequence(u + self.spsa_delta * delta)
                     um = self._project_sequence(u - self.spsa_delta * delta)
-                    jp = self._cost(x_chaser0=x_chaser0, x_target0=x_target0, u_seq=up)
-                    jm = self._cost(x_chaser0=x_chaser0, x_target0=x_target0, u_seq=um)
+                    if self.numeric_backend == "rust":
+                        jp, jm = self._cost_many(
+                            x_chaser0=x_chaser0, x_target0=x_target0, u_sequences=np.stack((up, um)),
+                        )
+                    else:
+                        jp = self._cost(x_chaser0=x_chaser0, x_target0=x_target0, u_seq=up)
+                        jm = self._cost(x_chaser0=x_chaser0, x_target0=x_target0, u_seq=um)
                     eval_count += 2
                     grad = ((jp - jm) / (2.0 * self.spsa_delta)) * delta
             if timed_out:
@@ -303,6 +315,14 @@ class RelativeOrbitMPCController(Controller):
         }
 
     def _cost(self, *, x_chaser0: np.ndarray, x_target0: np.ndarray, u_seq: np.ndarray) -> float:
+        if self.numeric_backend == "rust":
+            from sim.rust_control_backend import has_relative_mpc_cost_batch
+
+            if has_relative_mpc_cost_batch():
+                return float(self._cost_many(
+                    x_chaser0=x_chaser0, x_target0=x_target0,
+                    u_sequences=np.asarray(u_seq, dtype=float).reshape(1, self.horizon_steps, 3),
+                )[0])
         x_c = np.array(x_chaser0, dtype=float).reshape(6)
         x_t = np.array(x_target0, dtype=float).reshape(6)
         u_prev = np.array(self._u_prev_eci, dtype=float).reshape(3)
@@ -312,18 +332,8 @@ class RelativeOrbitMPCController(Controller):
         err = np.zeros(6, dtype=float)
         for k in range(self.horizon_steps):
             u = u_seq[k]
-            x_t = propagate_two_body_rk4(
-                x_eci=x_t,
-                dt_s=self.step_dt_s,
-                mu_km3_s2=self.mu_km3_s2,
-                accel_cmd_eci_km_s2=np.zeros(3, dtype=float),
-            )
-            x_c = propagate_two_body_rk4(
-                x_eci=x_c,
-                dt_s=self.step_dt_s,
-                mu_km3_s2=self.mu_km3_s2,
-                accel_cmd_eci_km_s2=u,
-            )
+            x_t = self._propagate_two_body(x_t, np.zeros(3, dtype=float))
+            x_c = self._propagate_two_body(x_c, u)
             x_rel_rect = self._relative_rect_ric(x_chaser=x_c, x_target=x_t)
             err = self.state_signs * (x_rel_rect - self.target_rel_ric_rect)
             du = u - u_prev
@@ -334,6 +344,45 @@ class RelativeOrbitMPCController(Controller):
 
         j += float(np.sum(self.terminal_weights * err * err))
         return j
+
+    def _cost_many(
+        self, *, x_chaser0: np.ndarray, x_target0: np.ndarray, u_sequences: np.ndarray,
+    ) -> np.ndarray:
+        if self.numeric_backend == "rust":
+            from sim.rust_control_backend import has_relative_mpc_cost_batch, relative_mpc_cost_batch
+
+            if has_relative_mpc_cost_batch():
+                return relative_mpc_cost_batch(
+                    x_chaser0, x_target0, self._u_prev_eci,
+                    self.target_rel_ric_rect, self.state_signs, self.q_weights,
+                    self.terminal_weights, self.r_weights, self.rd_weights, u_sequences,
+                    dt_s=self.step_dt_s, mu_km3_s2=self.mu_km3_s2,
+                    max_accel_km_s2=self.max_accel_km_s2,
+                )
+        return np.asarray([
+            self._cost(x_chaser0=x_chaser0, x_target0=x_target0, u_seq=sequence)
+            for sequence in np.asarray(u_sequences, dtype=float)
+        ], dtype=float)
+
+    def _propagate_two_body(self, state: np.ndarray, command_accel_eci_km_s2: np.ndarray) -> np.ndarray:
+        """Advance one nonlinear rollout step through the selected backend."""
+
+        if self.numeric_backend == "rust":
+            from sim.rust_orbit_backend import rk4_step_eci
+
+            return rk4_step_eci(
+                np.asarray(state, dtype=float).reshape(6),
+                self.step_dt_s,
+                self.mu_km3_s2,
+                include_j2=False,
+                command_accel_eci_km_s2=np.asarray(command_accel_eci_km_s2, dtype=float).reshape(3),
+            )
+        return propagate_two_body_rk4(
+            x_eci=np.asarray(state, dtype=float).reshape(6),
+            dt_s=self.step_dt_s,
+            mu_km3_s2=self.mu_km3_s2,
+            accel_cmd_eci_km_s2=np.asarray(command_accel_eci_km_s2, dtype=float).reshape(3),
+        )
 
     @staticmethod
     def _relative_rect_ric(*, x_chaser: np.ndarray, x_target: np.ndarray) -> np.ndarray:
@@ -350,6 +399,10 @@ class RelativeOrbitMPCController(Controller):
 
     def _project_sequence(self, u_seq: np.ndarray) -> np.ndarray:
         u = np.array(u_seq, dtype=float).reshape(self.horizon_steps, 3)
+        if self.numeric_backend == "rust":
+            from sim.rust_control_backend import project_sequence
+
+            return project_sequence(u, self.max_accel_km_s2)
         return np.vstack([self._project_accel(u[k]) for k in range(self.horizon_steps)])
 
     def _shift_sequence(self, u_seq: np.ndarray) -> np.ndarray:

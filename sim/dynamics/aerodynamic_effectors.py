@@ -117,36 +117,40 @@ class VariableGeometryAerodynamics:
             return StageEffects(), realization
         velocity_hat = relative_velocity / speed
         dynamic_pressure = 0.5 * density * speed * speed
-        drag_coefficient_area = self.config.base_drag_area_m2 * self.config.base_drag_coefficient
-        lift_coefficient_area = 0.0
-        weighted_center = np.zeros(3)
-        weighted_area = 0.0
+        base_drag_force = -dynamic_pressure * self.config.base_drag_area_m2 * self.config.base_drag_coefficient * velocity_hat
         drag_area = self.config.base_drag_area_m2
         lift_area = 0.0
+        surface_data: list[tuple[float, float, float, np.ndarray]] = []
         for surface in self.config.surfaces:
             deployment = surface.deployment_fraction(device_positions.get(surface.actuator_id, surface.minimum_position))
             area = surface.reference_area_m2 * deployment
             drag_area += area
             lift_area += area
-            drag_coefficient_area += area * surface.drag_coefficient
-            lift_coefficient_area += area * surface.lift_coefficient
-            weighted_center += area * np.asarray(surface.center_of_pressure_body_m, dtype=float)
-            weighted_area += area
-        drag_force = -dynamic_pressure * drag_coefficient_area * velocity_hat
+            surface_data.append(
+                (
+                    area,
+                    float(surface.drag_coefficient),
+                    float(surface.lift_coefficient),
+                    np.asarray(surface.center_of_pressure_body_m, dtype=float),
+                )
+            )
         bank = self._bank_angle(device_positions)
         lift_reference = _perpendicular_reference(velocity_hat, np.asarray(state.position_eci_km, dtype=float))
         lift_direction = _rotate_about_axis(lift_reference, velocity_hat, bank)
-        lift_force = dynamic_pressure * lift_coefficient_area * lift_direction
-        force_eci = drag_force + lift_force
+        force_eci = base_drag_force.copy()
+        surface_forces_eci: list[tuple[np.ndarray, np.ndarray]] = []
+        for area, drag_coefficient, lift_coefficient, center in surface_data:
+            drag_force = -dynamic_pressure * area * drag_coefficient * velocity_hat
+            lift_force = dynamic_pressure * area * lift_coefficient * lift_direction
+            surface_force = drag_force + lift_force
+            surface_forces_eci.append((surface_force, center))
+            force_eci += surface_force
         c_bn = quaternion_to_dcm_bn(state.attitude_quat_bn)
-        force_body = c_bn @ force_eci
-        center_of_pressure = (
-            np.asarray(self.config.center_of_mass_body_m, dtype=float)
-            if weighted_area <= 0.0
-            else weighted_center / weighted_area
-        )
-        lever = center_of_pressure - np.asarray(self.config.center_of_mass_body_m, dtype=float)
-        torque_body = np.cross(lever, force_body)
+        torque_body = np.zeros(3, dtype=float)
+        center_of_mass = np.asarray(self.config.center_of_mass_body_m, dtype=float)
+        for surface_force_eci, center_of_pressure in surface_forces_eci:
+            force_body = c_bn @ surface_force_eci
+            torque_body += np.cross(center_of_pressure - center_of_mass, force_body)
         realization = AerodynamicRealization(
             float(drag_area),
             float(lift_area),

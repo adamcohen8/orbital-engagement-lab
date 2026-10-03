@@ -59,6 +59,9 @@ def _number(data, key, path, default=None, *, low=0.0, high=None, positive=False
 
 def validate_resource_specs(specs: dict, path="specs") -> tuple[dict, dict]:
     """Validate without loading geometry, plugins, or executing a scenario."""
+    numeric_backend = specs.get("numeric_backend", "rust")
+    if numeric_backend not in {"python", "rust"}:
+        raise ValueError(f"{path}.numeric_backend must be python or rust")
     thermal = _mapping(
         specs.get("thermal", {}),
         f"{path}.thermal",
@@ -168,8 +171,14 @@ def _quadrature(order):
     return x, w, phi
 
 
-def earth_radiation(position, sun_position, order):
+def earth_radiation(position, sun_position, order, *, numeric_backend="rust"):
     """Return source directions, solid angles and surface solar irradiance factors."""
+    if numeric_backend == "rust":
+        from sim.rust_spacecraft_backend import earth_radiation as rust_earth_radiation
+
+        return rust_earth_radiation(position, sun_position, order)
+    if numeric_backend != "python":
+        raise ValueError("spacecraft resource numeric_backend must be python or rust")
     r = np.asarray(position, dtype=float)
     distance = float(np.linalg.norm(r))
     if distance <= EARTH_RADIUS_KM:
@@ -202,15 +211,19 @@ class SpacecraftResources:
     thermal: dict
     power: dict
     geometry: Any = None
+    numeric_backend: str = "rust"
 
     @classmethod
     def from_specs(cls, specs, geometry=None):
         thermal, power = validate_resource_specs(specs)
         if not thermal.get("enabled") and not power.get("enabled"):
             return None
+        numeric_backend = str(specs.get("numeric_backend", "rust"))
+        if numeric_backend not in {"python", "rust"}:
+            raise ValueError("spacecraft resource numeric_backend must be python or rust")
         if thermal.get("area_mode") == "geometry" and geometry is None:
             raise ValueError("specs.thermal.area_mode=geometry requires spacecraft geometry")
-        return cls(thermal, power, geometry)
+        return cls(thermal, power, geometry, numeric_backend)
 
     @property
     def max_step_s(self):
@@ -238,6 +251,13 @@ class SpacecraftResources:
         return np.array([method(-u) for u in directions_body])
 
     def advance(self, start, end, environment, dt_s):
+        if self.numeric_backend == "rust":
+            from sim.rust_spacecraft_backend import advance as rust_advance
+
+            return rust_advance(self, start, end, environment, dt_s)
+        return self._advance_python(start, end, environment, dt_s)
+
+    def _advance_python(self, start, end, environment, dt_s):
         """Advance owned states with midpoint forcing and implicit radiative cooling.
 
         Returned rates are interval averages. Backward-Euler radiation ensures
@@ -311,7 +331,8 @@ class SpacecraftResources:
             th = self.thermal
             direct = solar * self._area(np.array([sun_body]))[0] * th["solar_absorptivity"]
             rays, weights, surface_sun = earth_radiation(
-                position, geometry["sun_pos_eci_km"], th["earth_quadrature_order"]
+                position, geometry["sun_pos_eci_km"], th["earth_quadrature_order"],
+                numeric_backend="python",
             )
             weighted_area = self._area(rays @ c_bn.T) * weights / math.pi
             albedo = (

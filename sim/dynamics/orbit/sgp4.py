@@ -10,6 +10,7 @@ from sim.acceleration.settings import acceleration_settings_from_mode
 from sim.core.models import StateTruth
 from sim.dynamics.orbit.frames import teme_to_eci_vallado_iau80
 from sim.dynamics.orbit.tle import TLEElements, ogp_mean_elements_from_mapping, parse_tle_lines
+from sim.numeric_backend import normalize_numeric_backend
 
 try:  # pragma: no cover - availability is environment-dependent.
     from numba import njit, prange
@@ -116,7 +117,9 @@ class SGP4EphemerisProvider:
     angular_rate_body_rad_s: np.ndarray | None = None
     max_tle_age_days_warning: float | None = None
     acceleration_mode: str = "off"
+    numeric_backend: str = "rust"
     _sdp4_context: object | None = field(default=None, init=False, repr=False, compare=False)
+    _rust_context: object | None = field(default=None, init=False, repr=False, compare=False)
     _sgp4_numeric_elements: np.ndarray | None = field(default=None, init=False, repr=False, compare=False)
     _propagation_backend: str = field(default="python_scalar", init=False, repr=False, compare=False)
     _requested_backend: str = field(default="python_scalar", init=False, repr=False, compare=False)
@@ -139,7 +142,15 @@ class SGP4EphemerisProvider:
             object.__setattr__(self, "frame_transform", "native")
         if frame == "eci" and not transform:
             object.__setattr__(self, "frame_transform", "teme_to_eci_iau80")
-        if sgp4_orbital_period_min(self.elements) >= SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN:
+        backend = normalize_numeric_backend(self.numeric_backend, error_message="OGP numeric_backend must be python or rust.")
+        object.__setattr__(self, "numeric_backend", backend)
+        if backend == "rust":
+            from sim.rust_ogp_backend import RustOGPContext
+
+            object.__setattr__(self, "_rust_context", RustOGPContext(self.elements))
+            object.__setattr__(self, "_propagation_backend", "rust_scalar")
+            object.__setattr__(self, "_requested_backend", "rust_scalar")
+        elif sgp4_orbital_period_min(self.elements) >= SGP4_DEEP_SPACE_PERIOD_THRESHOLD_MIN:
             from sim.dynamics.orbit.sdp4 import sdp4_initialize
 
             object.__setattr__(self, "_sdp4_context", sdp4_initialize(self.elements))
@@ -196,6 +207,7 @@ class SGP4EphemerisProvider:
         angular_rate_body_rad_s: np.ndarray | None = None,
         max_tle_age_days_warning: float | None = None,
         acceleration_mode: str = "off",
+        numeric_backend: str = "rust",
     ) -> SGP4EphemerisProvider:
         block = dict(tle_block or {})
         lines = block.get("lines")
@@ -226,6 +238,7 @@ class SGP4EphemerisProvider:
             angular_rate_body_rad_s=angular_rate_body_rad_s,
             max_tle_age_days_warning=max_tle_age_days_warning,
             acceleration_mode=acceleration_mode,
+            numeric_backend=numeric_backend,
         )
 
     @classmethod
@@ -296,6 +309,39 @@ class SGP4EphemerisProvider:
             frame_transform="teme_to_eci_iau80",
         )
 
+    def canonical_states_at(self, times_s: np.ndarray | list[float]) -> np.ndarray:
+        """Evaluate exact requested ECI epochs in one Rust OGP batch.
+
+        This numerical preparation does not advance any engine event, sensor,
+        or output boundary. Arbitrary query ordering retains the context's
+        resonance-reset contract. Other backends retain the scalar owner.
+        """
+
+        times = np.asarray(times_s, dtype=float).reshape(-1)
+        for time in times:
+            self._validated_time(float(time))
+        if times.size == 0:
+            return np.empty((0, 6), dtype=float)
+        if self._rust_context is None:
+            return np.asarray([
+                np.concatenate(self._position_velocity_at(float(time), output_frame="eci", frame_transform="teme_to_eci_iau80"))
+                for time in times
+            ])
+        offsets = (float(self.start_jd_utc) - float(self.elements.epoch_jd_utc)) * 1440.0 + times / 60.0
+        positions, velocities, errors = self._rust_context.propagate_many(offsets)
+        for error in errors:
+            if error:
+                raise ValueError(str(error))
+        from sim.dynamics.orbit.frames import teme_to_eci_matrix_vallado_iau80
+
+        rotations = np.asarray([
+            teme_to_eci_matrix_vallado_iau80(float(self.start_jd_utc) + float(time) / 86400.0)
+            for time in times
+        ])
+        positions_eci = (rotations @ positions[..., None])[..., 0]
+        velocities_eci = (rotations @ velocities[..., None])[..., 0]
+        return np.column_stack((positions_eci, velocities_eci))
+
     def _truth_state_at(self, t_s: float, *, output_frame: str, frame_transform: str) -> StateTruth:
         t_s = self._validated_time(t_s)
         pos, vel = self._position_velocity_at(
@@ -321,7 +367,10 @@ class SGP4EphemerisProvider:
     ) -> tuple[np.ndarray, np.ndarray]:
         jd_utc = float(self.start_jd_utc) + t_s / 86400.0
         tsince_min = (float(self.start_jd_utc) - float(self.elements.epoch_jd_utc)) * 1440.0 + t_s / 60.0
-        if self._sdp4_context is not None:
+        if self._rust_context is not None:
+            position, velocity = self._rust_context.propagate(tsince_min)
+            native = SGP4State(position, velocity)
+        elif self._sdp4_context is not None:
             from sim.dynamics.orbit.sdp4 import sdp4_propagate_teme_from_context
 
             native = sdp4_propagate_teme_from_context(self._sdp4_context, tsince_min)
@@ -409,6 +458,8 @@ class SGP4EphemerisProvider:
             numerical_equivalence=(
                 "rounding_level"
                 if self._propagation_backend == "numba_scalar"
+                else "cross_implementation"
+                if self._propagation_backend == "rust_scalar"
                 else "bitwise_reference"
             ),
             tle_epoch_jd_utc=float(self.elements.epoch_jd_utc),

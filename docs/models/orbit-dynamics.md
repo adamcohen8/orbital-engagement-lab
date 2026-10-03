@@ -1,7 +1,7 @@
 # Orbit Dynamics
 
 This page documents the current public orbit-propagation model in Orbital
-Engagement Lab. It is intentionally conservative: it describes the equations,
+Engineering Lab. It is intentionally conservative: it describes the equations,
 configuration surface, implementation locations, evidence hooks, and limits
 that can be traced to the checked-in public source.
 
@@ -107,6 +107,10 @@ The public `objects.<id>.force_models` contract exposes these additive ONP
 callbacks through trusted scenario pointers. Each receives a read-only ECI
 state in km and km/s plus an absolute UTC Julian date, and returns ECI
 acceleration in km/s². See [scenario YAML](../scenario-yaml.md#custom-onp-force-models).
+For two-body reciprocal forces, the opt-in synchronized system-force path
+integrates a trajectory-only spacecraft pair at shared RK4 stage times. The
+object-scoped optional context exposes time-labelled committed partner truth;
+it is not a substitute for the synchronized path.
 
 ## Frames, Units, And Signs
 

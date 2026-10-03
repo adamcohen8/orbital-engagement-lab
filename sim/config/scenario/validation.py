@@ -6,6 +6,7 @@ from sim.config.scenario.models import (
 from sim.config.scenario.primitives import (
     _parse_bool,
 )
+from sim.numeric_backend import normalize_numeric_backend
 
 __all__ = [
     '_validate_physics_runtime_settings',
@@ -82,13 +83,173 @@ def _validate_orbital_analysis_references(cfg: SimulationScenarioConfig) -> None
                         f"{endpoint_path}_ground_station_id references disabled ground station {station_id!r}."
                     )
 
+def _require_rust_symbols(path: str, symbols: tuple[str, ...]) -> None:
+    try:
+        import oel_rust_orbit as native
+    except ImportError as exc:
+        raise ValueError(f"{path} requires the optional oel_rust_orbit wheel in this Python environment.") from exc
+    missing = [name for name in symbols if not callable(getattr(native, name, None))]
+    if missing:
+        raise ValueError(f"{path} requires an updated oel_rust_orbit wheel; missing kernels: {', '.join(missing)}.")
+
+
 def _validate_physics_runtime_settings(cfg: SimulationScenarioConfig) -> None:
+    dynamics = dict(cfg.simulator.dynamics or {})
+    native_requirements = {
+        "attitude": ("attitude_propagate_exponential_map", "attitude_builtin_disturbance_torque"),
+        "rocket": ("rocket_aero_state", "rocket_propellant_step"),
+        "reentry": ("reentry_metrics",),
+    }
+    for section, symbols in native_requirements.items():
+        backend = normalize_numeric_backend(
+            dict(dynamics.get(section, {}) or {}).get("numeric_backend", "rust"),
+            field_name=f"simulator.dynamics.{section}.numeric_backend",
+        )
+        if backend == "rust":
+            _require_rust_symbols(f"simulator.dynamics.{section}.numeric_backend=rust", symbols)
+    collisions_backend = normalize_numeric_backend(
+        dict(cfg.simulator.collisions or {}).get("numeric_backend", "rust"),
+        field_name="simulator.collisions.numeric_backend",
+    )
+    if collisions_backend == "rust":
+        _require_rust_symbols("simulator.collisions.numeric_backend=rust", ("collision_chord_geometry", "collision_elastic_impact"))
+    covariance_backend = normalize_numeric_backend(
+        getattr(cfg.analysis.covariance, "numeric_backend", "rust"),
+        field_name="analysis.covariance.numeric_backend",
+    )
+    if covariance_backend == "rust":
+        _require_rust_symbols("analysis.covariance.numeric_backend=rust", ("covariance_propagate_history",))
+    for object_id, obj in cfg.objects.items():
+        knowledge = dict(getattr(obj, "knowledge", {}) or {})
+        estimation = dict(knowledge.get("estimation", {}) or {})
+        estimation_ekf = dict(estimation.get("ekf", knowledge.get("ekf", {})) or {})
+        tracking_backend = normalize_numeric_backend(
+            estimation.get(
+                "numeric_backend",
+                estimation_ekf.get("numeric_backend", knowledge.get("numeric_backend", "rust")),
+            ),
+            field_name=f"objects.{object_id}.knowledge.numeric_backend",
+        )
+        if tracking_backend == "rust":
+            _require_rust_symbols(
+                f"objects.{object_id}.knowledge.numeric_backend=rust",
+                ("tracking_measurement", "tracking_measurement_and_jacobian"),
+            )
     orbit = dict((cfg.simulator.dynamics or {}).get("orbit", {}) or {})
-    reentry = dict((cfg.simulator.dynamics or {}).get("reentry", {}) or {})
+    model = str(orbit.get("model", "two_body") or "two_body").strip().lower()
     propagation_method = str(orbit.get("propagation_method", "special") or "special").strip().lower()
+    integrator = str(orbit.get("integrator", "rk4") or "rk4").strip().lower()
+    system_forces = list(getattr(cfg.simulator, "system_force_models", []) or [])
+    if any(
+        obj.enabled
+        and normalize_numeric_backend(
+            dict(obj.general or {}).get("numeric_backend", "rust"),
+            field_name=f"objects.{object_id}.general.numeric_backend",
+        )
+        == "rust"
+        for object_id, obj in cfg.objects.items()
+    ):
+        try:
+            import oel_rust_orbit
+        except ImportError as exc:
+            raise ValueError(
+                "objects.*.general.numeric_backend=rust requires the optional oel_rust_orbit wheel."
+            ) from exc
+        if not hasattr(oel_rust_orbit, "OGPContext"):
+            raise ValueError("objects.*.general.numeric_backend=rust requires an OGP-enabled oel_rust_orbit wheel.")
+    orbit_backend = normalize_numeric_backend(
+        orbit.get("numeric_backend", "rust"),
+        field_name="simulator.dynamics.orbit.numeric_backend",
+    )
+    if orbit_backend == "rust" and propagation_method != "general":
+        path = "simulator.dynamics.orbit.numeric_backend=rust"
+        if model not in {"two_body", "cr3bp"} or propagation_method != "special":
+            raise ValueError(f"simulator.dynamics.orbit.model with {path} requires two-body ECI ONP or rotating CR3BP special propagation.")
+        if integrator not in {"rk4", "rkf78", "adaptive", "dopri5"}:
+            raise ValueError(f"simulator.dynamics.orbit.integrator with {path} supports only RK4, RKF78, and DOPRI5.")
+        from importlib.util import find_spec
+
+        if find_spec("oel_rust_orbit") is None:
+            raise ValueError(f"{path} requires the optional oel_rust_orbit wheel in this Python environment.")
+        if model == "cr3bp":
+            import oel_rust_orbit
+
+            if not hasattr(oel_rust_orbit, "cr3bp_propagate"):
+                raise ValueError(f"{path} with model=cr3bp requires a CR3BP-enabled oel_rust_orbit wheel (0.6.0 or newer).")
+    collisions = dict(getattr(cfg.simulator, "collisions", {}) or {})
+    if collisions.get("enabled", False):
+        active = {oid: obj for oid, obj in cfg.objects.items() if obj.enabled}
+        radii = dict(collisions.get("radii_m", {}) or {})
+        execution = dict(cfg.simulator.execution or {})
+        attitude = dict((cfg.simulator.dynamics or {}).get("attitude", {}) or {})
+        if len(active) != 2 or set(radii) != set(active) or any(
+            obj.kind != "satellite" or obj.runtime_profile != "trajectory_only"
+            for obj in active.values()
+        ):
+            raise ValueError("simulator.collisions requires exactly two enabled trajectory_only satellites with radii_m entries.")
+        if (model != "two_body"
+                or propagation_method != "special"
+                or any(obj.propagation_method not in (None, "", "special") for obj in active.values())):
+            raise ValueError("simulator.collisions requires Earth-centered ECI ONP propagation.")
+        if bool(attitude.get("enabled", True)):
+            raise ValueError("simulator.collisions requires attitude.enabled=false in this first slice.")
+        if system_forces or any(obj.force_models for obj in active.values()):
+            raise ValueError("simulator.collisions cannot be combined with system or object force plugins.")
+        if execution.get("policy", "configured") in {"auto", "parallel"} or bool(
+            dict(execution.get("object_parallelism", {}) or {}).get("enabled", False)
+        ):
+            raise ValueError("simulator.collisions requires serial object execution.")
+        if any(
+            (obj.bridge is not None and obj.bridge.enabled)
+            or bool(dict(obj.reference_orbit or {}).get("enabled", False))
+            or any(bool(dict(obj.specs.get(name, {}) or {}).get("enabled", False)) for name in ("thermal", "power"))
+            for obj in active.values()
+        ):
+            raise ValueError("simulator.collisions does not support bridges, reference orbits, or spacecraft resources.")
+    if system_forces:
+        attitude = dict((cfg.simulator.dynamics or {}).get("attitude", {}) or {})
+        execution = dict(getattr(cfg.simulator, "execution", {}) or {})
+        active = {oid: obj for oid, obj in cfg.objects.items() if obj.enabled}
+        if len(active) != 2 or any(
+            obj.kind != "satellite" or obj.runtime_profile != "trajectory_only"
+            for obj in active.values()
+        ):
+            raise ValueError("simulator.system_force_models requires exactly two trajectory_only satellites.")
+        if (model != "two_body"
+                or propagation_method != "special"
+                or integrator != "rk4"
+                or any(obj.propagation_method not in (None, "", "special") for obj in active.values())):
+            raise ValueError("simulator.system_force_models requires two-body ECI ONP with RK4.")
+        if cfg.simulator.initial_jd_utc is None:
+            raise ValueError("simulator.system_force_models requires simulator.initial_jd_utc.")
+        if bool(attitude.get("enabled", True)):
+            raise ValueError("simulator.system_force_models requires attitude.enabled=false.")
+        if execution.get("policy", "configured") in {"auto", "parallel"} or bool(
+            dict(execution.get("object_parallelism", {}) or {}).get("enabled", False)
+        ):
+            raise ValueError("simulator.system_force_models requires serial object execution.")
+        if any(obj.force_models for obj in active.values()):
+            raise ValueError("simulator.system_force_models cannot be combined with object force_models in this first slice.")
+        if any(
+            (obj.bridge is not None and obj.bridge.enabled)
+            or bool(dict(obj.reference_orbit or {}).get("enabled", False))
+            for obj in active.values()
+        ):
+            raise ValueError("simulator.system_force_models does not yet support bridges or reference orbits.")
+        if any(
+            bool(dict(obj.specs.get(name, {}) or {}).get("enabled", False))
+            for obj in active.values() for name in ("thermal", "power")
+        ):
+            raise ValueError("simulator.system_force_models does not yet support spacecraft resources.")
+        perturbations = ("j2", "j3", "j4", "drag", "lift", "srp", "third_body_sun", "third_body_moon")
+        if any(bool(orbit.get(name, False)) for name in perturbations) or any(
+            bool(dict(orbit.get(name, {}) or {}).get("enabled", False))
+            for name in ("spherical_harmonics", "schwarzschild", "earth_radiation", "ocean_tides", "solid_earth_tides")
+        ):
+            raise ValueError("simulator.system_force_models currently requires unperturbed two-body ONP.")
+    reentry = dict((cfg.simulator.dynamics or {}).get("reentry", {}) or {})
     if propagation_method not in {"special", "general"}:
         raise ValueError("simulator.dynamics.orbit.propagation_method must be one of: special, general.")
-    integrator = str(orbit.get("integrator", "rk4") or "rk4").strip().lower()
     if integrator not in {"rk4", "rkf78", "dopri5", "adaptive"}:
         raise ValueError("simulator.dynamics.orbit.integrator must be one of: adaptive, dopri5, rk4, rkf78.")
 
@@ -147,7 +308,6 @@ def _validate_physics_runtime_settings(cfg: SimulationScenarioConfig) -> None:
                 "de440, hpop_de440, de440_hpop, spice, spiceypy."
             )
 
-    model = str(orbit.get("model", "two_body") or "two_body").strip().lower()
     for oid, obj in cfg.objects.items():
         if any(dict(obj.specs.get(name, {}) or {}).get("enabled", False) for name in ("thermal", "power")):
             propagation = obj.propagation_method or orbit.get("propagation_method", "special")

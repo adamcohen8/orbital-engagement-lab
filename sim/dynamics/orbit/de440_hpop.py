@@ -33,6 +33,22 @@ def _resolve_path(path_value: str | Path) -> Path:
     return _resolve_relative_path(expanded, os.getcwd())
 
 
+def _resource_signature(path_value: str | Path) -> tuple:
+    """Return a file identity used to invalidate loaded DE440 resources."""
+    path = _resolve_path(path_value)
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), None)
+    return (
+        str(path),
+        int(stat.st_ino),
+        int(stat.st_size),
+        int(stat.st_mtime_ns),
+        int(stat.st_ctime_ns),
+    )
+
+
 @lru_cache(maxsize=1)
 def default_de440_coeff_path() -> Path:
     return (Path(__file__).resolve().parents[3] / "validation" / "data" / "DE440Coeff.mat").resolve()
@@ -50,7 +66,7 @@ def default_hpop_eop_path() -> Path:
 
 
 @lru_cache(maxsize=2)
-def _load_de440_coeff_matrix(path_str: str) -> np.ndarray:
+def _load_de440_coeff_matrix_cached(path_str: str, signature: tuple) -> np.ndarray:
     try:
         from scipy.io import loadmat  # type: ignore
     except Exception as exc:
@@ -70,8 +86,14 @@ def _load_de440_coeff_matrix(path_str: str) -> np.ndarray:
     return arr
 
 
+def _load_de440_coeff_matrix(path_str: str) -> np.ndarray:
+    """Load a full DE440 matrix keyed by the current resource identity."""
+    path = _resolve_path(path_str)
+    return _load_de440_coeff_matrix_cached(str(path), _resource_signature(path))
+
+
 @lru_cache(maxsize=2)
-def _load_de440_light(path_str: str) -> dict[str, object]:
+def _load_de440_light_cached(path_str: str, signature: tuple) -> dict[str, object]:
     path = _resolve_path(path_str)
     with np.load(path, allow_pickle=False) as data:
         fmt = str(np.asarray(data["format_version"]).item())
@@ -114,6 +136,12 @@ def _load_de440_light(path_str: str) -> dict[str, object]:
         out["body_specs"] = body_specs
         out["body_records"] = body_records
         return out
+
+
+def _load_de440_light(path_str: str) -> dict[str, object]:
+    """Load a lightbank keyed by current file identity, not path alone."""
+    path = _resolve_path(path_str)
+    return _load_de440_light_cached(str(path), _resource_signature(path))
 
 
 @lru_cache(maxsize=1)
@@ -433,7 +461,9 @@ def hpop_de440_positions_km(jd_utc: float, env: dict) -> dict[str, np.ndarray]:
     cache_key = (
         float(jd_utc),
         str(coeff_path),
+        _resource_signature(coeff_path),
         eop_path,
+        None if eop_path is None else _resource_signature(eop_path),
         None if tai_utc_raw is None else float(tai_utc_raw),
     )
     cached = env.get(_DE440_POSITION_CACHE_KEY)
@@ -460,7 +490,8 @@ def hpop_de440_sun_moon_positions_km(jd_utc: float, env: dict) -> tuple[np.ndarr
 
     coeff_path_raw = env.get("de440_coeff_path")
     coeff_path = default_de440_coeff_path() if coeff_path_raw is None else _resolve_path(str(coeff_path_raw))
-    if coeff_path.suffix.lower() != ".npz" or not acceleration_enabled_from_mode():
+    native_requested = env.get("_rust_numeric_backend") == "rust"
+    if coeff_path.suffix.lower() != ".npz" or (not acceleration_enabled_from_mode() and not native_requested):
         positions = hpop_de440_positions_km(jd_utc, env)
         return np.array(positions["sun"], dtype=float), np.array(positions["moon"], dtype=float)
 
@@ -478,6 +509,65 @@ def hpop_de440_sun_moon_positions_km(jd_utc: float, env: dict) -> tuple[np.ndarr
             tai_utc_s = 37.0
     else:
         tai_utc_s = float(tai_utc_raw)
+    native_context = env.get("_rust_environment_context")
+    if native_context is not None:
+        from sim.rust_environment_backend import try_context_de440_sun_moon_km
+
+        jd_tdb = jd_utc_to_jd_tdb(float(jd_utc), eop_path=eop_path, tai_utc_s=float(tai_utc_s))
+        # Keep Python's exact coverage/row policy at the resource boundary;
+        # the native context only evaluates already selected coefficients.
+        for body in ("earthmoon", "moon", "sun"):
+            _find_light_body_row(light, jd_tdb, body)
+        pair = try_context_de440_sun_moon_km(
+            native_context,
+            jd_tdb,
+            earth_moon_mass_ratio=_EMRAT,
+        )
+        if pair is not None:
+            return pair
+    if env.get("_rust_numeric_backend") == "rust":
+        from sim.rust_environment_backend import try_de440_chebyshev_batch
+
+        jd_tdb = jd_utc_to_jd_tdb(float(jd_utc), eop_path=eop_path, tai_utc_s=float(tai_utc_s))
+
+        def native_body(body: str) -> np.ndarray | None:
+            starts = np.asarray(light.get(f"{body}_start_jd_tdb", light["row_start_jd_tdb"]), dtype=float)
+            ends = np.asarray(light.get(f"{body}_end_jd_tdb", light["row_end_jd_tdb"]), dtype=float)
+            spec = light["body_specs"][body]
+            records = light["body_records"][body]
+            # Keep resource selection and coverage policy in Python, but pass
+            # only the covering coefficient row across the native boundary.
+            # Sending the complete multi-decade lightbank for every RK stage
+            # dominated the Rust force-plan path and repeatedly serialized
+            # tens of thousands of coefficients.
+            row_index = _find_light_body_row(light, jd_tdb, body)
+            x_rows = np.asarray(records[2], dtype=float)[row_index : row_index + 1, :]
+            y_rows = np.asarray(records[3], dtype=float)[row_index : row_index + 1, :]
+            z_rows = np.asarray(records[4], dtype=float)[row_index : row_index + 1, :]
+            return try_de440_chebyshev_batch(
+                [jd_tdb],
+                row_starts_jd_tdb=starts[row_index : row_index + 1],
+                row_ends_jd_tdb=ends[row_index : row_index + 1],
+                coeff_count=int(spec[0]),
+                segments=int(spec[1]),
+                span_days=float(spec[2]),
+                x_rows=x_rows.reshape(-1),
+                y_rows=y_rows.reshape(-1),
+                z_rows=z_rows.reshape(-1),
+            )
+
+        earthmoon = native_body("earthmoon")
+        moon = native_body("moon")
+        sun_ssb = native_body("sun")
+        if earthmoon is not None and moon is not None and sun_ssb is not None:
+            earth = earthmoon[0] - moon[0] / (1.0 + _EMRAT)
+            return -earth + sun_ssb[0], moon[0]
+        if native_requested and not acceleration_enabled_from_mode():
+            earthmoon = _eval_light_body(light, jd_tdb, "earthmoon")
+            moon = _eval_light_body(light, jd_tdb, "moon")
+            sun_ssb = _eval_light_body(light, jd_tdb, "sun")
+            earth = earthmoon - moon / (1.0 + _EMRAT)
+            return -earth + sun_ssb, moon
     sun, moon, earthmoon_row, moon_row, sun_row = _compiled_de440_sun_moon_from_utc()(
         float(jd_utc),
         float(tai_utc_s),

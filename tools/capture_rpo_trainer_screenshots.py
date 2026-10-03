@@ -93,6 +93,7 @@ def _capture_level_selector(out_path: Path) -> None:
             music_enabled=True,
             preview_scroll_px=0,
             record_video=False,
+            selected_mode="pilot",
             font=font,
             small_font=small_font,
             title_font=title_font,

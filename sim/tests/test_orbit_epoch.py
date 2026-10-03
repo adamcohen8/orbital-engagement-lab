@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 import numpy as np
 
 from sim.dynamics.orbit.epoch import (
+    _mean_equator_of_date_to_j2000,
+    _sun_position_true_equator_of_date_km,
+    _true_equator_of_date_to_j2000,
     datetime_to_julian_date,
     julian_date_to_datetime,
     moon_position_eci_km_enhanced,
@@ -39,6 +42,26 @@ class OrbitEpochTests(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(m)))
         self.assertGreater(float(np.linalg.norm(s)), 1.0e8)
         self.assertGreater(float(np.linalg.norm(m)), 1.0e5)
+
+    def test_date_equator_to_j2000_rotation_is_identity_at_j2000(self):
+        vector = np.array([1.0, 2.0, 3.0])
+        np.testing.assert_allclose(
+            _mean_equator_of_date_to_j2000(vector, 2451545.0),
+            vector,
+            rtol=0.0,
+            atol=1.0e-14,
+        )
+        future = _mean_equator_of_date_to_j2000(vector, 2461110.5)
+        assert not np.allclose(future, vector, rtol=0.0, atol=1.0e-8)
+
+    def test_enhanced_sun_removes_true_of_date_nutation_before_precession(self):
+        jd = 2460310.5
+        date_vector = _sun_position_true_equator_of_date_km(jd)
+        actual = sun_position_eci_km_enhanced(jd)
+        precession_only = _mean_equator_of_date_to_j2000(date_vector, jd)
+
+        np.testing.assert_allclose(actual, _true_equator_of_date_to_j2000(date_vector, jd))
+        self.assertGreater(float(np.linalg.norm(actual - precession_only)), 1000.0)
 
     def test_external_ephemeris_callable(self):
         def eph_cb(jd_utc: float, env: dict):
@@ -114,6 +137,16 @@ class OrbitEpochTests(unittest.TestCase):
                         },
                         t_s=0.5,
                     )
+
+    def test_explicit_ephemeris_history_rejects_out_of_range_queries(self):
+        env = {
+            "sun_ephemeris_time_s": [0.0, 10.0],
+            "sun_ephemeris_eci_km": [[1.0, 2.0, 3.0], [11.0, 12.0, 13.0]],
+        }
+        for t_s in (-1.0, 11.0):
+            with self.subTest(t_s=t_s):
+                with self.assertRaisesRegex(ValueError, "outside supplied coverage"):
+                    resolve_sun_moon_positions(env, t_s=t_s)
 
 
 if __name__ == "__main__":

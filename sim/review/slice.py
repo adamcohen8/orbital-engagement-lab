@@ -21,6 +21,7 @@ FAMILIES = frozenset({"state", "relative", "control", "fsw", "access", "events",
 _TABLE_FAMILY = {
     "time_samples": "state", "object_state": "state", "object_state_covariance": "state",
     "object_orbital_elements": "state", "attitude_error": "state",
+    "spacecraft_resources": "state",
     "relative_state": "relative",
     "thrust": "control", "impulsive_maneuvers": "control",
     "controller_decisions": "control", "mission_modes": "control",
@@ -110,6 +111,7 @@ def create_review_slice(
     end_s: float,
     object_ids: Sequence[str] = (),
     families: Sequence[str] = ("state", "relative", "control", "events"),
+    staging_parent: str | Path | None = None,
 ) -> dict[str, Any]:
     """Write a new slice directory; never modify or replace the source run."""
 
@@ -125,6 +127,27 @@ def create_review_slice(
         raise FileExistsError("Review slice destination must be new.")
     if not target.parent.is_dir():
         raise FileNotFoundError("Review slice destination parent does not exist.")
+
+    temporary_parent = (
+        target.parent
+        if staging_parent is None
+        else Path(staging_parent).expanduser().absolute()
+    )
+    current = temporary_parent
+    components: list[Path] = []
+    while True:
+        components.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for component in reversed(components):
+        if component.is_symlink():
+            raise ValueError(f"Review slice staging path cannot contain symbolic links: {component}")
+    if not temporary_parent.is_dir():
+        raise FileNotFoundError("Review slice staging parent does not exist.")
+    temporary_parent = temporary_parent.resolve(strict=True)
+    if temporary_parent.stat().st_dev != target.parent.stat().st_dev:
+        raise ValueError("Review slice staging and destination must share a filesystem.")
 
     with ReviewWorkspace.open(source) as workspace:
         logical = workspace.logical_db_path
@@ -156,7 +179,7 @@ def create_review_slice(
                 raise ValueError(f"Unknown slice object ids: {sorted(set(selected) - available)}")
             before = {table: original.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0] for table in tables}
 
-            with tempfile.TemporaryDirectory(prefix=f".{target.name}.", dir=target.parent) as temporary:
+            with tempfile.TemporaryDirectory(prefix=f".{target.name}.", dir=temporary_parent) as temporary:
                 staged = Path(temporary) / target.name
                 staged.mkdir()
                 database = staged / SLICE_DATABASE

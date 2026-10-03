@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from sim.plotting.capability_common import _show_save_close
+from sim.plotting.style import tight_layout_oel_figure
 from sim.utils.figure_size import cap_figsize
 
 PlotMode = Literal["interactive", "save", "both"]
@@ -51,7 +52,7 @@ def plot_control_commands(
             ax.grid(True, alpha=0.3)
         axes[0].set_title(title)
         axes[-1].set_xlabel("Time (s)")
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _show_save_close(fig, mode=mode, out_path=out_path)
 
 
@@ -76,5 +77,5 @@ def plot_multi_control_commands(
     ax.set_ylabel(y_label if y_label else f"u[{component_index}]")
     ax.grid(True, alpha=0.3)
     ax.legend(loc="best")
-    fig.tight_layout()
+    tight_layout_oel_figure(fig)
     _show_save_close(fig, mode=mode, out_path=out_path)

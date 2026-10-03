@@ -14,10 +14,12 @@ metadata:
     replay_support: none
     level_name: Sandbox
     control_mode: ric_translation
-    camera_mode: target_pair
+    camera_mode: rule_toggle_pair
     camera_rule_mode: full_trajectory
+    camera_rule_toggle_enabled: true
     plot_overlays_in_zoom: false
     plot_prediction_in_zoom: true
+    plot_prediction_full_trajectory_only: true
     target_centered_plot_planes:
     - RI
     - RC

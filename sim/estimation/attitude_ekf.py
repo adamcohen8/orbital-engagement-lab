@@ -35,12 +35,20 @@ class AttitudeEKFEstimator(Estimator):
     process_noise_diag: np.ndarray
     meas_noise_diag: np.ndarray
     acceleration_mode: str = "off"
+    numeric_backend: str = "rust"
     _acceleration_enabled_value: bool = field(default=False, init=False, repr=False)
     _q: np.ndarray = field(default_factory=lambda: np.zeros((7, 7)), init=False, repr=False)
     _r: np.ndarray = field(default_factory=lambda: np.zeros((7, 7)), init=False, repr=False)
     _i7: np.ndarray = field(default_factory=lambda: np.eye(7), init=False, repr=False)
 
     def __post_init__(self) -> None:
+        self.numeric_backend = str(self.numeric_backend).strip().lower()
+        if self.numeric_backend not in {"python", "rust"}:
+            raise ValueError("numeric_backend must be 'python' or 'rust'.")
+        if self.numeric_backend == "rust":
+            from sim.rust_attitude_ekf_backend import _factory
+
+            _factory()
         self.inertia_kg_m2 = np.asarray(self.inertia_kg_m2, dtype=float).reshape(3, 3)
         self.process_noise_diag = np.asarray(self.process_noise_diag, dtype=float).reshape(7)
         self.meas_noise_diag = np.asarray(self.meas_noise_diag, dtype=float).reshape(7)
@@ -52,7 +60,7 @@ class AttitudeEKFEstimator(Estimator):
         self._q = np.diag(self.process_noise_diag)
         self._r = np.diag(self.meas_noise_diag)
         self._acceleration_enabled_value = bool(acceleration_settings_from_mode(self.acceleration_mode).enabled)
-        if self._acceleration_enabled_value:
+        if self._acceleration_enabled_value and self.numeric_backend == "python":
             _load_acceleration_kernels()
 
     def _acceleration_enabled(self) -> bool:
@@ -113,14 +121,23 @@ class AttitudeEKFEstimator(Estimator):
         to_t_s: float,
     ) -> tuple[np.ndarray, np.ndarray]:
         dt_s = max(float(to_t_s) - float(from_t_s), 0.0)
-        x_pred = self._propagate_state(x_prev, dt_s=dt_s)
-        f = self._numerical_jacobian(x_prev, base=x_pred, dt_s=dt_s)
+        if self.numeric_backend == "rust":
+            from sim.rust_attitude_ekf_backend import predict
+
+            x_pred, f = predict(x_prev, self.inertia_kg_m2, dt_s)
+        else:
+            x_pred = self._propagate_state(x_prev, dt_s=dt_s)
+            f = self._numerical_jacobian(x_prev, base=x_pred, dt_s=dt_s)
         q_scale = dt_s / self.dt_s if self.dt_s > 0.0 else 1.0
         p_pred = f @ p_prev @ f.T + self._q * max(q_scale, 0.0)
         return x_pred, p_pred
 
     def _propagate_state(self, x: np.ndarray, *, dt_s: float | None = None) -> np.ndarray:
         step_dt_s = self.dt_s if dt_s is None else float(dt_s)
+        if self.numeric_backend == "rust":
+            from sim.rust_attitude_ekf_backend import propagate
+
+            return propagate(x, self.inertia_kg_m2, step_dt_s)
         if self._acceleration_enabled():
             _load_acceleration_kernels()
             return attitude_ekf_propagate_state_kernel(
@@ -147,6 +164,10 @@ class AttitudeEKFEstimator(Estimator):
         dt_s: float | None = None,
     ) -> np.ndarray:
         step_dt_s = self.dt_s if dt_s is None else float(dt_s)
+        if self.numeric_backend == "rust":
+            from sim.rust_attitude_ekf_backend import predict
+
+            return predict(x, self.inertia_kg_m2, step_dt_s, base=base)[1]
         eps = 1e-6
         base_eval = base
         if base_eval is None:
