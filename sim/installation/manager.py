@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -1018,6 +1019,63 @@ def check_channel(
     }
 
 
+def download_release_wheelhouse(
+    manifest: Mapping[str, Any],
+    manifest_url: str,
+    destination: Path,
+    *,
+    allow_local_file: bool = False,
+) -> Path | None:
+    """Fetch wheels for an already verified manifest from its versioned bundle.
+
+    The ZIP is a transport, not a trust root: its manifest must exactly match
+    the verified manifest and every installed wheel is checked against that
+    manifest's signed size and SHA-256 before it reaches pip.
+    """
+    wheels = [row for row in manifest["artifacts"] if row.get("kind") == "wheel"]
+    if not wheels:
+        return None
+    _validate_host_compatibility(manifest)
+    _validate_offline_runtime_compatibility(manifest)
+    qualification = dict(manifest.get("supply_chain", {})).get("offline_runtime_qualification", {})
+    python_match = re.fullmatch(r"(\d+)\.(\d+)(?:\.\d+)?", str(qualification.get("python", "")))
+    architecture = str(manifest.get("architecture", "")).lower()
+    if python_match is None or re.fullmatch(r"[a-z0-9_]+", architecture) is None:
+        raise ContractError("Bundled release wheels require an exact qualified Python minor and architecture.")
+    tag = f"py{python_match[1]}{python_match[2]}"
+    name = f"oel-{manifest['edition']}-{manifest['version']}-{architecture}-{tag}.bundle.zip"
+    url = urllib.parse.urljoin(manifest_url, name)
+    _validate_remote_url(url, allow_local_file=allow_local_file)
+    destination.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="oel-release-wheels-", dir=destination) as temporary:
+        work = Path(temporary)
+        bundle = work / name
+        transport_limit = min(
+            MAX_RELEASE_BYTES,
+            sum(int(row["bytes"]) for row in manifest["artifacts"]) + MAX_METADATA_BYTES,
+        )
+        _download_url(url, bundle, max_bytes=transport_limit)
+        unpacked = safe_extract(bundle, work / "unpacked", max_bytes=MAX_RELEASE_BYTES)
+        bundled_manifest = unpacked / "release-manifest.json"
+        if canonical_json_bytes(load_json_object(bundled_manifest)) != canonical_json_bytes(manifest):
+            raise ContractError("Downloaded bundle manifest does not match the verified release manifest.")
+        expected: set[Path] = set()
+        for wheel in wheels:
+            path = _artifact_path(bundled_manifest, wheel)
+            if path.parent != unpacked / "wheelhouse":
+                raise ContractError("Bundled release wheel must be directly inside wheelhouse.")
+            verify_release_artifact(path, wheel)
+            expected.add(path)
+        actual = set((unpacked / "wheelhouse").rglob("*"))
+        if actual != expected:
+            raise ContractError("Downloaded bundle wheelhouse differs from the signed wheel inventory.")
+        wheelhouse = destination / "wheelhouse"
+        if wheelhouse.exists():
+            shutil.rmtree(wheelhouse)
+        (unpacked / "wheelhouse").replace(wheelhouse)
+    return wheelhouse
+
+
 def download_release(
     manifest_url: str,
     *,
@@ -1054,6 +1112,9 @@ def download_release(
     # Keep signed content byte-for-byte equivalent at the contract level. The
     # local installer resolves the downloaded artifact by its signed name.
     atomic_write_json(manifest_path, manifest)
+    wheelhouse = download_release_wheelhouse(
+        manifest, manifest_url, cache_root, allow_local_file=allow_local_file
+    )
     return {
         "schema_version": UPDATE_RECEIPT_SCHEMA,
         "status": "ready",
@@ -1061,6 +1122,7 @@ def download_release(
         "version": manifest["version"],
         "manifest": str(manifest_path),
         "artifact": str(archive),
+        "wheelhouse": str(wheelhouse) if wheelhouse is not None else None,
         "effects": {"network_used": True, "workspace_modified": False, "activated": False},
     }
 
@@ -1116,6 +1178,7 @@ def install_latest_release(
         create_runtime=create_runtime,
         license_path=license_path,
         license_public_keys=license_public_keys,
+        offline_wheelhouse=downloaded.get("wheelhouse"),
     )
     return {
         "schema_version": UPDATE_RECEIPT_SCHEMA,

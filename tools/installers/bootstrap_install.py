@@ -11,7 +11,9 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -163,6 +165,37 @@ def _safe_extract(archive: Path, destination: Path) -> Path:
     return roots[0]
 
 
+def _use_qualified_python(manifest: dict[str, Any]) -> None:
+    """Use the signed bundle's qualified interpreter before downloading code."""
+    if not any(row.get("kind") == "wheel" for row in manifest.get("artifacts", [])):
+        return
+    qualification = dict(manifest.get("supply_chain", {})).get("offline_runtime_qualification", {})
+    match = re.fullmatch(r"(\d+)\.(\d+)(?:\.\d+)?", str(qualification.get("python", "")))
+    if match is None:
+        raise SystemExit("Release wheelhouse is missing its qualified Python minor.")
+    required = (int(match[1]), int(match[2]))
+    if sys.version_info[:2] == required:
+        return
+    candidates: list[list[str]] = []
+    named = shutil.which(f"python{required[0]}.{required[1]}")
+    if named:
+        candidates.append([named])
+    launcher = shutil.which("py") if sys.platform == "win32" else None
+    if launcher:
+        candidates.append([launcher, f"-{required[0]}.{required[1]}"])
+    for candidate in candidates:
+        probe = subprocess.run(
+            [*candidate, "-c", f"import sys; raise SystemExit(0 if sys.version_info[:2] == {required!r} else 1)"],
+            capture_output=True, check=False, timeout=15,
+        )
+        if probe.returncode == 0:
+            os.execv(candidate[0], [*candidate, str(Path(__file__).resolve()), *sys.argv[1:]])
+    raise SystemExit(
+        f"This signed release bundle requires CPython {required[0]}.{required[1]}. "
+        "Install that Python minor and rerun the installer; no packages were installed."
+    )
+
+
 def _user_launcher_location() -> tuple[Path, Path]:
     if sys.platform == "win32":
         user_bin = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "Programs" / "OEL" / "bin"
@@ -250,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
         keys = json.loads(base64.b64decode(TRUSTED_KEYS_B64).decode("utf-8"))
     if not args.developer_unsigned and (not rendered or not _verify(manifest, keys)):
         raise SystemExit("Release manifest signature verification failed.")
+    _use_qualified_python(manifest)
     artifacts = [item for item in manifest.get("artifacts", []) if item.get("kind") in {"source", "source_bundle"}]
     if len(artifacts) != 1:
         raise SystemExit("Release manifest must declare exactly one source artifact.")
@@ -270,7 +304,7 @@ def main(argv: list[str] | None = None) -> int:
         inspection = root / "inspection"
         source_root = _safe_extract(archive, inspection)
         sys.path.insert(0, str(source_root))
-        from sim.installation.manager import activate, configure_channel, install_release
+        from sim.installation.manager import activate, configure_channel, download_release_wheelhouse, install_release
         from sim.installation.paths import InstallationPaths
         from sim.installation.signing import load_public_keys
 
@@ -289,6 +323,9 @@ def main(argv: list[str] | None = None) -> int:
         # Catch deterministic launcher conflicts before install/activation
         # changes the managed engine or current selector.
         _preflight_user_launcher()
+        wheelhouse = download_release_wheelhouse(
+            manifest, args.manifest_url, root, allow_local_file=bool(args.developer_unsigned)
+        )
         result = install_release(
             manifest_path,
             paths=paths,
@@ -296,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
             require_signature=not args.developer_unsigned,
             profile=args.profile,
             create_runtime=True,
+            offline_wheelhouse=wheelhouse,
         )
         activation = None
         channel_configuration = None

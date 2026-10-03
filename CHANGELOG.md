@@ -10,6 +10,12 @@ migration-sensitive behavior explicitly.
 
 ### Runtime and compatibility
 
+- Install and update managed releases from the signed GitHub bundle's exact
+  wheel inventory, including the required Rust runtimes, without requiring
+  native packages to exist on PyPI. Select the qualified Python minor before
+  first installation. The v0.32.0 managed bundle covers macOS arm64 Python
+  3.11; v0.31 users upgrade through `install-bundle` or the new installer.
+
 - Promote Rust to the default numeric backend for implemented propagation,
   estimation, control, geometry, analysis and Trainer paths. Explicit
   `numeric_backend: python` and Trainer `--backend python` retain reference
