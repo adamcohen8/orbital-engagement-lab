@@ -204,3 +204,37 @@ test("a completed serialized round restores its winner and score", () => {
   const restored = restoreDuelSeries({ result: series.result(), rules });
   assert.deepEqual(restored.snapshot(), series.snapshot());
 });
+
+
+test("full-duration two-round restore preserves histories, controls, scores, and detached results", () => {
+  const series = createDuelSeries({
+    playerIds: ["alpha", "bravo"],
+    regulationRounds: 2,
+    matchSeed: 1480670564,
+  });
+  for (let index = 1; index <= 2; index += 1) {
+    series.setPlayerControls("alpha", { r: 0.5, i: 0, c: 0 }, {
+      sequence: index * 2 - 1,
+      source: "computer_policy",
+      policyPhase: "intercept_burn",
+    });
+    series.step(3);
+    series.neutralizePlayer("alpha", { sequence: index * 2 });
+    series.step(DUEL_PROTOTYPE_RULES.round_duration_s);
+    if (index === 1) series.advanceRound();
+  }
+  const expected = series.result();
+  assert.equal(expected.match_terminal, true);
+  assert.equal(expected.round_summaries.length, 2);
+  assert.equal(expected.current_round.tick, DUEL_PROTOTYPE_RULES.round_duration_s);
+  assert.equal(expected.current_round.history.length, DUEL_PROTOTYPE_RULES.max_history_samples);
+  assert.equal(expected.round_summaries[0].input_events[0].source, "computer_policy");
+  assert.deepEqual(restoreDuelSeries({ result: expected }).result(), expected);
+  const detached = series.result();
+  detached.round_summaries[0].input_events[0].controls.r = 1;
+  detached.current_round.history[0].range_km = -1;
+  const snapshot = series.snapshot();
+  assert.equal("input_events" in snapshot.round_summaries[0], false);
+  snapshot.round_summaries[0].initial_geometry.target_coes.a_km = -1;
+  assert.deepEqual(series.result(), expected);
+});
