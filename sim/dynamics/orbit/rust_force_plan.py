@@ -62,6 +62,21 @@ _CODES = {
 }
 
 
+def force_codes(propagator, env):
+    from sim import rust_environment_backend
+    from sim.dynamics.orbit.rust_precision_force_plan import precision_code
+
+    supports_precision_force_plan = getattr(rust_environment_backend, "supports_precision_force_plan", lambda: False)
+    codes = []
+    for plugin in propagator.plugins:
+        builtin = next((code for known, code in _CODES.items() if plugin is known), None)
+        code = builtin if builtin is not None else precision_code(plugin)
+        if code is None or (code > 8 and (env.get("_rust_precision_force_plan_disabled") or not supports_precision_force_plan())):
+            return None
+        codes.append(code)
+    return codes
+
+
 def immutable_builtin_plan_signature(propagator, env: dict, ctx) -> tuple | None:
     """Bind speculative passive rows to all built-in numeric inputs.
 
@@ -69,7 +84,7 @@ def immutable_builtin_plan_signature(propagator, env: dict, ctx) -> tuple | None
     truth and internal scratch caches are not read by these built-in forces;
     compiled harmonic coefficient content is bound separately.
     """
-    if any(not any(plugin is known for known in _CODES) for plugin in propagator.plugins):
+    if force_codes(propagator, env) is None:
         return None
 
     def frozen(value):
@@ -115,7 +130,9 @@ def immutable_builtin_plan_signature(propagator, env: dict, ctx) -> tuple | None
         )
         return (
             id(propagator), str(propagator.numeric_backend), str(propagator.integrator), str(propagator.model),
-            tuple(_CODES[plugin] for plugin in propagator.plugins),
+            tuple(force_codes(propagator, env)),
+            tuple(frozen(getattr(plugin, f.name)) for plugin in propagator.plugins if hasattr(plugin, "__dataclass_fields__") for f in fields(plugin) if f.init),
+            tuple((_table_signature(plugin._factors), _table_signature(plugin._coefficients)) for plugin in propagator.plugins if hasattr(plugin, "_coefficients")),
             float(ctx.mu_km3_s2), float(ctx.mass_kg), float(ctx.area_m2), float(ctx.cd), float(ctx.cr),
             values, resources, harmonic_signature,
         )
@@ -186,13 +203,16 @@ def _configure_native_environment_context(propagator, env: dict, *, need_de440: 
     return context
 
 
-def _native_force_context(propagator, codes, scalars, shadow, dims, tables):
+def _native_force_context(propagator, codes, scalars, shadow, dims, tables, ctx=None):
     table_signature = tuple(_table_signature(table) for table in tables)
-    key = (tuple(codes), tuple(float(value) for value in scalars), int(shadow), tuple(dims), table_signature)
+    from sim.dynamics.orbit.rust_precision_force_plan import precision_code, precision_signature, specifications
+    precision_key = tuple(precision_signature(plugin, ctx) for plugin in propagator.plugins if precision_code(plugin) is not None) if ctx is not None else ()
+    key = (precision_key, tuple(codes), tuple(float(value) for value in scalars), int(shadow), tuple(dims), table_signature)
     cached = getattr(propagator, "_rust_force_context_cache", None)
     if isinstance(cached, tuple) and len(cached) == 2 and cached[0] == key:
         return cached[1]
-    context = try_create_force_context(codes, scalars, shadow, dims, tables)
+    kwargs = {"precision_specs": specifications(propagator.plugins, ctx)} if precision_key else {}
+    context = try_create_force_context(codes, scalars, shadow, dims, tables, **kwargs)
     if context is not None:
         propagator._rust_force_context_cache = (key, context)
     return context
@@ -224,9 +244,9 @@ def _prepared_frame(propagator, env, model_key, path_key, native_context):
 def make_plan(propagator, state, t_s, env, ctx):
     """Return immutable Rust plan inputs and an authoritative stage callback."""
 
-    if any(not any(plugin is known for known in _CODES) for plugin in propagator.plugins):
+    if force_codes(propagator, env) is None:
         raise ValueError("Rust force plan does not support a selected plugin")
-    codes = [_CODES[plugin] for plugin in propagator.plugins]
+    codes = force_codes(propagator, env)
     if 1 in codes and env.get("_compiled_spherical_harmonics_terms") is None:
         spherical_harmonics_plugin(t_s, np.asarray(state, dtype=float), env, ctx)
     harmonic = env.get("_compiled_spherical_harmonics_terms")
@@ -260,7 +280,7 @@ def make_plan(propagator, state, t_s, env, ctx):
     if all(code in (6, 7, 8) for code in codes):
         # These ordered zonal forces have no stage environment dependencies.
         # Rust still evaluates all four state derivatives at every RK4 step.
-        force_context = _native_force_context(propagator, codes, scalars, shadow, dims, tables)
+        force_context = _native_force_context(propagator, codes, scalars, shadow, dims, tables, ctx)
         empty_stage = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0] + [0.0] * 10
         return codes, scalars, shadow, dims, tables, lambda _time, _state: empty_stage, force_context
     stage_env_cache = {}
@@ -312,7 +332,7 @@ def make_plan(propagator, state, t_s, env, ctx):
         "spherical_harmonics_eop_path", "drag_eop_path", "density_eop_path", "de440_eop_path",
     ) if env.get(key)}))
     eop_signature = tuple(_resource_signature(path) for path in eop_paths)
-    force_context = _native_force_context(propagator, codes, scalars, shadow, dims, tables)
+    force_context = _native_force_context(propagator, codes, scalars, shadow, dims, tables, ctx)
     # Caller-owned, bounded reuse of exact frame preparation. The aero owner
     # keys every frame input and EOP metadata; state values stay uncached.
     frame_cache = getattr(propagator, "_rust_atmosphere_frame_cache", None)
@@ -406,6 +426,9 @@ def make_plan(propagator, state, t_s, env, ctx):
     ) != FRAME_MODEL_IAU76_80_EOP:
         stage_inputs._simple_drag_density_callback = partial(stage_inputs, _density_only=True)
         stage_inputs._simple_drag_jd_utc_start = env.get("jd_utc_start")
+    if any(code > 8 for code in codes):
+        from sim.dynamics.orbit.rust_precision_force_plan import wrap_stages
+        return codes, scalars, shadow, dims, tables, wrap_stages(stage_inputs, propagator.plugins, env, ctx), force_context
     from sim.dynamics.orbit.rust_stage_context import try_native_stage_context
     try:
         native_stage = try_native_stage_context(

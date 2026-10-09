@@ -123,10 +123,14 @@ def try_create_force_context(
     shadow_model: int,
     harmonic_dims: tuple[int, int],
     tables: Any,
+    *, precision_specs=None,
 ) -> Any | None:
     """Create a persistent native force context when the installed wheel supports it."""
     native = getattr(_extension(), "ONPForceContext", None)
     if not callable(native):
+        return None
+    kwargs = {} if precision_specs is None else {"precision_specs": precision_specs}
+    if precision_specs is not None and not supports_precision_force_plan():
         return None
     return native(
         [int(value) for value in codes],
@@ -134,7 +138,13 @@ def try_create_force_context(
         int(shadow_model),
         (int(harmonic_dims[0]), int(harmonic_dims[1])),
         [[float(value) for value in table] for table in tables],
+        **kwargs,
     )
+
+
+def supports_precision_force_plan() -> bool:
+    """An explicit capability guards compatibility with older native wheels."""
+    return getattr(_extension(), "ONP_PRECISION_FORCE_PLAN_VERSION", 0) == 1
 
 
 def _vector(value: Any, shape: tuple[int, ...], label: str) -> np.ndarray:
@@ -436,8 +446,36 @@ def try_srp_acceleration(
     return np.asarray(native(position.tolist(), sun.tolist(), float(mass_kg), float(area_m2), float(reflectivity), float(pressure_pa), float(au_km), float(earth_radius_km), float(sun_radius_km), int(shadow_model)), dtype=np.float64).reshape(3)
 
 
+def _schwarzschild_prepared_acceleration(native: Any, state: Any, *, mu_km3_s2: float) -> np.ndarray:
+    values = np.asarray(state, dtype=np.float64)
+    if values.shape != (6,):
+        raise ValueError("state must have shape (6,) and contain finite values")
+    try:
+        mu = float(mu_km3_s2)
+    except Exception:
+        # Preserve the existing state-before-mu validation order even when
+        # conversion of mu fails. The successful path validates in Rust.
+        _vector(values, (6,), "state")
+        raise
+    return np.asarray(native(values, mu), dtype=np.float64).reshape(3)
+
+
+def prepare_schwarzschild_acceleration() -> Any | None:
+    """Bind the prepared native symbol once for a persistent force plugin."""
+    native = getattr(_extension(), "perturbation_schwarzschild_prepared", None)
+    if not callable(native):
+        return None
+    from functools import partial
+
+    return partial(_schwarzschild_prepared_acceleration, native)
+
+
 def try_schwarzschild_acceleration(state: Any, *, mu_km3_s2: float) -> np.ndarray | None:
-    native = getattr(_extension(), "perturbation_schwarzschild", None)
+    extension = _extension()
+    native = getattr(extension, "perturbation_schwarzschild_prepared", None)
+    if callable(native):
+        return _schwarzschild_prepared_acceleration(native, state, mu_km3_s2=mu_km3_s2)
+    native = getattr(extension, "perturbation_schwarzschild", None)
     if not callable(native):
         return None
     values = _vector(state, (6,), "state")
@@ -573,3 +611,44 @@ def try_force_bundle_batch(
                     tuple(float(value) for value in scalars), int(shadow_model),
                     tuple(int(code) for code in codes), c.ravel().tolist(), s.ravel().tolist(), c.shape[0] - 1)
     return np.frombuffer(result, dtype="<f8").reshape(-1, 3).copy()
+
+
+def try_solid_tides_acceleration(position_km, sun_fixed_km, moon_fixed_km, *, mu_km3_s2, radius_km,
+                                  jd_tt, jd_ut1, tide_system, pole_xy_arcsec, sun_mu, moon_mu):
+    """Evaluate IERS solid-tide coefficients and their gradient in one Rust call."""
+    native = getattr(_extension(), "perturbation_solid_tides", None)
+    if not callable(native):
+        return None
+    position = _vector(position_km, (3,), "position")
+    sun = _vector(sun_fixed_km, (3,), "Sun position")
+    moon = _vector(moon_fixed_km, (3,), "Moon position")
+    result = native(position.tolist(), sun.tolist(), moon.tolist(), float(mu_km3_s2), float(radius_km),
+                    float(jd_tt), float(jd_ut1), str(tide_system), pole_xy_arcsec, float(sun_mu), float(moon_mu))
+    return np.asarray(result, dtype=np.float64).reshape(3)
+
+
+def try_create_ocean_tides_context(factors, coefficients):
+    """Bind validated, immutable FES wave arrays to an optional native context."""
+    factory = getattr(_extension(), "OceanTidesContext", None)
+    if not callable(factory):
+        return None
+    factors = np.asarray(factors, dtype=np.float64)
+    coefficients = np.asarray(coefficients, dtype=np.float64)
+    if (factors.ndim != 2 or factors.shape[1] != 6 or coefficients.ndim != 4
+            or coefficients.shape[0] != factors.shape[0] or coefficients.shape[-1] != 4
+            or coefficients.shape[1] != coefficients.shape[2]
+            or not np.all(np.isfinite(factors)) or not np.all(np.isfinite(coefficients))):
+        raise ValueError("Ocean tide context requires finite factors (N,6) and coefficients (N,D,D,4).")
+    return factory(factors.ravel().tolist(), coefficients.ravel().tolist(), coefficients.shape[1] - 1)
+
+
+def try_context_ocean_tides_acceleration(context, position_km, *, jd_tt, jd_ut1, pole_xy_arcsec,
+                                        mu_km3_s2, radius_km):
+    """Evaluate one content-bound ocean tide force without Python wave matrices."""
+    native = getattr(context, "acceleration", None)
+    if not callable(native):
+        return None
+    position = _vector(position_km, (3,), "position")
+    result = native(position.tolist(), float(jd_tt), float(jd_ut1), pole_xy_arcsec,
+                    float(mu_km3_s2), float(radius_km))
+    return np.asarray(result, dtype=np.float64).reshape(3)

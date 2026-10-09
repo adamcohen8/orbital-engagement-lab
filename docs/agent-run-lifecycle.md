@@ -113,6 +113,9 @@ python examples/python/run_lifecycle_client.py \
   --timeout 900
 ```
 
+For long waits, let the host wait for command completion instead of repeatedly
+waking the model to poll status. A normal bounded timeout does not indicate failure.
+
 A host-native adapter can translate its own sleep or wake primitive around the
 same `start`, `await`, and `inspect` records. MCP may expose these operations in
 a later layer, but it is not the lifecycle's foundational protocol.

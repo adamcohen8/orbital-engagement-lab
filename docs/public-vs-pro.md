@@ -21,6 +21,9 @@ The public core includes:
   tracking/resource packets, explicit outages, and two-body orbit estimates
   initialized from supplied priors;
 - public controllers, sensors, estimators, actuators, and mission primitives;
+- opt-in Earth albedo/infrared radiation pressure, Schwarzschild acceleration,
+  solid Earth tides, and ocean tidal gravity with optional Rust kernels;
+  ocean coefficients remain authorized external inputs;
 - the Public FSW Authoring Kit for ADCS/RPO stack scaffolding, safe inspection,
   trusted lifecycle validation, component tests, and one deterministic serial
   smoke run;
@@ -95,8 +98,8 @@ operational decision system.
 Pro adds workflows whose value comes from repeatability, scale, search, or
 review-ready packaging:
 
-- selected opt-in environmental and relativistic ONP force-model extensions
-  with model-specific input and comparison contracts;
+- private precision-model validation automation and customer-specific
+  environmental studies; the four documented Earth precision forces are public;
 - the experimental private `sim.trajectory_targeting` package for
   force-configurable impulsive coast/burn studies and reference comparisons;
 - Monte Carlo, sensitivity, calibrated covariance analysis, and campaign

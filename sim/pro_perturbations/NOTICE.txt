@@ -1,0 +1,16 @@
+IERS Conventions (2010), Chapter 6, tables 6.3 and 6.5a/b/c.
+Numeric tables transcribed from Orekit 13.1.7 resources.
+Orekit copyright 2002-2025 CS GROUP; Apache License, Version 2.0.
+https://www.orekit.org/
+https://iers-conventions.obspm.fr/content/chapter6/icc6.pdf
+OEL implementation uses the published equations; Orekit is the comparison implementation.
+
+Earth radiation: Knocke, Ries and Tapley (1988), Earth Radiation Pressure
+Effects on Satellites. Seasonal coefficient and irradiance conventions
+checked against Orekit KnockeRediffusedForceModel (13.1 family).
+OEL uses its own apparent-disk Lambertian geometry, not Orekit's stock
+surface-cap quadrature. Orekit comparison adaptations are documented.
+
+Ocean tides: IERS Conventions 2010 sections 6.3 and 6.5. Doodson argument
+and normalized C/S conventions checked against Orekit OceanTidesWave and
+FESCnmSnmReader (Apache-2.0). FES datasets are external inputs, not bundled.

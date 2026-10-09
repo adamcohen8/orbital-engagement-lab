@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -276,6 +277,36 @@ def test_eop_cache_refreshes_after_symlink_retarget(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="crosses a DAT leap-second boundary"):
         eci_to_ecef_rotation_hpop_like(86400.0, jd_utc_start=2460310.5, eop_path=str(link))
+
+
+def test_eop_cache_observes_atomic_replacement_and_deletion(tmp_path: Path) -> None:
+    eop_path = tmp_path / "eop.txt"
+    _write_minimal_eop(eop_path)
+    ctx = frame_context_from_mapping(
+        {"model": "iau76_80_eop", "eop_path": str(eop_path)},
+        jd_utc_start=2460310.5,
+    )
+    original = eci_to_ecef_rotation_context(0.0, ctx)
+    assert ctx.at(0.0).dut1_s == 0.30
+    metadata = eop_path.stat()
+
+    # Replacement retains size and mtime; the file identity must still refresh
+    # interpolation and rotation caches at the same requested epoch.
+    replacement = tmp_path / "replacement.txt"
+    replacement.write_text(eop_path.read_text().replace("0.30", "0.80"))
+    os.utime(replacement, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+    replacement.replace(eop_path)
+    assert _interp_eop(60310.0, str(eop_path))[2] == 0.80
+    assert ctx.at(0.0).dut1_s == 0.80
+    assert not np.array_equal(eci_to_ecef_rotation_context(0.0, ctx), original)
+
+    eop_path.unlink()
+    with pytest.raises(FileNotFoundError):
+        _interp_eop(60310.0, str(eop_path))
+    with pytest.raises(FileNotFoundError):
+        ctx.at(0.0)
+    with pytest.raises(FileNotFoundError):
+        eci_to_ecef_rotation_context(0.0, ctx)
 
 
 def test_relative_eop_cache_path_tracks_current_directory(tmp_path: Path, monkeypatch) -> None:

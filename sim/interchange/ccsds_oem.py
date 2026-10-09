@@ -27,7 +27,6 @@ from sim.frame_time import (
     transform_cartesian_state,
     transform_covariance,
 )
-from sim.interchange.public_mission_input import MissionInputPacket, ingest_ephemeris_samples
 from sim.interchange.ccsds_odm import (
     CcsdsOdmError,
     compare_odm,
@@ -37,6 +36,7 @@ from sim.interchange.ccsds_odm import (
     write_odm_kvn,
 )
 from sim.interchange.provenance import sha256_file
+from sim.interchange.public_mission_input import MissionInputPacket, ingest_ephemeris_samples
 from sim.review import ReviewWorkspace
 
 CCSDS_OEM_VERSION = "3.0"

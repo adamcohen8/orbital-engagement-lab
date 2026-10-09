@@ -1043,7 +1043,7 @@ class _NRLMSISE00:
         output.d[1], output.t[2] = self._densu(
             z, db04, tinf, tlb, 4.0, alpha[1], output.t[2], PTM1[6], s, mn1, zn1, self.meso_tn1, self.meso_tgn1
         )
-        if flags.sw[16] and z < altl[1]:
+        if flags.sw[16] and z <= altl[1]:
             b04, output.t[2] = self._densu(
                 PDM1[1, 3],
                 db04,

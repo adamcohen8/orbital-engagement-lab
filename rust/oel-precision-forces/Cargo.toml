@@ -1,0 +1,21 @@
+[package]
+name = "oel-precision-forces"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Public Earth radiation, Schwarzschild and tidal force kernels"
+publish = false
+
+[lib]
+name = "oel_precision_forces"
+
+[features]
+default = []
+python = ["dep:pyo3"]
+
+[dependencies]
+pyo3 = { version = "0.29.2", optional = true, features = ["extension-module", "abi3-py310"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

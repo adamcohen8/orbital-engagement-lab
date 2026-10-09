@@ -431,7 +431,13 @@ def _nrlmsise00_sun_longitude_rad(
 
 
 def _nrlmsise00_local_solar_time_hr(lon_deg: float, dt_utc: datetime, t_s: float, env: dict) -> float:
-    sun_lon = _nrlmsise00_sun_longitude_rad(dt_utc, t_s, env)
+    # Internal native stage input shares the exact resource-bound matrix.
+    # The ephemeris resolver and NumPy Sun projection retain their semantics.
+    rotation = env.get("_native_density_rotation")
+    sun_lon = (
+        _nrlmsise00_sun_longitude_rad(dt_utc, t_s, env) if rotation is None
+        else _nrlmsise00_sun_longitude_rad(dt_utc, t_s, env, rotation=rotation)
+    )
     hour_angle = (math.radians(float(lon_deg)) - sun_lon + math.pi) % (2.0 * math.pi) - math.pi
     return float((12.0 + hour_angle * 12.0 / math.pi) % 24.0)
 

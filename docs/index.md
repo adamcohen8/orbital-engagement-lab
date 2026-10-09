@@ -146,3 +146,5 @@ Long-form roadmap, maturity, founder, and commercial-readiness files are
 planning memory, not first-run or buyer-facing documentation. Keep them out of
 the normal user path unless the task is explicitly about product strategy,
 validation investment, release governance, or business/compliance planning.
+
+- [Optional Earth precision forces](orbit-precision-forces.md): public radiation, relativity and tidal gravity with a synthetic-data demonstration.

@@ -28,7 +28,7 @@
     {
       "path": "../ccsds_oem.py",
       "role": "authoritative OEM implementation owner",
-      "sha256": "8a2642038ba46cec3b20c98dcf5609cda16deecf8c5d5e7f62b0dd2d2e67100a"
+      "sha256": "5663e0b4cd86c209b5ee02174f257fcc3a85b09029b9c6bd1491a5d203171b47"
     },
     {
       "path": "../../ccsds.py",

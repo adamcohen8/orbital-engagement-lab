@@ -1,0 +1,18 @@
+OEL Earth precision-force implementations
+
+IERS Conventions (2010), Chapter 6: published Love numbers, astronomical
+arguments, frequency terms and pole-tide conventions. Numeric frequency
+tables transcribed from Orekit 13.1.7 resources.
+Orekit copyright 2002-2025 CS GROUP; Apache License, Version 2.0.
+https://www.orekit.org/
+https://iers-conventions.obspm.fr/content/chapter6/icc6.pdf
+
+Ocean-tide Doodson and normalized C/S conventions are compared with Orekit's
+OceanTidesWave and FESCnmSnmReader. No external FES dataset is included.
+
+Earth radiation follows Knocke, Ries and Tapley (1988), Earth Radiation
+Pressure Effects on Satellites, with OEL's apparent-disk Lambertian geometry.
+The stock Orekit surface-cap quadrature is a different comparison model.
+
+Repository Apache-2.0 license: ../../LICENSE.txt. Additional vendored source
+licenses are retained in their respective vendor directories.

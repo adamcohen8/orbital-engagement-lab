@@ -94,7 +94,11 @@ def test_m5_wheel_packages_supported_mcp_profiles_and_keeps_dependency_optional(
         ).stdout.strip()
     )
     (installed_site / "oel-mcp-test-parent-venv.pth").write_text(
-        site.getsitepackages()[0] + "\n",
+        "".join(
+            str(Path(path).resolve()) + "\n"
+            for path in dict.fromkeys([*site.getsitepackages(), *sys.path])
+            if Path(path).name == "site-packages" and Path(path).is_dir()
+        ),
         encoding="utf-8",
     )
     installed_env = dict(os.environ)

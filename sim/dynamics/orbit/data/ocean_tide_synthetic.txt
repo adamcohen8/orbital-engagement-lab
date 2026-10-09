@@ -1,0 +1,5 @@
+Synthetic normalized Cnm-Snm coefficients, units 10^-11: DelC+ DelS+ DelC- DelS-
+OEL-authored numerical demonstration only; not a measured FES ocean model.
+165.555 synthetic 2 0 1.0 0.2 -0.1 0.3
+165.555 synthetic 2 1 0.4 -0.3 0.2 0.1
+165.555 synthetic 2 2 0.6 0.1 -0.2 0.4

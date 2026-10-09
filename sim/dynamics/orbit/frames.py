@@ -129,7 +129,9 @@ class FrameContext:
 
 def _eop_file_signature(path_value: str) -> tuple[int, int, int, int]:
     """Return metadata that changes when an EOP file is replaced or rewritten."""
-    stat = Path(path_value).expanduser().resolve().stat()
+    # stat follows symlinks and preserves inode/mtime invalidation without
+    # repeating realpath resolution at every integrator stage.
+    stat = os.stat(os.path.expanduser(path_value))
     return (int(stat.st_ino), int(stat.st_size), int(stat.st_mtime_ns), int(stat.st_ctime_ns))
 
 
@@ -326,7 +328,7 @@ def _load_eop_table_cached(
 
 
 def _load_eop_table(eop_path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    resolved = str(Path(eop_path).expanduser().resolve())
+    resolved = _eop_cache_path(eop_path)
     return _load_eop_table_cached(resolved, _eop_file_signature(resolved))
 
 
@@ -337,7 +339,7 @@ def _eop_dat_change_intervals_cached(
 ) -> tuple[tuple[float, float], ...]:
     """Return EOP intervals over which DAT changes between records."""
 
-    mjd, _xp_arcsec, _yp_arcsec, _dut1_s, dat_s = _load_eop_table(eop_path)
+    mjd, _xp_arcsec, _yp_arcsec, _dut1_s, dat_s = _load_eop_table_cached(eop_path, signature)
     if mjd.size < 2:
         return ()
     changes = np.flatnonzero(
@@ -349,7 +351,7 @@ def _eop_dat_change_intervals_cached(
 
 
 def _eop_dat_change_intervals(eop_path: str) -> tuple[tuple[float, float], ...]:
-    resolved = str(Path(eop_path).expanduser().resolve())
+    resolved = _eop_cache_path(eop_path)
     return _eop_dat_change_intervals_cached(resolved, _eop_file_signature(resolved))
 
 
@@ -413,7 +415,7 @@ def _interp_eop(
     *,
     extrapolation: str = "error",
 ) -> tuple[float, float, float, float]:
-    resolved = str(Path(eop_path).expanduser().resolve())
+    resolved = _eop_cache_path(eop_path)
     return _interp_eop_cached(
         float(mjd_utc),
         resolved,

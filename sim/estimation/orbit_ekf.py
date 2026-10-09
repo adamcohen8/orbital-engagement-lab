@@ -248,19 +248,22 @@ class OrbitEKFEstimator(Estimator):
                 xp = np.asarray(x, dtype=float).reshape(6).copy()
                 xp[i] += eps
                 perturbed[i] = self._propagate_state(xp, dt_s=step_dt_s)
-            return _load_rust_estimation_backend().jacobian_from_perturbed(
+            j = _load_rust_estimation_backend().jacobian_from_perturbed(
                 np.asarray(base_eval, dtype=float).reshape(6),
                 perturbed,
                 eps,
             )
+            return self._i6.copy() if step_dt_s == 0.0 else j
         if self._acceleration_enabled():
             _load_acceleration_kernels()
-            return orbit_ekf_numerical_jacobian_kernel(
+            j = orbit_ekf_numerical_jacobian_kernel(
                 np.asarray(x, dtype=float).reshape(6),
                 np.asarray(base_eval, dtype=float).reshape(6),
                 step_dt_s,
                 float(self.mu_km3_s2),
             )
+            # Keep this route's existing nonfinite-result behavior.
+            return self._i6.copy() if step_dt_s == 0.0 and np.all(np.isfinite(j)) else j
         j = np.zeros((6, 6))
         for i in range(6):
             xp = x.copy()
@@ -272,4 +275,6 @@ class OrbitEKFEstimator(Estimator):
                 accel_cmd_eci_km_s2=self._zero_accel,
             )
             j[:, i] = (yp - base_eval) / eps
-        return j
+        # Evaluate the existing route first, preserving its validation and
+        # nonfinite-result behavior; valid zero-time flows have exact I6.
+        return self._i6.copy() if step_dt_s == 0.0 and np.all(np.isfinite(j)) else j
