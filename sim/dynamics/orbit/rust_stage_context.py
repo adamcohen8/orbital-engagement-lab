@@ -41,7 +41,8 @@ def _frame_spec(context: FrameContext | None, *, guard=False):
 def try_native_stage_context(propagator, codes, scalars, env, native_env, native,
                              harmonic_frame, drag_frame, density_frame, de440_path,
                              fallback):
-    from sim.dynamics.orbit.atmosphere import density_from_model
+    from sim.dynamics.orbit import atmosphere as atmosphere_owner
+    density_from_model = atmosphere_owner.density_from_model
     from sim.dynamics.orbit.epoch import resolve_sun_moon_positions, resolve_time_dependent_env
     from sim.dynamics.orbit.rust_force_plan import _resource_signature
     from sim.rust_environment_backend import _extension
@@ -151,17 +152,40 @@ def try_native_stage_context(propagator, codes, scalars, env, native_env, native
         float(env.get("exponential_scale_height_km", 8.5)),
         float(env.get("exponential_ceiling_altitude_km", 1000.0)), float(scalars[5]),
     ]
-    def atmosphere(time, raw_state, coordinates):
+    # DE440 vectors already have the same resource/epoch guards as the
+    # reference resolver. Keep other ephemeris modes on their original route.
+    density_body_inputs = bool(
+        model == "nrlmsise00" and body_mode == 1
+        and callable(getattr(atmosphere_owner, "_nrlmsise00_sun_longitude_rad", None))
+        and env.get("nrlmsise00_lst_hr") is None
+        and hasattr(constructor, "supports_density_body_inputs")
+        and constructor.supports_density_body_inputs()
+    )
+
+    density_frame_inputs = bool(
+        density_body_inputs and density_frame is not None
+        and hasattr(constructor, "supports_density_frame_inputs")
+        and constructor.supports_density_frame_inputs()
+    )
+
+    def atmosphere(time, raw_state, coordinates, prepared_bodies=None, prepared_rotation=None):
         # Per-call scratch: no state-derived coordinates survive the callback.
         stage_env = dict(native_env)
         stage_env["_native_density_coordinates"] = coordinates
+        if prepared_rotation is not None:
+            stage_env["_native_density_rotation"] = np.asarray(prepared_rotation, dtype=float).reshape(3, 3)
+        if prepared_bodies is not None:
+            stage_env["sun_pos_eci_km"], stage_env["moon_pos_eci_km"] = prepared_bodies
         return float(density_from_model(model, np.asarray(raw_state, dtype=float)[:3],
                                        float(time), env=stage_env))
 
+    body_options = {"density_body_inputs": True} if density_body_inputs else {}
+    if density_frame_inputs:
+        body_options["density_frame_inputs"] = True
     result = constructor(native, frames, codes, density_mode, density_values,
                          str(env.get("geodetic_model", "")).lower() == "wgs84",
                          atmosphere, bodies, body_mode, jd, env.get("jd_utc"),
-                         env.get("de440_tai_utc_s"), sorted(paths), fallback)
+                         env.get("de440_tai_utc_s"), sorted(paths), fallback, **body_options)
     # Reject a snapshot assembled across a concurrent rewrite.
     if any(_resource_signature(path) != signature for path, signature in signatures.items()):
         return None

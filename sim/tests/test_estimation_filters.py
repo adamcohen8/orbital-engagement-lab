@@ -55,6 +55,129 @@ def test_orbit_ekf_ignores_partial_measurements_instead_of_zero_padding() -> Non
     assert estimator.last_update_diagnostics.update_applied is False
 
 
+@pytest.mark.parametrize("numeric_backend", ["python", "rust"])
+@pytest.mark.parametrize("acceleration_mode", ["off", "numba"])
+@pytest.mark.parametrize("output_t_s", [0.0, -0.0])
+def test_orbit_ekf_repeated_same_epoch_prediction_is_identity(
+    numeric_backend, acceleration_mode, output_t_s, monkeypatch
+) -> None:
+    monkeypatch.delenv("OEL_ACCELERATION", raising=False)
+    estimator = OrbitEKFEstimator(
+        mu_km3_s2=398600.4415,
+        dt_s=1.0,
+        process_noise_diag=np.full(6, 1.0e-4),
+        meas_noise_diag=np.full(6, 1.0e-8),
+        numeric_backend=numeric_backend,
+        acceleration_mode=acceleration_mode,
+    )
+    if acceleration_mode == "numba" and not estimator._acceleration_enabled():
+        pytest.skip("Numba route unavailable; do not count the scalar fallback as acceleration")
+    state = np.array([42164.0, 0.02, -0.01, 0.001, 3.074666284, -0.002])
+    covariance = np.diag([4.0, 9.0, 16.0, 0.01, 0.02, 0.03])
+    covariance[0, 4] = covariance[4, 0] = 0.05
+    covariance[1, 2] = covariance[2, 1] = -0.25
+    belief = StateBelief(state.copy(), covariance.copy(), 0.0)
+    for _ in range(4):
+        belief = estimator.update(belief, None, output_t_s)
+        np.testing.assert_array_equal(belief.state, state)
+        np.testing.assert_array_equal(belief.covariance, covariance)
+        assert not np.shares_memory(belief.state, state)
+        assert not np.shares_memory(belief.covariance, covariance)
+        assert estimator.last_update_diagnostics is not None
+        assert not estimator.last_update_diagnostics.update_applied
+    jacobian = estimator._numerical_jacobian(state, dt_s=output_t_s)
+    np.testing.assert_array_equal(jacobian, np.eye(6))
+    assert not np.shares_memory(jacobian, estimator._i6)
+
+
+@pytest.mark.parametrize("numeric_backend", ["python", "rust"])
+def test_orbit_ekf_same_epoch_measurement_still_assimilates(numeric_backend) -> None:
+    estimator = OrbitEKFEstimator(
+        mu_km3_s2=398600.4415,
+        dt_s=1.0,
+        process_noise_diag=np.full(6, 100.0),
+        meas_noise_diag=np.full(6, 2.0),
+        numeric_backend=numeric_backend,
+    )
+    state = np.array([7001.0, 2.0, -0.5, 0.01, 7.49, -0.015])
+    belief = StateBelief(state.copy(), np.eye(6) * 2.0, 5.0)
+    offset = np.array([0.01, -0.02, 0.03, 0.001, -0.002, 0.003])
+    measurement = Measurement(vector=state + offset, t_s=5.0)
+    updated = estimator.update(belief, measurement, 5.0)
+    np.testing.assert_array_equal(updated.state, state + 0.5 * (measurement.vector - state))
+    np.testing.assert_array_equal(updated.covariance, np.eye(6))
+    assert estimator.last_update_diagnostics is not None
+    assert estimator.last_update_diagnostics.update_applied
+    np.testing.assert_array_equal(estimator.last_update_diagnostics.innovation_covariance, np.eye(6) * 4.0)
+
+    partial = estimator.update(belief, Measurement(vector=np.ones(2), t_s=5.0), 5.0)
+    np.testing.assert_array_equal(partial.state, state)
+    np.testing.assert_array_equal(partial.covariance, belief.covariance)
+    assert not estimator.last_update_diagnostics.update_applied
+
+
+@pytest.mark.parametrize("numeric_backend", ["python", "rust"])
+def test_orbit_ekf_zero_duration_retains_symmetrization_and_private_time_clamp(numeric_backend) -> None:
+    estimator = OrbitEKFEstimator(
+        mu_km3_s2=398600.4415, dt_s=1.0,
+        process_noise_diag=np.ones(6), meas_noise_diag=np.ones(6),
+        numeric_backend=numeric_backend,
+    )
+    state = np.array([7001.0, 2.0, -0.5, 0.01, 7.49, -0.015])
+    covariance = np.eye(6)
+    covariance[0, 1] = 0.125
+    for output in (5.0, 4.0):
+        predicted, propagated = estimator._predict(state, covariance, from_t_s=5.0, to_t_s=output)
+        np.testing.assert_array_equal(predicted, state)
+        np.testing.assert_array_equal(propagated, 0.5 * (covariance + covariance.T))
+
+
+@pytest.mark.parametrize("numeric_backend", ["python", "rust"])
+def test_orbit_ekf_epoch_validation_precedes_zero_duration_prediction(numeric_backend, monkeypatch) -> None:
+    estimator = OrbitEKFEstimator(
+        mu_km3_s2=398600.4415, dt_s=1.0,
+        process_noise_diag=np.ones(6), meas_noise_diag=np.ones(6),
+        numeric_backend=numeric_backend,
+    )
+    belief = StateBelief(np.full(6, np.nan), np.eye(6), 5.0)
+
+    def unexpected_prediction(*args, **kwargs):
+        raise AssertionError("invalid epochs must fail before prediction")
+
+    monkeypatch.setattr(estimator, "_predict", unexpected_prediction)
+    for output in (4.0, np.nan, np.inf, -np.inf):
+        with pytest.raises(ValueError, match="output epoch must be finite and not precede"):
+            estimator.update(belief, None, output)
+    for epoch in (4.0, 6.0, np.nan, np.inf, -np.inf):
+        with pytest.raises(ValueError, match="measurement epoch must lie"):
+            estimator.update(belief, Measurement(vector=np.full(6, np.nan), t_s=epoch), 5.0)
+
+
+@pytest.mark.parametrize("numeric_backend", ["python", "rust"])
+@pytest.mark.parametrize("acceleration_mode", ["off", "numba"])
+def test_orbit_ekf_zero_duration_keeps_nonfinite_state_route_behavior(
+    numeric_backend, acceleration_mode, monkeypatch
+) -> None:
+    monkeypatch.delenv("OEL_ACCELERATION", raising=False)
+    estimator = OrbitEKFEstimator(
+        mu_km3_s2=398600.4415, dt_s=1.0,
+        process_noise_diag=np.zeros(6), meas_noise_diag=np.ones(6),
+        numeric_backend=numeric_backend,
+        acceleration_mode=acceleration_mode,
+    )
+    if acceleration_mode == "numba" and not estimator._acceleration_enabled():
+        pytest.skip("Numba route unavailable; do not count the scalar fallback as acceleration")
+    state = np.array([np.nan, 2.0, -0.5, 0.01, 7.49, -0.015])
+    belief = StateBelief(state, np.eye(6), 0.0)
+    if numeric_backend == "rust":
+        with pytest.raises(ValueError, match="must contain only finite values"):
+            estimator.update(belief, None, 0.0)
+    else:
+        result = estimator.update(belief, None, 0.0)
+        assert not np.all(np.isfinite(result.state))
+        assert not np.all(np.isfinite(result.covariance))
+
+
 def test_orbit_ekf_update_avoids_np_inv_and_preserves_symmetric_covariance() -> None:
     estimator = OrbitEKFEstimator(
         mu_km3_s2=398600.4418,

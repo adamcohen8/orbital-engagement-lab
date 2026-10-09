@@ -35,7 +35,7 @@ def _legacy(module):
     return Legacy()
 
 
-@pytest.mark.parametrize("dt_s", [0.0, 0.1, 1.0, 10.0, 60.0])
+@pytest.mark.parametrize("dt_s", [1.0e-12, 0.1, 1.0, 10.0, 60.0])
 def test_fused_two_body_prediction_preserves_forward_differences_and_covariance(native, dt_s):
     if not hasattr(native, "estimation_two_body_predict_and_jacobian_bytes"):
         pytest.skip("installed wheel predates fused prediction")
@@ -66,6 +66,64 @@ def test_fused_two_body_prediction_preserves_forward_differences_and_covariance(
         assert actual_state.flags.writeable and actual_phi.flags.writeable
 
 
+@pytest.mark.parametrize("dt_s", [0.0, -0.0])
+@pytest.mark.parametrize("radius_km", [7001.0, 42164.0])
+@pytest.mark.parametrize("mu", [0.0, 398600.4415])
+def test_fused_zero_duration_prediction_is_analytical_identity(native, dt_s, radius_km, mu):
+    if not hasattr(native, "estimation_two_body_predict_and_jacobian_bytes"):
+        pytest.skip("installed wheel predates fused prediction")
+    state = np.array([radius_km, 2.0, -0.5, 0.01, 7.49, -0.015])
+    for epsilon in (5.0e-7, 1.0e-6, 2.0e-6):
+        predicted, transition = estimation.two_body_predict_and_jacobian(state, dt_s, mu, epsilon)
+        np.testing.assert_array_equal(predicted, state)
+        np.testing.assert_array_equal(transition, np.eye(6))
+        assert predicted.flags.writeable and transition.flags.writeable
+        assert not np.shares_memory(predicted, state)
+
+
+@pytest.mark.parametrize("dt_s", [0.0, -0.0, 1.0])
+def test_fused_prediction_keeps_invalid_input_validation_order(native, dt_s):
+    if not hasattr(native, "estimation_two_body_predict_and_jacobian_bytes"):
+        pytest.skip("installed wheel predates fused prediction")
+    call = native.estimation_two_body_predict_and_jacobian_bytes
+    state = np.array([7000.0, 0.0, 0.0, 0.0, 7.5, 0.0], dtype="<f8")
+    scalar_error = "prediction requires finite nonnegative dt and mu and positive epsilon"
+    cases = [
+        (state.tobytes()[:-1], float("nan"), -1.0, 0.0, "numeric bytes must contain complete float64 values"),
+        (np.full(5, np.nan, dtype="<f8").tobytes(), float("nan"), -1.0, 0.0, "state must contain 6 values"),
+        (np.full(6, np.nan, dtype="<f8").tobytes(), float("nan"), -1.0, 0.0, "state must contain only finite values"),
+        (np.zeros(6, dtype="<f8").tobytes(), dt_s, -1.0, 0.0, scalar_error),
+        (np.zeros(6, dtype="<f8").tobytes(), dt_s, 398600.4415, 1.0e-6, "position must be nonzero"),
+    ]
+    for nonfinite in (np.nan, np.inf, -np.inf):
+        invalid = state.copy()
+        invalid[4] = nonfinite
+        cases.append((invalid.tobytes(), dt_s, 398600.4415, 1.0e-6, "state must contain only finite values"))
+    for invalid_dt in (-1.0, np.nan, np.inf, -np.inf):
+        cases.append((state.tobytes(), invalid_dt, 398600.4415, 1.0e-6, scalar_error))
+    for invalid_mu in (-1.0, np.nan, np.inf, -np.inf):
+        cases.append((state.tobytes(), dt_s, invalid_mu, 1.0e-6, scalar_error))
+    for invalid_epsilon in (0.0, -1.0e-6, np.nan, np.inf, -np.inf):
+        cases.append((state.tobytes(), dt_s, 398600.4415, invalid_epsilon, scalar_error))
+    for raw, step, mu, epsilon, message in cases:
+        with pytest.raises(ValueError) as error:
+            call(raw, step, mu, epsilon)
+        assert str(error.value) == message
+
+
+@pytest.mark.parametrize("dt_s", [0.0, -0.0])
+def test_fused_zero_duration_keeps_perturbed_state_errors(native, dt_s):
+    if not hasattr(native, "estimation_two_body_predict_and_jacobian_bytes"):
+        pytest.skip("installed wheel predates fused prediction")
+    for state, epsilon, message in (
+        ([-1.0e-6, 0.0, 0.0, 0.0, 0.0, 0.0], 1.0e-6, "position must be nonzero"),
+        ([np.finfo(float).max, 0.0, 0.0, 0.0, 0.0, 0.0], np.finfo(float).max, "state must contain only finite values"),
+    ):
+        with pytest.raises(ValueError) as error:
+            estimation.two_body_predict_and_jacobian(state, dt_s, 0.0, epsilon)
+        assert str(error.value) == message
+
+
 def test_fused_prediction_older_wheel_and_zero_position_preserve_scalar_owner(native, monkeypatch):
     parameters = dict(
         mu_km3_s2=398600.4415,
@@ -79,6 +137,8 @@ def test_fused_prediction_older_wheel_and_zero_position_preserve_scalar_owner(na
     for state in (np.array([7001.0, 2.0, -0.5, 0.01, 7.49, -0.015]), np.zeros(6)):
         expected = python._predict(state, np.eye(6), from_t_s=0.0, to_t_s=0.0)
         actual = rust._predict(state, np.eye(6), from_t_s=0.0, to_t_s=0.0)
+        np.testing.assert_array_equal(expected[0], state)
+        np.testing.assert_array_equal(expected[1], np.eye(6))
         np.testing.assert_array_equal(actual[0], expected[0])
         np.testing.assert_array_equal(actual[1], expected[1])
 

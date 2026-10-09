@@ -117,6 +117,24 @@ def _backend_error(name: str, exc: Exception) -> RuntimeError:
     return RuntimeError(f"Rust relative kernel {name!r} is unavailable in the installed wheel")
 
 
+def try_chief_state_propagation(
+    chief_state_eci_km_s: np.ndarray,
+    dt_s: float,
+    *,
+    mu_km3_s2: float,
+    max_step_s: float,
+) -> np.ndarray | None:
+    """Use the native relative-model RK4 owner when the installed wheel has it."""
+    function = getattr(_extension(), "relative_chief_propagate_bytes", None)
+    if function is None:
+        return None
+    raw = function(
+        _state(chief_state_eci_km_s, "chief_state_eci_km_s"),
+        float(dt_s), float(mu_km3_s2), float(max_step_s),
+    )
+    return np.frombuffer(raw, dtype="<f8").copy().reshape(6)
+
+
 def hcw_state_transition_matrix(mean_motion_rad_s: float, dt_s: float) -> np.ndarray:
     native = _extension()
     byte_function = getattr(native, "relative_hcw_stm_bytes", None)

@@ -201,6 +201,13 @@ class SimulationSession:
         assert self._engine is not None
         self._engine.publish_fsw_input(str(object_id), event)
 
+    def flight_software_observations(self, object_id: str) -> dict:
+        """Return copies of published onboard telemetry and actuator packets."""
+        from sim.public_api.fsw_observations import flight_software_observations
+
+        self._ensure_engine()
+        return flight_software_observations(self._engine, str(object_id))
+
     def add_fsw_input_publisher(self, object_id: str, publisher: Callable[..., object]) -> None:
         """Attach a truth-free input source sampled at flight-software releases."""
 

@@ -119,7 +119,7 @@ def _build_orbit_propagator(
         except ModuleNotFoundError as exc:
             if exc.name not in {"sim.pro_perturbations", "sim.pro_perturbations.schwarzschild"}:
                 raise
-            raise ValueError("Schwarzschild acceleration requires the OEL Pro perturbation package.") from exc
+            raise ValueError("Schwarzschild acceleration requires the OEL precision perturbation package.") from exc
         plugins.append(SchwarzschildAcceleration(acceleration_mode=str(acceleration.get("mode", "off"))))
     radiation = dict(orbit.get("earth_radiation", {}) or {})
     if bool(radiation.get("enabled", False)):
@@ -128,7 +128,7 @@ def _build_orbit_propagator(
         except ModuleNotFoundError as exc:
             if exc.name not in {"sim.pro_perturbations", "sim.pro_perturbations.earth_radiation"}:
                 raise
-            raise ValueError("Earth radiation requires the OEL Pro perturbation package.") from exc
+            raise ValueError("Earth radiation requires the OEL precision perturbation package.") from exc
         from sim.dynamics.orbit.frames import frame_context_from_mapping
         plugins.append(EarthRadiationPressure(
             frames=frame_context_from_mapping(dict(cfg.simulator.frames), jd_utc_start=cfg.simulator.initial_jd_utc),
@@ -145,7 +145,7 @@ def _build_orbit_propagator(
         except ModuleNotFoundError as exc:
             if exc.name not in {"sim.pro_perturbations", "sim.pro_perturbations.ocean_tides"}:
                 raise
-            raise ValueError("Ocean tides require the OEL Pro perturbation package.") from exc
+            raise ValueError("Ocean tides require the OEL precision perturbation package.") from exc
         from sim.dynamics.orbit.frames import frame_context_from_mapping
         plugins.append(OceanTides(
             frames=frame_context_from_mapping(dict(cfg.simulator.frames), jd_utc_start=cfg.simulator.initial_jd_utc),
@@ -160,7 +160,7 @@ def _build_orbit_propagator(
         except ModuleNotFoundError as exc:
             if exc.name not in {"sim.pro_perturbations", "sim.pro_perturbations.solid_earth_tides"}:
                 raise
-            raise ValueError("Solid Earth tides requires the OEL Pro perturbation package.") from exc
+            raise ValueError("Solid Earth tides requires the OEL precision perturbation package.") from exc
         from sim.dynamics.orbit.frames import frame_context_from_mapping
         plugins.append(SolidEarthTides(
             frames=frame_context_from_mapping(dict(cfg.simulator.frames), jd_utc_start=cfg.simulator.initial_jd_utc),

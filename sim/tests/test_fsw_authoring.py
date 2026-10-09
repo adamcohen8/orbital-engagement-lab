@@ -203,6 +203,7 @@ def test_init_rejects_receipt_directory_symlink_escape(tmp_path):
 def test_candidate_reload_reads_same_size_source_and_helper_edits(tmp_path, monkeypatch, broad_root):
     import importlib
     import os
+    import sys
 
     from sim.fsw_authoring.candidate import clear_candidate_imports
 
@@ -215,6 +216,8 @@ def test_candidate_reload_reads_same_size_source_and_helper_edits(tmp_path, monk
     source_root = tmp_path if broad_root else root
     unrelated = tmp_path / "unrelated_cache.py"
     unrelated.write_text("value = 17\n")
+    # This probe deliberately exercises an existing unrelated bytecode cache.
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
     monkeypatch.syspath_prepend(str(tmp_path))
     unrelated_module = importlib.import_module("unrelated_cache")
     unrelated_cache = Path(unrelated_module.__cached__)
@@ -232,7 +235,6 @@ def test_candidate_reload_reads_same_size_source_and_helper_edits(tmp_path, monk
             assert unrelated_cache.read_bytes() == cache_bytes
     finally:
         clear_candidate_imports(module_name, source_root=source_root)
-        import sys
         sys.modules.pop("unrelated_cache", None)
 
 

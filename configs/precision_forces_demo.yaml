@@ -1,0 +1,84 @@
+scenario_name: precision_forces_demo
+scenario_description: Passive Earth orbit with four optional precision forces and synthetic ocean coefficients.
+metadata:
+  owner: public
+  public_surface: public-example
+  support_level: demonstration
+  notes: Synthetic ocean coefficients exercise the interface; they do not represent an ocean model.
+objects:
+  satellite:
+    enabled: true
+    kind: satellite
+    role: target
+    specs:
+      mass_kg: 300.0
+      area_m2: 4.0
+      cr: 1.2
+    initial_state:
+      coes:
+        a_km: 7000.0
+        ecc: 0.0
+        inc_deg: 45.0
+        raan_deg: 0.0
+        argp_deg: 0.0
+        true_anomaly_deg: 0.0
+    flight_software:
+      stack: fsw.passive
+      hardware_profile: hardware.passive.v1
+      params: {}
+simulator:
+  initial_jd_utc: 2459669.5
+  duration_s: 600.0
+  dt_s: 10.0
+  frames:
+    model: iau76_80_eop
+    dut1_s: -0.0992395
+    xp_arcsec: 0.043546
+    yp_arcsec: 0.424847
+    dat_s: 37.0
+  dynamics:
+    orbit:
+      model: two_body
+      propagation_method: special
+      integrator: rk4
+      numeric_backend: python
+      orbit_substep_s: 10.0
+      earth_radiation:
+        enabled: true
+        albedo: true
+        infrared: true
+        quadrature_order: 32
+      schwarzschild:
+        enabled: true
+      solid_earth_tides:
+        enabled: true
+        tide_system: tide_free
+        pole_tide: true
+      ocean_tides:
+        enabled: true
+        coeff_path: sim/dynamics/orbit/data/ocean_tide_synthetic.txt
+        degree: 2
+        order: 2
+        pole_tide: true
+    attitude:
+      enabled: false
+  environment:
+    ephemeris_mode: analytic_enhanced
+  execution:
+    object_parallelism:
+      enabled: false
+      backend: serial
+outputs:
+  output_dir: outputs/precision_forces_demo
+  mode: save
+  stats:
+    print_summary: false
+    save_json: true
+    save_full_log: false
+  review:
+    enabled: true
+    detail: standard
+  plots:
+    enabled: false
+  animations:
+    enabled: false

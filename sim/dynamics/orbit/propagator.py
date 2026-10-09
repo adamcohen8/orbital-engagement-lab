@@ -665,10 +665,10 @@ class OrbitPropagator:
         """
         if self.numeric_backend != "rust" or self.integrator != "rk4" or self.model != "two_body" or self.state_frame != "eci":
             return None
-        from sim.dynamics.orbit.rust_force_plan import _CODES, make_plan
+        from sim.dynamics.orbit.rust_force_plan import force_codes, make_plan
         from sim.rust_orbit_backend import _command, _state, native_harmonic_degree_limit
 
-        if any(not any(plugin is known for known in _CODES) for plugin in self.plugins):
+        if force_codes(self, env) is None:
             return None
         if spherical_harmonics_plugin in self.plugins:
             if env.get("_compiled_spherical_harmonics_terms") is None:
@@ -698,10 +698,10 @@ class OrbitPropagator:
         """
         if self.numeric_backend != "rust" or self.integrator != "rk4" or self.model != "two_body" or self.state_frame != "eci":
             return None
-        from sim.dynamics.orbit.rust_force_plan import _CODES, make_plan
+        from sim.dynamics.orbit.rust_force_plan import force_codes, make_plan
         from sim.rust_orbit_backend import _command, _state, native_harmonic_degree_limit
 
-        if any(not any(plugin is known for known in _CODES) for plugin in self.plugins):
+        if force_codes(self, env) is None:
             return None
         if spherical_harmonics_plugin in self.plugins:
             if env.get("_compiled_spherical_harmonics_terms") is None:
@@ -816,11 +816,8 @@ class OrbitPropagator:
                 [next(code for known, code in codes if plugin is known) for plugin in self.plugins]
                 if zonal_only else []
             )
-            native_forces = tuple(known for known, _ in codes) + (
-                spherical_harmonics_plugin, drag_plugin, srp_plugin,
-                third_body_sun_plugin, third_body_moon_plugin,
-            )
-            native_plan = all(any(plugin is known for known in native_forces) for plugin in self.plugins)
+            from sim.dynamics.orbit.rust_force_plan import force_codes as native_force_codes
+            native_plan = native_force_codes(self, env) is not None
             if native_plan and any(plugin is spherical_harmonics_plugin for plugin in self.plugins):
                 from sim.rust_orbit_backend import native_harmonic_degree_limit
 

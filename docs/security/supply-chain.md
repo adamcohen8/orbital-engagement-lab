@@ -7,9 +7,8 @@ security, legal, export-control, or mission-assurance process.
 ## Supported Versions
 
 - Public releases: security fixes target the current public release line,
-  currently `v0.31.0`. At this documentation snapshot, `v0.32.0` is still in
-  development and is not a published release or a changed support target. Update
-  this version after a later public release is published.
+  `v0.33.0` once published. During release preparation, `v0.32.0` remains
+  the published support target.
 - Private/Pro releases: security fixes target the active customer-supported
   release line or pilot branch named in the agreement.
 - Declared Python compatibility range: Python 3.10 through 3.14. Functional and

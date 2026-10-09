@@ -6,6 +6,27 @@ This project uses semantic versioning while it is pre-1.0: minor versions may
 still introduce API or workflow changes, and release notes should call out
 migration-sensitive behavior explicitly.
 
+## 0.33.0 - 2026-10-09
+
+- Promote Earth albedo/infrared radiation pressure, Schwarzschild acceleration,
+  solid Earth tides and ocean tidal gravity to public ONP. Preserve existing
+  model keys and import identities; remove their Pro entitlement gates. Add a
+  public synthetic-ocean-data example and document external-data and scientific
+  limits. Expose the shared native owners through a buildable public Rust kernel
+  crate. External FES data and private qualification fixtures remain unbundled.
+- Optimize optional Rust precision-force evaluation without changing the force
+  equations, quadrature resolution or reference path. Add native solid/ocean
+  tidal coefficient evaluation, prepared Schwarzschild binding and radiation
+  loop improvements with focused parity and speed measurements.
+- Include all four precision forces in the ordered native ONP force plan for
+  RK4, RKF78, DOPRI5 and supported passive histories. Preserve configured model
+  order and reference fallbacks; retain exact stage frame and ephemeris policy.
+- Avoid repeated EOP path resolution using signature-bound cache invalidation.
+- Advance the changed native orbit runtime to 0.17.1. Retain the Python reference
+  path and limit managed-install qualification to the recorded host/interpreter.
+- Limit the feature promotion to these four forces; retain the existing Pro
+  entitlements for other capabilities.
+
 ## 0.32.0 - 2026-10-01
 
 ### Runtime and compatibility

@@ -289,6 +289,17 @@ class THRelativeEKFEstimator(Estimator):
 
     def _chief_state_at(self, t_s: float) -> np.ndarray:
         dt_s = float(t_s) - float(self.chief_epoch_t_s)
+        if self.numeric_backend == "rust" and np.isfinite(dt_s):
+            from sim.rust_relative_backend import try_chief_state_propagation
+
+            native = try_chief_state_propagation(
+                self.chief_state_eci_km_s,
+                dt_s,
+                mu_km3_s2=float(self.mu_km3_s2),
+                max_step_s=float(self.integration_substep_s),
+            )
+            if native is not None:
+                return native
         return _propagate_chief_state(
             self.chief_state_eci_km_s,
             dt_s,
