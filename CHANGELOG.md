@@ -26,6 +26,9 @@ migration-sensitive behavior explicitly.
   path and limit managed-install qualification to the recorded host/interpreter.
 - Limit the feature promotion to these four forces; retain the existing Pro
   entitlements for other capabilities.
+- Avoid copying complete RPO Duel histories during every round-status check
+  and restored-room replay. Preserve match results, control provenance and
+  detached snapshots; cover full-duration two-round restoration.
 
 ## 0.32.0 - 2026-10-01
 

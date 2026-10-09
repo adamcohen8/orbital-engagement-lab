@@ -267,8 +267,8 @@ export function createDuelSeries({
   }
 
   function finishRoundIfNeeded() {
+    if (summaries.some((summary) => summary.round_index === roundIndex) || !round.snapshot().terminal) return;
     const result = round.result();
-    if (!result.terminal || summaries.some((summary) => summary.round_index === roundIndex)) return;
     const assignments = roleAssignments();
     const winnerPlayerId = assignments[result.winner_role];
     score[winnerPlayerId] += 1;
@@ -349,7 +349,7 @@ export function createDuelSeries({
         match_terminal: matchTerminal,
         match_winner_player_id: matchWinnerPlayerId,
         match_draw: matchDraw,
-        round_summaries: clone(summaries).map(({ input_events: _inputEvents, ...summary }) => summary),
+        round_summaries: summaries.map(({ input_events: _inputEvents, ...summary }) => clone(summary)),
       };
     },
     result() {
